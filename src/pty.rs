@@ -72,6 +72,14 @@ impl Pty {
         let _ = self.writer.send(bytes.to_vec());
     }
 
+    pub fn fd(&self) -> std::os::fd::RawFd {
+        self.pty.file().as_raw_fd()
+    }
+
+    pub fn shell_pid(&self) -> u32 {
+        self.pty.child().id()
+    }
+
     pub fn resize(&mut self, size: WindowSize) {
         self.pty.on_resize(size);
     }
