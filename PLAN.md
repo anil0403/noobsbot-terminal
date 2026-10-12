@@ -207,7 +207,7 @@ commit.
 2. Ctrl+Shift+P overlay with fuzzy match, shows the keybinding. ~~`nucleo-matcher`~~
    — a 20-line subsequence scorer is plenty for ~40 entries.
 3. Includes "Theme: …" (holds until the situation changes) and every action.
-   "Toggle CRT" joins when M11 exists.
+   "Toggle CRT effect" is palette-only (no default key).
 
 ### M10 — Quake mode ✅
 1. `--quake` flag: borderless, top of screen, `quake.height` % (default 40),
@@ -223,10 +223,13 @@ commit.
    desktop shortcut work on Wayland. Plain `noobsbot` launches stay separate
    windows.
 
-### M11 — CRT mode
-1. Render terminal to offscreen texture.
-2. `crt.wgsl` post-pass: scanlines, bloom/glow, barrel curvature, vignette,
-   subtle flicker. All intensities configurable, toggle from the palette.
+### M11 — CRT mode ✅
+1. Render terminal to offscreen texture (only while the effect is on).
+2. `crt.wgsl` post-pass: scanlines, glow, barrel curvature, vignette,
+   flicker. All intensities in `[crt]`, toggle from the palette. Curvature
+   keeps the middle of each edge fixed, so no text is cut off; the mouse
+   pointer goes through the same warp so clicks land on what you see.
+   Flicker defaults to 0: it needs a redraw every frame.
 
 ### M12 — Inline images
 1. Kitty graphics protocol (APC `_G`): transmit (direct + file), place, delete.

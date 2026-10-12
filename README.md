@@ -70,6 +70,14 @@ another program already owns F12, or you're on Wayland, set `quake.hotkey`
 in the config (e.g. `"Ctrl+grave"`), or bind `noobsbot --quake` to a key in
 your desktop's keyboard shortcuts: running it again toggles the open one.
 
+## CRT mode
+
+Scanlines, glow, a curved screen and dark corners, like an old monitor.
+Toggle it with **Toggle CRT effect** in the command palette (Ctrl+Shift+P),
+or turn it on for good with `[crt] enabled = true`. Each effect's strength
+is set in `[crt]`; `flicker` is off by default because it redraws
+constantly.
+
 ## Situation themes
 
 Built-in themes: `default`, `danger`, `root`, `careful`, `night`. Rules in the
