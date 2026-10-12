@@ -18,8 +18,7 @@ __noobsbot_precmd() {
 # The pretty prompt (terminal.pretty_prompt): powerline segments in palette
 # colors, so themes recolor it. Rebuilt every time for the git branch and status.
 __noobsbot_pretty() {
-    local e=$'\e' prev='' branch bg=14 arrow=2
-    local p="%{${e}[38;5;8m%}╭─"
+    local e=$'\e' p='' prev='' branch
     # seg BG FG TEXT: an arrow from the previous segment, or a rounded start.
     __noobsbot_seg() {
         if [[ -z $prev ]]; then
@@ -30,20 +29,23 @@ __noobsbot_pretty() {
         p+=" $3 "
         prev=$1
     }
-    __noobsbot_seg 11 0 $'\uf007'" %n${SSH_CONNECTION:+@%m}"
-    __noobsbot_seg 12 15 $'\uf07b'" %(4~|…/%2~|%~)" # deep: …/last/two
+    __noobsbot_seg 11 0 "%n${SSH_CONNECTION:+@%m}"
+    __noobsbot_seg 208 15 $'\uf07b'" %1~"
     if branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null); then
         # Shown, never expanded: % is a prompt escape, and with prompt_subst so
         # is $(...), unless it comes from a parameter (expanded only once).
         __noobsbot_branch=${branch//\%/%%}
         [[ -o promptsubst ]] && branch='${__noobsbot_branch}' || branch=$__noobsbot_branch
         # ● when there's uncommitted work (no index lock: don't race the user's git).
-        [[ -n $(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1) ]] && branch+=" ●" bg=208
-        __noobsbot_seg $bg 0 $'\ue725'" $branch"
+        [[ -n $(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1) ]] && branch+=" ●"
+        __noobsbot_seg 14 0 $'\ue725'" $branch"
     fi
-    # Failed: the exit code, and a red arrow.
-    (( ${__noobsbot_last:-0} )) && __noobsbot_seg 1 15 $'\uf00d'" $__noobsbot_last" && arrow=1
-    PS1=$p"%{${e}[0;38;5;${prev}m%}"$'\ue0b4'$'\n'"%{${e}[38;5;8m%}╰─%{${e}[38;5;${arrow}m%}❯%{${e}[0m%} "
+    if (( ${__noobsbot_last:-0} == 0 )); then
+        __noobsbot_seg 12 15 $'\uf00c'
+    else
+        __noobsbot_seg 1 15 $'\uf00d'" $__noobsbot_last"
+    fi
+    PS1=$p"%{${e}[0;38;5;${prev}m%}"$'\ue0b4'"%{${e}[0m%} "
 }
 
 __noobsbot_wrap() {

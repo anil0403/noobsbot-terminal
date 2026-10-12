@@ -18,22 +18,20 @@ function fish_prompt
     set -g __noobsbot_prev
     set -l user $USER
     set -q SSH_CONNECTION; and set user $USER@(prompt_hostname)
-    printf '\e[38;5;8m╭─'
-    __noobsbot_seg 11 0 \uf007" $user"
-    # Deep: …/last/two
-    set -l dir (string replace -r "^$(string escape --style=regex -- $HOME)(?=/|\$)" '~' -- $PWD)
-    set -l parts (string split / -- $dir)
-    test (count $parts) -gt 3; and set dir "…/$parts[-2]/$parts[-1]"
-    __noobsbot_seg 12 15 \uf07b" $dir"
+    __noobsbot_seg 11 0 $user
+    set -l dir (path basename -- $PWD)
+    test "$PWD" = "$HOME"; and set dir '~'
+    __noobsbot_seg 208 15 " $dir"
     set -l branch (git symbolic-ref --short HEAD 2>/dev/null; or git rev-parse --short HEAD 2>/dev/null)
     if test -n "$branch"
         # ● when there's uncommitted work (no index lock: don't race the user's git).
-        set -l bg 14
-        test -n "$(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1)"; and set branch "$branch ●"; and set bg 208
-        __noobsbot_seg $bg 0 \ue725" $branch"
+        test -n "$(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1)"; and set branch "$branch ●"
+        __noobsbot_seg 14 0 " $branch"
     end
-    # Failed: the exit code, and a red arrow.
-    set -l arrow 2
-    test $s -ne 0; and __noobsbot_seg 1 15 \uf00d" $s"; and set arrow 1
-    printf '\e[0;38;5;%sm\ue0b4\n\e[38;5;8m╰─\e[38;5;%sm❯\e[0m ' $__noobsbot_prev $arrow
+    if test $s -eq 0
+        __noobsbot_seg 12 15 
+    else
+        __noobsbot_seg 1 15 " $s"
+    end
+    printf '\e[0;38;5;%sm\e[0m ' $__noobsbot_prev
 end
