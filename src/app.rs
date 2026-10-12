@@ -172,8 +172,10 @@ impl App {
     }
 }
 
-/// Grid point at a viewport cell (accounts for scrollback offset).
+/// Grid point at a viewport cell (accounts for scrollback offset). Clamped:
+/// the cell may be from before the pane shrank (split, resize).
 fn grid_point(term: &Term, (col, line): (usize, usize)) -> Point {
+    let (col, line) = (col.min(term.columns() - 1), line.min(term.screen_lines() - 1));
     Point::new(Line(line as i32 - term.grid().display_offset() as i32), Column(col))
 }
 
