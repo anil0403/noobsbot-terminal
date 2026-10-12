@@ -1,12 +1,14 @@
 mod app;
+mod pty;
 mod render;
+mod term;
 
 use winit::event_loop::EventLoop;
 
 fn main() {
     env_logger::init();
-    let event_loop = EventLoop::new().expect("create event loop");
-    event_loop
-        .run_app(&mut app::App::default())
-        .expect("run event loop");
+    alacritty_terminal::tty::setup_env();
+    let event_loop = EventLoop::with_user_event().build().expect("create event loop");
+    let mut app = app::App::new(event_loop.create_proxy());
+    event_loop.run_app(&mut app).expect("run event loop");
 }
