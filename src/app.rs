@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::index::{Column, Direction, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::test::TermSize;
@@ -13,17 +13,18 @@ use alacritty_terminal::term::{ClipboardType, TermMode};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
 use crate::context::{self, Context};
 use crate::font::Font;
-use crate::input::{self, Action, binding, key_bytes, mouse_report, paste_bytes};
+use crate::input::{self, Action, Vi, binding, key_bytes, mouse_report, paste_bytes, vi_binding};
 use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::Renderer;
+use crate::search::Search;
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
 
@@ -54,6 +55,8 @@ pub struct App {
     drag: Option<usize>,
     cursor_icon: CursorIcon,
     window_title: String,
+    /// Scrollback search in the focused pane.
+    search: Option<Search>,
     mods: ModifiersState,
     next_blink: Instant,
     /// Something on screen changed since the last frame.
@@ -101,6 +104,7 @@ impl App {
             drag: None,
             cursor_icon: CursorIcon::Default,
             window_title: String::new(),
+            search: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
             dirty: false,
@@ -292,6 +296,9 @@ impl App {
     /// Keyboard focus moved away from `old` (which may be gone by now).
     fn focus_changed(&mut self, old: Option<PaneId>) {
         let new = self.focused();
+        if self.search.as_ref().is_some_and(|s| s.pane != new) {
+            self.search = None;
+        }
         if old != Some(new) && self.renderer.as_ref().is_some_and(|r| r.focused) {
             if let Some(pane) = old.and_then(|id| self.panes.get_mut(&id)) {
                 focus_report(pane, false);
@@ -400,6 +407,15 @@ impl App {
                 Some(id) => self.focus(id),
                 None => return false,
             },
+            Action::Search => self.open_search(),
+            Action::ViMode => {
+                if self.focused_pane().term.lock().mode().contains(TermMode::VI) {
+                    self.vi(Vi::Exit);
+                } else {
+                    self.focused_pane().term.lock().toggle_vi_mode();
+                    self.dirty = true;
+                }
+            }
             Action::Resize(dir) => {
                 let delta = if matches!(dir, Dir::Left | Dir::Up) { -RESIZE_STEP } else { RESIZE_STEP };
                 let id = self.focused();
@@ -410,6 +426,110 @@ impl App {
             }
         }
         true
+    }
+}
+
+// Search and vi mode.
+impl App {
+    fn open_search(&mut self) {
+        let id = self.focused();
+        match &mut self.search {
+            Some(s) if s.pane == id => s.editing = true,
+            _ => self.search = Some(Search::new(id, &self.panes[&id].term.lock())),
+        }
+        self.dirty = true;
+    }
+
+    /// A key while the search bar is open. False: not ours (Ctrl combos), carry on.
+    fn search_key(&mut self, key: &Key, text: Option<&str>) -> bool {
+        let Some(search) = self.search.as_mut().filter(|s| s.editing) else { return false };
+        let Some(pane) = self.panes.get_mut(&search.pane) else { return false };
+        let mut term = pane.term.lock();
+        let vi = term.mode().contains(TermMode::VI);
+        match key {
+            Key::Named(NamedKey::Escape) if vi => search.editing = false,
+            Key::Named(NamedKey::Escape) => {
+                drop(term);
+                self.search = None;
+            }
+            Key::Named(NamedKey::Enter) if vi => search.editing = false,
+            Key::Named(NamedKey::Enter) => {
+                let direction = if self.mods.shift_key() { Direction::Right } else { Direction::Left };
+                search.step(&mut term, direction);
+            }
+            Key::Named(NamedKey::Backspace) => {
+                search.query.pop();
+                search.update(&mut term);
+            }
+            _ => match text {
+                Some(t) if !self.mods.control_key() && !self.mods.alt_key() && !t.chars().any(char::is_control) => {
+                    search.query.push_str(t);
+                    search.update(&mut term);
+                }
+                _ if self.mods.control_key() || self.mods.alt_key() => return false,
+                _ => {}
+            },
+        }
+        self.dirty = true;
+        true
+    }
+
+    /// A key in vi mode (focused pane).
+    fn vi(&mut self, cmd: Vi) {
+        let id = self.focused();
+        let pane = self.panes.get_mut(&id).expect("focused pane exists");
+        let mut term = pane.term.lock();
+        let point = term.vi_mode_cursor.point;
+        let mut exit = false;
+        match cmd {
+            Vi::Motion(motion) => term.vi_motion(motion),
+            Vi::Top | Vi::Bottom => {
+                let line = if cmd == Vi::Top { term.topmost_line() } else { term.bottommost_line() };
+                term.vi_goto_point(Point::new(line, Column(0)));
+            }
+            Vi::HalfUp | Vi::HalfDown => {
+                let half = term.screen_lines() as i32 / 2;
+                let line = if cmd == Vi::HalfUp { point.line - half } else { point.line + half };
+                let line = line.clamp(term.topmost_line(), term.bottommost_line());
+                term.vi_goto_point(Point::new(line, point.column));
+            }
+            Vi::Select(ty) => match &term.selection {
+                Some(sel) if sel.ty == ty => term.selection = None,
+                _ => {
+                    let mut sel = Selection::new(ty, point, Side::Left);
+                    sel.include_all(); // non-empty, so motions extend it
+                    term.selection = Some(sel);
+                }
+            },
+            Vi::Copy => {
+                if let Some(text) = term.selection_to_string() {
+                    self.clipboard.set(false, text);
+                }
+                exit = true;
+            }
+            Vi::Escape if term.selection.is_some() => term.selection = None,
+            Vi::Escape | Vi::Exit => exit = true,
+            Vi::Search => {
+                drop(term);
+                return self.open_search();
+            }
+            Vi::SearchPrev | Vi::SearchNext => {
+                if let Some(search) = self.search.as_mut().filter(|s| s.pane == id) {
+                    search.step(&mut term, if cmd == Vi::SearchPrev { Direction::Left } else { Direction::Right });
+                }
+            }
+        }
+        if exit {
+            term.selection = None;
+            term.toggle_vi_mode();
+            term.scroll_display(Scroll::Bottom);
+            drop(term);
+            self.search = None;
+        } else {
+            let point = term.vi_mode_cursor.point;
+            term.scroll_to_point(point);
+        }
+        self.dirty = true;
     }
 }
 
@@ -606,9 +726,19 @@ impl ApplicationHandler<UserEvent> for App {
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if self.search_key(&event.logical_key, event.text.as_deref()) {
+                    return;
+                }
                 if let Some(action) = binding(&event.logical_key, self.mods)
                     && self.run(event_loop, action)
                 {
+                    return;
+                }
+                if self.focused_pane().term.lock().mode().contains(TermMode::VI) {
+                    // Unbound keys do nothing in vi mode rather than reach the shell.
+                    if let Some(cmd) = vi_binding(&event.logical_key, self.mods) {
+                        self.vi(cmd);
+                    }
                     return;
                 }
                 let mods = self.mods;
@@ -812,7 +942,16 @@ impl ApplicationHandler<UserEvent> for App {
                 for id in tab.root.leaves() {
                     let pane = self.panes.get_mut(&id).unwrap();
                     let theme = pane.theme.frame();
-                    renderer.pane(&pane.term.lock(), &theme, pane.rect, id == tab.focused);
+                    let term = pane.term.lock();
+                    let search = self.search.as_mut().filter(|s| s.pane == id);
+                    let (matches, current) = match search {
+                        Some(s) => (s.visible(&term), s.current.clone()),
+                        None => (Vec::new(), None),
+                    };
+                    renderer.pane(&term, &theme, pane.rect, id == tab.focused, &matches, current.as_ref());
+                    let vi = term.mode().contains(TermMode::VI);
+                    drop(term);
+                    draw_pane_ui(renderer, pane.rect, &theme, vi, self.search.as_ref().filter(|s| s.pane == id && s.editing));
                     if id == tab.focused {
                         focused_theme = Some(theme);
                     }
@@ -828,6 +967,24 @@ impl ApplicationHandler<UserEvent> for App {
             }
             _ => {}
         }
+    }
+}
+
+/// Vi mode badge (top right) and the search bar (bottom row) over a pane.
+fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, vi: bool, search: Option<&Search>) {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    if vi {
+        let w = cw * 4.0;
+        r.fill(Rect { x: rect.x + rect.w - w, y: rect.y, w, h: ch }, theme::to_f32(theme.cursor));
+        r.text(rect.x + rect.w - w + cw / 2.0, rect.y, " VI", theme::to_f32(theme.bg));
+    }
+    if let Some(s) = search {
+        let y = rect.y + rect.h - ch;
+        r.fill(Rect { x: rect.x, y, w: rect.w, h: ch }, theme::to_f32(theme.selection));
+        let status = if !s.query.is_empty() && s.current.is_none() { "   no match" } else { "" };
+        let fit = (rect.w / cw) as usize;
+        let line: String = format!("Find: {}_{status}", s.query).chars().take(fit).collect();
+        r.text(rect.x, y, &line, theme::to_f32(theme.fg));
     }
 }
 
