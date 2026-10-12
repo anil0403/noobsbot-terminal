@@ -32,11 +32,19 @@ pub struct App {
     pty: Option<Pty>,
     mods: ModifiersState,
     next_blink: Instant,
+    /// Terminal content changed since the last frame.
+    dirty: bool,
+    last_frame: Instant,
+    frame_time: Duration,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<Event>) -> Self {
-        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty(), next_blink: Instant::now() }
+        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty(), next_blink: Instant::now(),
+            dirty: false,
+            last_frame: Instant::now(),
+            frame_time: Duration::from_micros(16_667),
+        }
     }
 }
 
@@ -56,6 +64,9 @@ impl ApplicationHandler<Event> for App {
         }
         let attrs = Window::default_attributes().with_title("noobsbot terminal");
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+        if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
+            self.frame_time = Duration::from_secs_f64(1000.0 / mhz as f64);
+        }
         let font = Font::new(FONT_FAMILY, FONT_SIZE * window.scale_factor() as f32);
         let px = window.inner_size();
         let size = window_size(&font, px.width, px.height);
@@ -86,9 +97,9 @@ impl ApplicationHandler<Event> for App {
                         dump_grid(&term.lock());
                     }
                 }
-                if let Some(w) = &self.window {
-                    w.request_redraw();
-                }
+                // Drawn from about_to_wait at most once per refresh, so a flood of output
+                // doesn't make the renderer hog the terminal lock.
+                self.dirty = true;
             }
             Event::Exit | Event::ChildExit(_) => event_loop.exit(),
             _ => {}
@@ -97,21 +108,31 @@ impl ApplicationHandler<Event> for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let (Some(term), Some(renderer), Some(window)) = (&self.term, self.renderer.as_mut(), &self.window) else { return };
-        if !(renderer.focused && term.lock().cursor_style().blinking) {
-            if !renderer.cursor_on {
-                renderer.cursor_on = true;
-                window.request_redraw();
-            }
-            event_loop.set_control_flow(ControlFlow::Wait);
-            return;
-        }
         let now = Instant::now();
-        if now >= self.next_blink {
-            renderer.cursor_on = !renderer.cursor_on;
-            self.next_blink = now + BLINK;
-            window.request_redraw();
+        let mut wake = None;
+
+        if renderer.focused && term.lock().cursor_style().blinking {
+            if now >= self.next_blink {
+                renderer.cursor_on = !renderer.cursor_on;
+                self.next_blink = now + BLINK;
+                self.dirty = true;
+            }
+            wake = Some(self.next_blink);
+        } else if !renderer.cursor_on {
+            renderer.cursor_on = true;
+            self.dirty = true;
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_blink));
+
+        if self.dirty {
+            let due = self.last_frame + self.frame_time;
+            if now >= due {
+                self.dirty = false;
+                window.request_redraw();
+            } else {
+                wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
+            }
+        }
+        event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -145,6 +166,7 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                self.last_frame = Instant::now();
                 if let Some(term) = &self.term {
                     renderer.render(&term.lock());
                 }
