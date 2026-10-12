@@ -163,7 +163,7 @@ commit.
 5. ~~Exit-code border flash~~ → moved to M8: the exit code only exists once
    shell integration (OSC 133;D) does.
 
-### M5 — Tabs and splits
+### M5 — Tabs and splits ✅
 1. Tab bar (rendered by us, not native) with titles from OSC 0/2.
 2. Split tree: horizontal/vertical, resize with mouse/keys, focus movement.
 3. New tab/split opens in current pane's cwd.
