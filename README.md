@@ -36,6 +36,8 @@ your desktop's app menu.
 | Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
 | Alt+Arrows, click | Move focus between split panes |
 | Ctrl+Shift+Arrows, drag the divider | Resize splits |
+| Ctrl+Shift+F | Search history (regex, or plain text if it isn't one). Enter / Shift+Enter: older / newer match, Esc: close |
+| Ctrl+Shift+Space | Vi mode: `hjkl` `wbe` `0$^` `g` `G` `Ctrl+U/D`, `v` / `V` / `Ctrl+V` select, `y` copy, `/` search, `n` / `N` next, Esc / `q` leave |
 
 ## Config
 
