@@ -106,7 +106,12 @@ constantly.
 
 ## Situation themes
 
-Built-in themes: `default`, `danger`, `root`, `careful`, `night`. Rules in the
+Built-in themes: `default`, `danger`, `root`, `careful`, `night`. `default` is
+One Half Dark with the warm amber, teal and blue of powerline prompts (as in
+[Pretty PowerShell](https://christitus.com/pretty-powershell/)); tabs, the
+palette and the search bar use the same rounded pill look, tinted by each
+pane's theme. Powerline separators (U+E0B0–E0B7) are drawn by the terminal to
+fill the cell exactly, so oh-my-posh and starship prompts join without seams. Rules in the
 config pick one based on what's happening in the terminal; the first rule whose
 conditions all match wins, and the switch fades in over 150 ms. Every pane
 picks its own theme, and each tab carries its pane's accent color, so an SSH
