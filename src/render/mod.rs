@@ -116,8 +116,8 @@ impl Renderer {
         Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme, focused: true, cursor_on: true }
     }
 
-    pub fn set_font(&mut self, font: Font) {
-        self.font = font;
+    pub fn set_font(&mut self, family: &str, size: f32) {
+        self.font.set(family, size);
         self.atlas.clear();
     }
 

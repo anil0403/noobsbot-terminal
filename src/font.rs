@@ -37,6 +37,13 @@ impl Font {
         font
     }
 
+    /// Switch family/size, keeping the already-scanned system font database.
+    pub fn set(&mut self, family: &str, size: f32) {
+        self.family = family.to_owned();
+        self.size = size;
+        self.measure();
+    }
+
     fn measure(&mut self) {
         let (key, advance) = self.shape('M', false, false).expect("font has no 'M' glyph");
         let face = self.system.get_font(key.font_id, Weight::NORMAL).expect("load font face");

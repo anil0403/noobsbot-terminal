@@ -9,11 +9,15 @@ pub enum Action {
     ScrollBottom,
     Copy,
     Paste,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
 }
 
 /// Default keybindings. Checked before a key is sent to the shell.
 pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
     let shift = ModifiersState::SHIFT;
+    let ctrl = ModifiersState::CONTROL;
     let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
     Some(match (key, mods) {
         (Key::Named(NamedKey::PageUp), m) if m == shift => Action::ScrollPageUp,
@@ -23,6 +27,9 @@ pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
         (Key::Character(c), m) if m == ctrl_shift && c.eq_ignore_ascii_case("c") => Action::Copy,
         (Key::Character(c), m) if m == ctrl_shift && c.eq_ignore_ascii_case("v") => Action::Paste,
         (Key::Named(NamedKey::Insert), m) if m == shift => Action::Paste,
+        (Key::Character(c), m) if (m == ctrl && c == "=") || (m == ctrl_shift && c == "+") => Action::ZoomIn,
+        (Key::Character(c), m) if m == ctrl && c == "-" => Action::ZoomOut,
+        (Key::Character(c), m) if m == ctrl && c == "0" => Action::ZoomReset,
         _ => return None,
     })
 }

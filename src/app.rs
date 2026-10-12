@@ -52,6 +52,8 @@ pub struct App {
     last_click: Instant,
     clicks: u8,
     clipboard: Clipboard,
+    /// Font size change from Ctrl+=/Ctrl+-, in px on top of the config size.
+    zoom: f32,
 }
 
 impl App {
@@ -82,6 +84,7 @@ impl App {
             last_click: Instant::now(),
             clicks: 0,
             clipboard: Clipboard::new(),
+            zoom: 0.0,
         }
     }
 }
@@ -114,8 +117,22 @@ fn window_size(font: &Font, width: u32, height: u32) -> WindowSize {
 }
 
 impl App {
-    fn font(&self, window: &Window) -> Font {
-        Font::new(&self.config.font.family, self.config.font.size * window.scale_factor() as f32)
+    /// Font size in physical pixels: config size + zoom, scaled for HiDPI.
+    fn font_px(&self, window: &Window) -> f32 {
+        (self.config.font.size + self.zoom).max(6.0) * window.scale_factor() as f32
+    }
+
+    /// Re-apply font family/size to the renderer (after zoom or config change).
+    fn apply_font(&mut self) {
+        let Some(px) = self.window.as_ref().map(|w| self.font_px(w)) else { return };
+        let Some(renderer) = self.renderer.as_mut() else { return };
+        renderer.set_font(&self.config.font.family, px);
+        self.resize_grid();
+    }
+
+    fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom;
+        self.apply_font();
     }
 
     /// Fit the grid and PTY to the window after the window or the cell size changed.
@@ -136,16 +153,13 @@ impl App {
         log::info!("config reloaded");
         let font_changed = config.font != self.config.font;
         self.config = config;
-        let (Some(window), Some(term)) = (self.window.clone(), &self.term) else { return };
+        let (Some(term), Some(renderer)) = (&self.term, self.renderer.as_mut()) else { return };
         term.lock().set_options(self.config.term());
-        let font = font_changed.then(|| self.font(&window));
-        if let Some(renderer) = self.renderer.as_mut() {
-            renderer.theme = self.config.theme();
-            if let Some(font) = font {
-                renderer.set_font(font);
-            }
+        renderer.theme = self.config.theme();
+        if font_changed {
+            self.apply_font();
         }
-        self.resize_grid();
+        self.dirty = true;
     }
 }
 
@@ -159,7 +173,7 @@ impl ApplicationHandler<UserEvent> for App {
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
             self.frame_time = Duration::from_secs_f64(1000.0 / mhz as f64);
         }
-        let font = self.font(&window);
+        let font = Font::new(&self.config.font.family, self.font_px(&window));
         let px = window.inner_size();
         let size = window_size(&font, px.width, px.height);
 
@@ -276,6 +290,9 @@ impl ApplicationHandler<UserEvent> for App {
                             return;
                         }
                         Action::Paste => return self.paste(false),
+                        Action::ZoomIn => return self.set_zoom(self.zoom + 1.0),
+                        Action::ZoomOut => return self.set_zoom(self.zoom - 1.0),
+                        Action::ZoomReset => return self.set_zoom(0.0),
                     };
                     term.lock().scroll_display(scroll);
                     self.dirty = true;
