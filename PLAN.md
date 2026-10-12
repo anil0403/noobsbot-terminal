@@ -146,7 +146,7 @@ commit.
    went 4.1 s → 1.2 s; kitty is 1.7 s on the same machine).
 7. **Check:** `vttest` basics, `htop`, `vim`, `cat` of a 100 MB file without lockup.
 
-### M3 — Daily-drivable
+### M3 — Daily-drivable ✅
 1. Key encoding: modifiers, function keys, app cursor mode, bracketed paste.
 2. Mouse reporting (SGR) for vim/tmux.
 3. Scrollback with wheel + Shift+PgUp/PgDn.
