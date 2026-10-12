@@ -1,7 +1,11 @@
+use std::collections::HashMap;
+
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
+use serde::Deserialize;
 
-/// A color palette. M4 picks one of these per pane based on the situation.
+/// A full color palette. Situation rules pick one by name.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
     pub fg: Rgb,
     pub bg: Rgb,
@@ -29,6 +33,95 @@ impl Default for Theme {
             ],
         }
     }
+}
+
+/// "#rrggbb" in the config file.
+#[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
+#[serde(try_from = "String")]
+pub struct Hex(pub Rgb);
+
+impl TryFrom<String> for Hex {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, String> {
+        let hex = s.strip_prefix('#').filter(|h| h.len() == 6).ok_or(format!("expected #rrggbb, got {s:?}"))?;
+        let v = u32::from_str_radix(hex, 16).map_err(|_| format!("bad hex color {s:?}"))?;
+        Ok(Hex(rgb(v)))
+    }
+}
+
+/// A theme as written in the config: only the colors it changes.
+#[derive(Debug, Deserialize, PartialEq, Clone, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThemePatch {
+    pub foreground: Option<Hex>,
+    pub background: Option<Hex>,
+    pub cursor: Option<Hex>,
+    pub selection: Option<Hex>,
+    /// black, red, green, yellow, blue, magenta, cyan, white
+    pub normal: Option<[Hex; 8]>,
+    pub bright: Option<[Hex; 8]>,
+}
+
+impl ThemePatch {
+    fn apply(&self, t: &mut Theme) {
+        let set = |dst: &mut Rgb, src: Option<Hex>| {
+            if let Some(Hex(c)) = src {
+                *dst = c;
+            }
+        };
+        set(&mut t.fg, self.foreground);
+        set(&mut t.bg, self.background);
+        set(&mut t.cursor, self.cursor);
+        set(&mut t.selection, self.selection);
+        for i in 0..8 {
+            set(&mut t.ansi[i], self.normal.map(|n| n[i]));
+            set(&mut t.ansi[i + 8], self.bright.map(|b| b[i]));
+        }
+    }
+}
+
+const fn patch(fg: u32, bg: u32, cursor: u32, selection: u32) -> ThemePatch {
+    ThemePatch {
+        foreground: Some(Hex(rgb(fg))),
+        background: Some(Hex(rgb(bg))),
+        cursor: Some(Hex(rgb(cursor))),
+        selection: Some(Hex(rgb(selection))),
+        normal: None,
+        bright: None,
+    }
+}
+
+/// Built-in themes, layered on top of `default`.
+fn builtin(name: &str) -> Option<ThemePatch> {
+    Some(match name {
+        "danger" => patch(0xf4dede, 0x2b0d12, 0xff5c6c, 0x5a1f28),
+        "root" => patch(0xf2e6d4, 0x261808, 0xffb347, 0x5a3a14),
+        "careful" => patch(0xe4dcf2, 0x1c1628, 0xc792ea, 0x3d2f5c),
+        "night" => patch(0xb8b2a6, 0x0b0b0d, 0xd4a373, 0x2e2a24),
+        _ => return None,
+    })
+}
+
+pub const BUILTIN_NAMES: [&str; 5] = ["default", "danger", "root", "careful", "night"];
+
+/// Final palettes by name: `default` (+ user tweaks), then every other theme as
+/// default + built-in colors + user tweaks.
+pub fn resolve_all(user: &HashMap<String, ThemePatch>) -> HashMap<String, Theme> {
+    let mut base = Theme::default();
+    if let Some(p) = user.get("default") {
+        p.apply(&mut base);
+    }
+    let names = BUILTIN_NAMES.iter().map(|s| s.to_string()).chain(user.keys().cloned());
+    names
+        .map(|name| {
+            let mut t = base.clone();
+            if name != "default" {
+                builtin(&name).inspect(|p| p.apply(&mut t));
+                user.get(&name).inspect(|p| p.apply(&mut t));
+            }
+            (name, t)
+        })
+        .collect()
 }
 
 impl Theme {
@@ -95,5 +188,27 @@ mod tests {
         assert_eq!(t.resolve(Color::Named(NamedColor::Red), &none), t.ansi[1]);
         assert_eq!(t.resolve(Color::Named(NamedColor::Background), &none), t.bg);
         assert_eq!(t.resolve(Color::Named(NamedColor::DimRed), &none), dim(t.ansi[1]));
+    }
+
+    #[test]
+    fn layers_themes() {
+        let user: HashMap<String, ThemePatch> = toml::from_str(
+            r##"
+            default = { foreground = "#010203" }
+            danger = { cursor = "#00ff00" }
+            mine = { background = "#0a0b0c" }
+            "##,
+        )
+        .unwrap();
+        let all = resolve_all(&user);
+        // user tweak to default flows into themes that don't set their own foreground
+        assert_eq!(all["default"].fg, rgb(0x010203));
+        assert_eq!(all["mine"].fg, rgb(0x010203));
+        // built-in danger background kept, user cursor applied, ANSI inherited from default
+        assert_eq!(all["danger"].bg, rgb(0x2b0d12));
+        assert_eq!(all["danger"].cursor, rgb(0x00ff00));
+        assert_eq!(all["danger"].ansi, Theme::default().ansi);
+        assert_eq!(all["mine"].bg, rgb(0x0a0b0c));
+        assert_eq!(all.len(), 6);
     }
 }

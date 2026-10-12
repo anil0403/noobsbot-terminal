@@ -1,13 +1,14 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use alacritty_terminal::term::{self, Osc52};
-use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle, Rgb};
+use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle};
 use notify::{RecursiveMode, Watcher};
 use serde::Deserialize;
 use winit::event_loop::EventLoopProxy;
 
 use crate::term::UserEvent;
-use crate::theme::Theme;
+use crate::theme::{self, Theme, ThemePatch};
 
 const EXAMPLE: &str = include_str!("../config.example.toml");
 
@@ -17,7 +18,10 @@ pub struct Config {
     pub font: Font,
     pub terminal: Terminal,
     pub cursor: Cursor,
-    pub colors: Colors,
+    /// Theme used when no situation rule matches.
+    pub theme: String,
+    /// User themes and tweaks to built-in ones, layered on `default`.
+    pub themes: HashMap<String, ThemePatch>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -59,31 +63,6 @@ pub enum Shape {
     Underline,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct Colors {
-    pub foreground: Hex,
-    pub background: Hex,
-    pub cursor: Hex,
-    pub selection: Hex,
-    pub normal: [Hex; 8],
-    pub bright: [Hex; 8],
-}
-
-/// "#rrggbb" in the file.
-#[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
-#[serde(try_from = "String")]
-pub struct Hex(pub Rgb);
-
-impl TryFrom<String> for Hex {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, String> {
-        let hex = s.strip_prefix('#').filter(|h| h.len() == 6).ok_or(format!("expected #rrggbb, got {s:?}"))?;
-        let v = u32::from_str_radix(hex, 16).map_err(|_| format!("bad hex color {s:?}"))?;
-        Ok(Hex(Rgb { r: (v >> 16) as u8, g: (v >> 8) as u8, b: v as u8 }))
-    }
-}
-
 impl Default for Font {
     fn default() -> Self {
         Self { family: "JetBrainsMono Nerd Font Mono".into(), size: 15.0 }
@@ -102,36 +81,22 @@ impl Default for Cursor {
     }
 }
 
-impl Default for Colors {
-    fn default() -> Self {
-        let t = Theme::default();
-        Self {
-            foreground: Hex(t.fg),
-            background: Hex(t.bg),
-            cursor: Hex(t.cursor),
-            selection: Hex(t.selection),
-            normal: std::array::from_fn(|i| Hex(t.ansi[i])),
-            bright: std::array::from_fn(|i| Hex(t.ansi[i + 8])),
-        }
-    }
-}
-
 impl Default for Config {
     fn default() -> Self {
-        Self { font: Font::default(), terminal: Terminal::default(), cursor: Cursor::default(), colors: Colors::default() }
+        Self {
+            font: Font::default(),
+            terminal: Terminal::default(),
+            cursor: Cursor::default(),
+            theme: "default".into(),
+            themes: HashMap::new(),
+        }
     }
 }
 
 impl Config {
-    pub fn theme(&self) -> Theme {
-        let c = &self.colors;
-        Theme {
-            fg: c.foreground.0,
-            bg: c.background.0,
-            cursor: c.cursor.0,
-            selection: c.selection.0,
-            ansi: std::array::from_fn(|i| if i < 8 { c.normal[i].0 } else { c.bright[i - 8].0 }),
-        }
+    /// All resolved themes by name.
+    pub fn themes(&self) -> HashMap<String, Theme> {
+        theme::resolve_all(&self.themes)
     }
 
     pub fn term(&self) -> term::Config {
@@ -212,6 +177,7 @@ mod tests {
         assert_eq!(c.font.size, 20.0);
         assert_eq!(c.font.family, Font::default().family);
         assert!(toml::from_str::<Config>("[font]\nsise = 20.0").is_err());
-        assert!(toml::from_str::<Config>("[colors]\nforeground = \"red\"").is_err());
+        assert!(toml::from_str::<Config>("[themes.default]\nforeground = \"red\"").is_err());
+        assert!(toml::from_str::<Config>("[themes.default]\nforegrund = \"#ffffff\"").is_err());
     }
 }

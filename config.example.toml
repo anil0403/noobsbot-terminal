@@ -1,6 +1,9 @@
 # noobsbot terminal config — ~/.config/noobsbot/config.toml
 # Saved changes apply immediately (except `shell`, which applies to new windows).
 
+# Theme used when no situation rule matches (see [themes] and [[rules]] below).
+theme = "default"
+
 [font]
 family = "JetBrainsMono Nerd Font Mono"
 size = 15.0
@@ -19,11 +22,23 @@ clipboard = "copy"
 shape = "block"
 blink = false
 
-[colors]
-foreground = "#d9dee8"
-background = "#121317"
-cursor = "#f5c2e7"
-selection = "#3b4261"
-# black, red, green, yellow, blue, magenta, cyan, white
-normal = ["#1d1f27", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5"]
-bright = ["#565f89", "#ff899d", "#b9f27c", "#ffc777", "#8db0ff", "#c7a9ff", "#a4daff", "#e9ecf5"]
+# ── Themes ────────────────────────────────────────────────────────────────
+# Built in: default, danger, root, careful, night.
+# A theme only needs the colors it changes; the rest come from `default`.
+# Tweak a built-in by naming it, or invent your own name.
+#
+# [themes.default]
+# foreground = "#d9dee8"
+# background = "#121317"
+# cursor = "#f5c2e7"
+# selection = "#3b4261"
+# # black, red, green, yellow, blue, magenta, cyan, white
+# normal = ["#1d1f27", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5"]
+# bright = ["#565f89", "#ff899d", "#b9f27c", "#ffc777", "#8db0ff", "#c7a9ff", "#a4daff", "#e9ecf5"]
+#
+# [themes.danger]
+# background = "#2b0d12"
+#
+# [themes.ocean]
+# background = "#0b1a2b"
+# cursor = "#5fd7ff"

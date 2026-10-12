@@ -21,6 +21,7 @@ use crate::input::{self, Action, binding, key_bytes, mouse_report, paste_bytes};
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::term::{Listener, Term, UserEvent};
+use crate::theme::Theme;
 
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
@@ -145,6 +146,15 @@ impl App {
         self.dirty = true;
     }
 
+    /// Palette for the theme name, falling back to `default` for unknown names.
+    fn theme(&self, name: &str) -> Theme {
+        let themes = self.config.themes();
+        themes.get(name).cloned().unwrap_or_else(|| {
+            log::warn!("unknown theme {name:?}, using default");
+            themes["default"].clone()
+        })
+    }
+
     fn reload_config(&mut self) {
         let config = match config::load(&config::path()) {
             Ok(c) => c,
@@ -153,9 +163,10 @@ impl App {
         log::info!("config reloaded");
         let font_changed = config.font != self.config.font;
         self.config = config;
+        let theme = self.theme(&self.config.theme);
         let (Some(term), Some(renderer)) = (&self.term, self.renderer.as_mut()) else { return };
         term.lock().set_options(self.config.term());
-        renderer.theme = self.config.theme();
+        renderer.theme = theme;
         if font_changed {
             self.apply_font();
         }
@@ -181,7 +192,7 @@ impl ApplicationHandler<UserEvent> for App {
         let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, Listener(self.proxy.clone()))));
         self.pty = Some(Pty::spawn(term.clone(), size, self.proxy.clone(), &self.config.terminal.shell));
         self.term = Some(term);
-        self.renderer = Some(Renderer::new(window.clone(), font, self.config.theme()));
+        self.renderer = Some(Renderer::new(window.clone(), font, self.theme(&self.config.theme)));
         self.window = Some(window);
     }
 
