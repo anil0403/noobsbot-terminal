@@ -70,6 +70,9 @@ impl Font {
     }
 
     pub fn rasterize(&mut self, c: char, bold: bool, italic: bool) -> Option<Glyph> {
+        if let Some(glyph) = self.powerline(c) {
+            return Some(glyph);
+        }
         let (key, _) = self.shape(c, bold, italic)?;
         let image = self.cache.get_image_uncached(&mut self.system, key)?;
         Some(Glyph {
@@ -80,5 +83,50 @@ impl Font {
             color: matches!(image.content, SwashContent::Color),
             data: image.data,
         })
+    }
+}
+
+impl Font {
+    /// Powerline separators (U+E0B0..=E0B7) drawn to fill the cell exactly:
+    /// font versions rarely line up with the cells around them, leaving seams
+    /// in prompts built from colored segments.
+    fn powerline(&self, c: char) -> Option<Glyph> {
+        let (w, h) = (self.cell_w as usize, self.cell_h as usize);
+        let stroke = (self.cell_w / 9.0).max(1.0);
+        // Distance from point p to segment a-b, in pixels.
+        let seg = |p: (f32, f32), a: (f32, f32), b: (f32, f32)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+            ((p.0 - a.0 - t * dx).powi(2) + (p.1 - a.1 - t * dy).powi(2)).sqrt()
+        };
+        let (fw, fh) = (w as f32, h as f32);
+        // Does pixel-space point (x, y) fall inside the shape?
+        let inside: Box<dyn Fn(f32, f32) -> bool> = match c {
+            '\u{e0b0}' => Box::new(move |x, y| x / fw <= 1.0 - (2.0 * y / fh - 1.0).abs()),
+            '\u{e0b2}' => Box::new(move |x, y| x / fw >= (2.0 * y / fh - 1.0).abs()),
+            '\u{e0b1}' => Box::new(move |x, y| seg((x, y), (0.0, 0.0), (fw, fh / 2.0)).min(seg((x, y), (fw, fh / 2.0), (0.0, fh))) <= stroke / 2.0),
+            '\u{e0b3}' => Box::new(move |x, y| seg((x, y), (fw, 0.0), (0.0, fh / 2.0)).min(seg((x, y), (0.0, fh / 2.0), (fw, fh))) <= stroke / 2.0),
+            // Half ellipses: the flat side on the cell edge, the round side bulging out.
+            '\u{e0b4}' | '\u{e0b5}' | '\u{e0b6}' | '\u{e0b7}' => {
+                let right = matches!(c, '\u{e0b4}' | '\u{e0b5}');
+                let outline = matches!(c, '\u{e0b5}' | '\u{e0b7}');
+                Box::new(move |x, y| {
+                    let nx = if right { x / fw } else { 1.0 - x / fw };
+                    let ny = 2.0 * y / fh - 1.0;
+                    let r = (nx * nx + ny * ny).sqrt();
+                    if outline { (r - 1.0).abs() * fw.min(fh / 2.0) <= stroke / 2.0 } else { r <= 1.0 }
+                })
+            }
+            _ => return None,
+        };
+        // 4x4 samples per pixel for smooth edges.
+        let mut data = vec![0u8; w * h];
+        for py in 0..h {
+            for px in 0..w {
+                let hits = (0..16).filter(|i| inside(px as f32 + (i % 4) as f32 / 4.0 + 0.125, py as f32 + (i / 4) as f32 / 4.0 + 0.125)).count();
+                data[py * w + px] = (hits * 255 / 16) as u8;
+            }
+        }
+        Some(Glyph { left: 0, top: self.baseline as i32, width: w as u32, height: h as u32, color: false, data })
     }
 }

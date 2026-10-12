@@ -22,15 +22,17 @@ const fn rgb(hex: u32) -> Rgb {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            fg: rgb(0xd9dee8),
-            bg: rgb(0x121317),
-            cursor: rgb(0xf5c2e7),
-            selection: rgb(0x3b4261),
+            // One Half Dark, with the warm amber / teal / blue of powerline prompts
+            // (christitus.com/pretty-powershell) as accents and bright colors.
+            fg: rgb(0xdcdfe4),
+            bg: rgb(0x282c34),
+            cursor: rgb(0xf2ad36),
+            selection: rgb(0x3e4451),
             ansi: [
-                rgb(0x1d1f27), rgb(0xf7768e), rgb(0x9ece6a), rgb(0xe0af68),
-                rgb(0x7aa2f7), rgb(0xbb9af7), rgb(0x7dcfff), rgb(0xc0caf5),
-                rgb(0x565f89), rgb(0xff899d), rgb(0xb9f27c), rgb(0xffc777),
-                rgb(0x8db0ff), rgb(0xc7a9ff), rgb(0xa4daff), rgb(0xe9ecf5),
+                rgb(0x3e4451), rgb(0xe06c75), rgb(0x98c379), rgb(0xe5c07b),
+                rgb(0x61afef), rgb(0xc678dd), rgb(0x56b6c2), rgb(0xdcdfe4),
+                rgb(0x5c6370), rgb(0xff7b86), rgb(0xb5e890), rgb(0xf2ad36),
+                rgb(0x4e92e8), rgb(0xd7a1f0), rgb(0x5bc8a6), rgb(0xffffff),
             ],
         }
     }
@@ -261,7 +263,7 @@ mod tests {
         b.bg = rgb(0xffffff);
         assert_eq!(a.mix(&b, 0.0), a);
         assert_eq!(a.mix(&b, 1.0), b);
-        assert_eq!(a.mix(&b, 0.5).bg, Rgb { r: 0x89, g: 0x89, b: 0x8b });
+        assert_eq!(a.mix(&b, 0.5).bg, Rgb { r: 0x94, g: 0x96, b: 0x9a });
     }
 
     #[test]

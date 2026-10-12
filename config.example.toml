@@ -48,13 +48,13 @@ flicker = 0.0
 # Tweak a built-in by naming it, or invent your own name.
 #
 # [themes.default]
-# foreground = "#d9dee8"
-# background = "#121317"
-# cursor = "#f5c2e7"
-# selection = "#3b4261"
+# foreground = "#dcdfe4"
+# background = "#282c34"
+# cursor = "#f2ad36"
+# selection = "#3e4451"
 # # black, red, green, yellow, blue, magenta, cyan, white
-# normal = ["#1d1f27", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5"]
-# bright = ["#565f89", "#ff899d", "#b9f27c", "#ffc777", "#8db0ff", "#c7a9ff", "#a4daff", "#e9ecf5"]
+# normal = ["#3e4451", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#dcdfe4"]
+# bright = ["#5c6370", "#ff7b86", "#b5e890", "#f2ad36", "#4e92e8", "#d7a1f0", "#5bc8a6", "#ffffff"]
 #
 # [themes.danger]
 # background = "#2b0d12"
