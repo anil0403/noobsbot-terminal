@@ -38,9 +38,12 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
     let info = info(gpu, shell);
     let cat: Vec<&str> = if cols >= MIN_COLS { CAT.lines().skip(1).collect() } else { Vec::new() };
     let mut out = String::from("\r\n");
-    for row in 0..cat.len().max(info.len()) {
+    // The shorter column sits in the middle of the taller one.
+    let rows = cat.len().max(info.len());
+    let (cat_top, info_top) = ((rows - cat.len()) / 2, (rows - info.len()) / 2);
+    for row in 0..rows {
         if !cat.is_empty() {
-            let line = cat.get(row).copied().unwrap_or("");
+            let line = row.checked_sub(cat_top).and_then(|r| cat.get(r)).copied().unwrap_or("");
             for c in line.chars() {
                 match c {
                     '.' => out.push_str("\x1b[1;38;5;11m."),
@@ -53,69 +56,94 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
             out.push(' ');
         }
         out.push_str("\x1b[0m");
-        out.push_str(info.get(row).map_or("", String::as_str));
+        out.push_str(row.checked_sub(info_top).and_then(|r| info.get(r)).map_or("", String::as_str));
         out.push_str("\x1b[0m\r\n");
     }
     out.push_str("\r\n");
     out
 }
 
+/// Shortcuts worth knowing; a different one each time.
+const TIPS: [&str; 8] = [
+    "Ctrl+Shift+P: the command palette, every action and theme",
+    "Ctrl+Shift+E / O split the window, Alt+Arrows move focus",
+    "Ctrl+Shift+G copies the last command's output",
+    "Ctrl+Shift+Z / X jump between prompts",
+    "Ctrl+click opens links, and file.rs:12 in your editor",
+    "Ctrl+Shift+F searches the scrollback",
+    "Ctrl+Shift+Space: vi mode, select with the keyboard",
+    "noobsbot --quake: a drop-down terminal on F12",
+];
+
 fn info(gpu: &str, shell: &str) -> Vec<String> {
     let user = std::env::var("USER").unwrap_or_else(|_| "you".into());
-    let host = first_line("/proc/sys/kernel/hostname");
+    let now = now();
+    // Like the pretty prompt: user, host, date. The terminal draws these separators itself.
+    let header = format!(
+        "\x1b[38;5;11m\u{e0b6}\x1b[48;5;11;38;5;0m {user} \x1b[38;5;11;48;5;12m\u{e0b0}\x1b[38;5;15m {} \x1b[38;5;12;48;5;14m\u{e0b0}\x1b[38;5;0m {} \x1b[0;38;5;14m\u{e0b4}",
+        first_line("/proc/sys/kernel/hostname"),
+        now.1
+    );
     let mut lines = vec![
-        format!("\x1b[1;38;5;11m{}\x1b[0;1m, {user}!\x1b[0m Welcome to \x1b[1;38;5;14mnoobsbot\x1b[0m.", greeting(local_hour())),
-        format!("\x1b[38;5;8m{}", "-".repeat(40)),
+        header,
+        String::new(),
+        format!("\x1b[1;38;5;11m{}\x1b[0;1m, {user}!\x1b[0m Welcome to \x1b[1;38;5;14mnoobsbot\x1b[0m.", greeting(now.0)),
+        String::new(),
     ];
     let mut row = |label: &str, value: String| {
         if !value.is_empty() {
-            lines.push(format!("\x1b[1;38;5;12m{label:<9}\x1b[0m{value}"));
+            lines.push(format!("\x1b[1;38;5;12m{label:<10}\x1b[0m{value}"));
         }
     };
-    row("Host", format!("{user}@{host}"));
     row("OS", format!("{} {}", os_name(), std::env::consts::ARCH));
     row("Kernel", first_line("/proc/sys/kernel/osrelease"));
     row("Uptime", uptime());
+    row("Packages", packages());
     row("Desktop", std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().trim_start_matches("X-").to_owned());
     row("Shell", shell.to_owned());
     row("Terminal", format!("noobsbot {}", env!("CARGO_PKG_VERSION")));
     row("CPU", cpu());
-    row("GPU", gpu.to_owned());
+    row("GPU", tidy(gpu));
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get()) as f64;
     let mem = memory();
     let gib = |kib: f64| kib / 1024.0 / 1024.0;
     lines.push(String::new());
-    let mut meter = |label: &str, used: f64, text: String| {
-        lines.push(format!("\x1b[1;38;5;12m{label:<9}\x1b[0m{} {text}", bar(used)));
+    let mut meter = |label: &str, bar: String, text: String| {
+        lines.push(format!("\x1b[1;38;5;12m{label:<10}\x1b[0m{bar} {text}"));
     };
     if let Some(load) = first_line("/proc/loadavg").split(' ').next().and_then(|l| l.parse::<f64>().ok()) {
-        meter("Load", load / cores, format!("{load:.2} on {cores} cores"));
+        meter("Load", bar(load / cores, false), format!("{load:.2} on {cores} cores"));
     }
     if let Some((total, free)) = mem.ram {
-        meter("Memory", 1.0 - free / total, format!("{:.1} / {:.1} GiB", gib(total - free), gib(total)));
+        meter("Memory", bar(1.0 - free / total, false), format!("{:.1} / {:.1} GiB", gib(total - free), gib(total)));
     }
     if let Some((total, free)) = mem.swap.filter(|s| s.0 > 0.0) {
-        meter("Swap", 1.0 - free / total, format!("{:.1} / {:.1} GiB", gib(total - free), gib(total)));
+        meter("Swap", bar(1.0 - free / total, false), format!("{:.1} / {:.1} GiB", gib(total - free), gib(total)));
     }
     if let Some((total, free)) = disk("/") {
-        meter("Disk /", 1.0 - free / total, format!("{:.0} / {:.0} GiB", gib(total - free), gib(total)));
+        meter("Disk", bar(1.0 - free / total, false), format!("{:.0} / {:.0} GiB", gib(total - free), gib(total)));
+    }
+    if let Some((level, status)) = battery() {
+        meter("Battery", bar(level, true), status.to_lowercase());
     }
     lines.push(String::new());
     // The theme's 16 colors.
     for half in [0..8, 8..16] {
-        lines.push(half.map(|i| format!("\x1b[48;5;{i}m   ")).collect::<String>());
+        lines.push(half.map(|i| format!("\x1b[38;5;{i}m\u{25cf} ")).collect::<String>());
     }
     lines.push(String::new());
-    lines.push("\x1b[38;5;8mCtrl+Shift+P: every command and theme".into());
+    lines.push(format!("\x1b[38;5;8m{}", TIPS[now.2 % TIPS.len()]));
     lines
 }
 
-/// A meter for `used` (0..=1): green, yellow from 60 %, red from 85 %.
-fn bar(used: f64) -> String {
-    let used = used.clamp(0.0, 1.0);
-    let filled = (used * BAR as f64).round() as usize;
-    let color = if used >= 0.85 { 1 } else if used >= 0.6 { 3 } else { 2 };
-    format!("\x1b[38;5;{color}m{}\x1b[38;5;8m{}\x1b[0m {:>3.0}%", "■".repeat(filled), "■".repeat(BAR - filled), used * 100.0)
+/// A meter for `level` (0..=1): green, yellow from 60 %, red from 85 %.
+/// `full_is_good` (a battery): red up to 15 %, yellow up to 40 %.
+fn bar(level: f64, full_is_good: bool) -> String {
+    let level = level.clamp(0.0, 1.0);
+    let filled = (level * BAR as f64).round() as usize;
+    let badness = if full_is_good { 1.0 - level } else { level };
+    let color = if badness >= 0.85 { 1 } else if badness >= 0.6 { 3 } else { 2 };
+    format!("\x1b[38;5;{color}m{}\x1b[38;5;8m{}\x1b[0m {:>3.0}%", "■".repeat(filled), "■".repeat(BAR - filled), level * 100.0)
 }
 
 fn greeting(hour: u32) -> &'static str {
@@ -127,13 +155,16 @@ fn greeting(hour: u32) -> &'static str {
     }
 }
 
-fn local_hour() -> u32 {
-    // SAFETY: plain libc calls on our own values.
+/// The local hour, "Tue 13 Oct 00:13", and seconds since 1970.
+fn now() -> (u32, String, usize) {
+    let mut text = [0u8; 64];
+    // SAFETY: plain libc calls on our own values; strftime gets the buffer's size.
     unsafe {
         let now = libc::time(std::ptr::null_mut());
         let mut tm: libc::tm = std::mem::zeroed();
         libc::localtime_r(&now, &mut tm);
-        tm.tm_hour as u32
+        let n = libc::strftime(text.as_mut_ptr().cast(), text.len(), c"%a %d %b %H:%M".as_ptr(), &tm);
+        (tm.tm_hour as u32, String::from_utf8_lossy(&text[..n]).into_owned(), now as usize)
     }
 }
 
@@ -166,12 +197,37 @@ fn duration(secs: u64) -> String {
     }
 }
 
-/// "AMD Ryzen 7 5800X 8-Core Processor (16)".
+/// "AMD Ryzen 7 5800X 8-Core (16)".
 fn cpu() -> String {
     let text = read_to_string("/proc/cpuinfo").unwrap_or_default();
     let Some(model) = text.lines().find(|l| l.starts_with("model name")).and_then(|l| l.split_once(':')) else { return String::new() };
     let threads = text.lines().filter(|l| l.starts_with("processor")).count();
-    format!("{} ({threads})", model.1.split_whitespace().collect::<Vec<_>>().join(" "))
+    format!("{} ({threads})", tidy(model.1))
+}
+
+/// Hardware names without the legal and filler words:
+/// "Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz" -> "Intel Core i7-8550U".
+fn tidy(name: &str) -> String {
+    let name = name.replace("(R)", "").replace("(TM)", "").replace("(tm)", "");
+    let name = name.split(" @ ").next().unwrap_or("");
+    name.split_whitespace().filter(|w| !matches!(*w, "CPU" | "Processor")).collect::<Vec<_>>().join(" ")
+}
+
+/// Installed packages, where counting them is one directory listing.
+fn packages() -> String {
+    let count = |dir: &str, ext: &str| std::fs::read_dir(dir).map_or(0, |d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(ext)).count());
+    match (count("/var/lib/pacman/local", "").saturating_sub(1), count("/var/lib/dpkg/info", ".list")) {
+        (0, 0) => String::new(),
+        (0, n) => format!("{n} (dpkg)"),
+        (n, _) => format!("{n} (pacman)"), // minus ALPM_DB_VERSION
+    }
+}
+
+/// The first battery's charge (0..=1) and "Charging" / "Discharging" / "Full".
+fn battery() -> Option<(f64, String)> {
+    let dir = std::fs::read_dir("/sys/class/power_supply").ok()?.flatten().find(|e| e.file_name().to_string_lossy().starts_with("BAT"))?.path();
+    let read = |name: &str| read_to_string(dir.join(name)).ok().map(|s| s.trim().to_owned());
+    Some((read("capacity")?.parse::<f64>().ok()? / 100.0, read("status").unwrap_or_default()))
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -211,6 +267,8 @@ mod tests {
         let lines: Vec<&str> = CAT.lines().skip(1).collect();
         assert!(lines.iter().all(|l| l.chars().all(|c| matches!(c, '.' | '-' | ' '))));
         assert_eq!(lines.iter().map(|l| l.len()).max(), Some(CAT_W));
+        // Nothing beside the cat may wrap in the narrowest window that shows it.
+        assert!(TIPS.iter().all(|t| t.len() <= MIN_COLS - CAT_W - 3));
     }
 
     #[test]
@@ -225,8 +283,12 @@ mod tests {
 
     #[test]
     fn meters_and_layout() {
-        assert!(bar(0.5).contains(&"■".repeat(10)) && bar(0.5).contains("38;5;2m"));
-        assert!(bar(0.9).contains("38;5;1m") && bar(7.0).contains("100%"));
+        assert!(bar(0.5, false).contains(&"■".repeat(10)) && bar(0.5, false).contains("38;5;2m"));
+        assert!(bar(0.9, false).contains("38;5;1m") && bar(7.0, false).contains("100%"));
+        // A battery is red when empty, green when full.
+        assert!(bar(0.1, true).contains("38;5;1m") && bar(0.9, true).contains("38;5;2m"));
+        assert_eq!(tidy("Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz"), "Intel Core i7-8550U");
+        assert_eq!(tidy("AMD Ryzen 7 5800X 8-Core Processor"), "AMD Ryzen 7 5800X 8-Core");
         // Wide: every line starts with the cat's column. Narrow: no cat.
         assert!(screen(120, "gpu", "zsh").contains("1;38;5;14m-"));
         assert!(!screen(80, "gpu", "zsh").contains("1;38;5;14m-"));

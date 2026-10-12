@@ -96,9 +96,10 @@ font is one). It applies to shells started after the change.
 ## Welcome screen
 
 A new window opens with a cat drawn in dots and dashes beside a summary of the
-machine: user and host, distro, kernel, uptime, desktop, shell, CPU and GPU,
-with meters for load, memory, swap and disk (green, yellow from 60 %, red from
-85 %) and the theme's colors. It is drawn by the terminal itself from `/proc`
+machine: a powerline header (user, host, date), distro, kernel, uptime, package
+count, desktop, shell, CPU and GPU, with meters for load, memory, swap, disk
+and battery (green, yellow, red as they get worse), the theme's colors and a
+different shortcut tip each time. It is drawn by the terminal itself from `/proc`
 before the shell starts, so it costs no startup time and works with any shell.
 New tabs and splits stay clean, and windows too narrow for it leave the cat
 out. Turn it off with `welcome = false` under `[terminal]`.
