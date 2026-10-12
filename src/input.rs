@@ -1,5 +1,27 @@
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+/// Terminal-level actions. M9's command palette lists these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    ScrollPageUp,
+    ScrollPageDown,
+    ScrollTop,
+    ScrollBottom,
+}
+
+/// Default keybindings. Checked before a key is sent to the shell.
+pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
+    let shift = ModifiersState::SHIFT;
+    let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    Some(match (key, mods) {
+        (Key::Named(NamedKey::PageUp), m) if m == shift => Action::ScrollPageUp,
+        (Key::Named(NamedKey::PageDown), m) if m == shift => Action::ScrollPageDown,
+        (Key::Named(NamedKey::Home), m) if m == ctrl_shift => Action::ScrollTop,
+        (Key::Named(NamedKey::End), m) if m == ctrl_shift => Action::ScrollBottom,
+        _ => return None,
+    })
+}
+
 /// xterm modifier parameter: 1 + shift|alt<<1|ctrl<<2|super<<3. 1 means "no modifiers".
 fn mod_param(mods: ModifiersState) -> u8 {
     1 + mods.shift_key() as u8 + ((mods.alt_key() as u8) << 1) + ((mods.control_key() as u8) << 2) + ((mods.super_key() as u8) << 3)

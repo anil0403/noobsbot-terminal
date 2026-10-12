@@ -2,19 +2,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, WindowSize};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::Line;
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::{Config, TermMode};
 use alacritty_terminal::term::test::TermSize;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 use crate::font::Font;
-use crate::input::key_bytes;
+use crate::input::{Action, binding, key_bytes};
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::term::{Listener, Term};
@@ -36,6 +36,8 @@ pub struct App {
     dirty: bool,
     last_frame: Instant,
     frame_time: Duration,
+    /// Sub-line remainder of touchpad scrolling, in pixels.
+    scroll_px: f64,
 }
 
 impl App {
@@ -44,6 +46,7 @@ impl App {
             dirty: false,
             last_frame: Instant::now(),
             frame_time: Duration::from_micros(16_667),
+            scroll_px: 0.0,
         }
     }
 }
@@ -157,12 +160,46 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
-                let app_cursor = term.lock().mode().contains(TermMode::APP_CURSOR);
+                if let Some(action) = binding(&event.logical_key, self.mods) {
+                    let scroll = match action {
+                        Action::ScrollPageUp => Scroll::PageUp,
+                        Action::ScrollPageDown => Scroll::PageDown,
+                        Action::ScrollTop => Scroll::Top,
+                        Action::ScrollBottom => Scroll::Bottom,
+                    };
+                    term.lock().scroll_display(scroll);
+                    self.dirty = true;
+                    return;
+                }
+                let mut term = term.lock();
+                let app_cursor = term.mode().contains(TermMode::APP_CURSOR);
                 if let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), self.mods, app_cursor) {
+                    if term.grid().display_offset() != 0 {
+                        term.scroll_display(Scroll::Bottom);
+                        self.dirty = true;
+                    }
+                    drop(term);
                     pty.write(&bytes);
                     // Keep the cursor solid while typing.
                     renderer.cursor_on = true;
                     self.next_blink = Instant::now() + BLINK;
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let Some(term) = &self.term else { return };
+                let lines = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => (y * 3.0) as i32,
+                    MouseScrollDelta::PixelDelta(p) => {
+                        self.scroll_px += p.y;
+                        let cell_h = renderer.font.cell_h as f64;
+                        let lines = (self.scroll_px / cell_h).trunc();
+                        self.scroll_px -= lines * cell_h;
+                        lines as i32
+                    }
+                };
+                if lines != 0 {
+                    term.lock().scroll_display(Scroll::Delta(lines));
+                    self.dirty = true;
                 }
             }
             WindowEvent::RedrawRequested => {
