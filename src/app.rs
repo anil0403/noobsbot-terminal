@@ -106,6 +106,12 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
+            WindowEvent::Focused(focused) => {
+                renderer.focused = focused;
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
                 let app_cursor = term.lock().mode().contains(TermMode::APP_CURSOR);

@@ -3,6 +3,7 @@ mod atlas;
 use std::sync::Arc;
 
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::vte::ansi::CursorShape;
 use bytemuck::{Pod, Zeroable};
 use winit::window::Window;
 
@@ -37,6 +38,9 @@ pub struct Renderer {
     atlas: Atlas,
     pub font: Font,
     pub theme: Theme,
+    pub focused: bool,
+    /// Blink phase; the app toggles it on a timer.
+    pub cursor_on: bool,
 }
 
 impl Renderer {
@@ -109,7 +113,7 @@ impl Renderer {
         });
         let instances = instance_buffer(&device, 4096);
 
-        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme: Theme::default() }
+        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme: Theme::default(), focused: true, cursor_on: true }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -167,6 +171,14 @@ impl Renderer {
         let line_h = (ch / 14.0).round().max(1.0);
         let content = term.renderable_content();
         let offset = content.display_offset as i32;
+        let cursor = content.cursor;
+        let cursor_shape = match cursor.shape {
+            _ if !self.cursor_on => CursorShape::Hidden,
+            CursorShape::Hidden => CursorShape::Hidden,
+            _ if !self.focused => CursorShape::HollowBlock,
+            shape => shape,
+        };
+        let cursor_color = theme::to_f32(self.theme.cursor);
         let mut quads = Vec::new();
         let mut glyphs = Vec::new();
         let solid = |x: f32, y: f32, w: f32, h: f32, color: [f32; 4]| Instance {
@@ -192,6 +204,20 @@ impl Renderer {
             }
             if flags.contains(Flags::INVERSE) {
                 std::mem::swap(&mut fg, &mut bg);
+            }
+            if cell.point == cursor.point {
+                match cursor_shape {
+                    CursorShape::Block => (fg, bg) = (self.theme.bg, self.theme.cursor),
+                    CursorShape::Beam => glyphs.push(solid(x, y, line_h * 2.0, ch, cursor_color)),
+                    CursorShape::Underline => glyphs.push(solid(x, y + ch - line_h * 2.0, w, line_h * 2.0, cursor_color)),
+                    CursorShape::HollowBlock => {
+                        glyphs.push(solid(x, y, w, line_h, cursor_color));
+                        glyphs.push(solid(x, y + ch - line_h, w, line_h, cursor_color));
+                        glyphs.push(solid(x, y, line_h, ch, cursor_color));
+                        glyphs.push(solid(x + w - line_h, y, line_h, ch, cursor_color));
+                    }
+                    CursorShape::Hidden => {}
+                }
             }
             if bg != self.theme.bg {
                 quads.push(solid(x, y, w, ch, theme::to_f32(bg)));
@@ -220,6 +246,7 @@ impl Renderer {
                 kind: if e.color { COLOR } else { MASK },
             });
         }
+        // Cursor outlines were pushed into `glyphs` so they land on top of the text.
         // ponytail: every underline style draws as a single line; undercurl etc. when someone misses them.
         quads.append(&mut glyphs);
         quads
