@@ -4,6 +4,7 @@ mod config;
 mod context;
 mod font;
 mod input;
+mod links;
 mod pane;
 mod pty;
 mod render;
