@@ -103,9 +103,43 @@ pub fn key_bytes(key: &Key, text: Option<&str>, mods: ModifiersState, app_cursor
     }
 }
 
+pub const MOUSE_LEFT: u8 = 0;
+pub const MOUSE_MIDDLE: u8 = 1;
+pub const MOUSE_RIGHT: u8 = 2;
+pub const MOUSE_RELEASE: u8 = 3; // legacy encoding has no per-button release
+pub const MOUSE_WHEEL_UP: u8 = 64;
+pub const MOUSE_WHEEL_DOWN: u8 = 65;
+pub const MOUSE_MOTION: u8 = 32;
+
+/// Encode a mouse event for apps that enabled mouse reporting.
+/// `col`/`line` are 0-based viewport cells. `sgr` selects the modern SGR 1006 format.
+pub fn mouse_report(button: u8, pressed: bool, col: usize, line: usize, mods: ModifiersState, sgr: bool) -> Option<Vec<u8>> {
+    let code = button + 4 * mods.shift_key() as u8 + 8 * mods.alt_key() as u8 + 16 * mods.control_key() as u8;
+    if sgr {
+        let end = if pressed { 'M' } else { 'm' };
+        return Some(format!("\x1b[<{code};{};{}{end}", col + 1, line + 1).into_bytes());
+    }
+    // X10/normal encoding: values offset by 32 in a single byte, so coordinates max out at 222.
+    if col > 222 || line > 222 {
+        return None;
+    }
+    let code = if pressed { code } else { MOUSE_RELEASE + (code & !3) };
+    Some(vec![0x1b, b'[', b'M', 32 + code, 33 + col as u8, 33 + line as u8])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encodes_mouse() {
+        assert_eq!(mouse_report(MOUSE_LEFT, true, 0, 0, NONE, true).unwrap(), b"\x1b[<0;1;1M");
+        assert_eq!(mouse_report(MOUSE_LEFT, false, 4, 9, NONE, true).unwrap(), b"\x1b[<0;5;10m");
+        assert_eq!(mouse_report(MOUSE_WHEEL_UP, true, 1, 1, ModifiersState::CONTROL, true).unwrap(), b"\x1b[<80;2;2M");
+        assert_eq!(mouse_report(MOUSE_RIGHT, true, 0, 0, NONE, false).unwrap(), b"\x1b[M\"!!");
+        assert_eq!(mouse_report(MOUSE_RIGHT, false, 0, 0, NONE, false).unwrap(), b"\x1b[M#!!");
+        assert_eq!(mouse_report(MOUSE_LEFT, true, 300, 0, NONE, false), None);
+    }
 
     const NONE: ModifiersState = ModifiersState::empty();
 

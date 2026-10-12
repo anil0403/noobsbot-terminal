@@ -8,13 +8,13 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::{Config, TermMode};
 use alacritty_terminal::term::test::TermSize;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 use crate::font::Font;
-use crate::input::{Action, binding, key_bytes};
+use crate::input::{self, Action, binding, key_bytes, mouse_report};
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::term::{Listener, Term};
@@ -38,6 +38,10 @@ pub struct App {
     frame_time: Duration,
     /// Sub-line remainder of touchpad scrolling, in pixels.
     scroll_px: f64,
+    /// Pointer position in viewport cells (col, line).
+    mouse_cell: (usize, usize),
+    /// Button held down, for drag reporting.
+    mouse_held: Option<u8>,
 }
 
 impl App {
@@ -47,6 +51,8 @@ impl App {
             last_frame: Instant::now(),
             frame_time: Duration::from_micros(16_667),
             scroll_px: 0.0,
+            mouse_cell: (0, 0),
+            mouse_held: None,
         }
     }
 }
@@ -154,6 +160,11 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::Focused(focused) => {
                 renderer.focused = focused;
+                if let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) {
+                    if term.lock().mode().contains(TermMode::FOCUS_IN_OUT) {
+                        pty.write(if focused { b"\x1b[I" } else { b"\x1b[O" });
+                    }
+                }
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
@@ -197,9 +208,78 @@ impl ApplicationHandler<Event> for App {
                         lines as i32
                     }
                 };
-                if lines != 0 {
-                    term.lock().scroll_display(Scroll::Delta(lines));
+                if lines == 0 {
+                    return;
+                }
+                let mut term = term.lock();
+                let mode = *term.mode();
+                if mode.intersects(TermMode::MOUSE_MODE) {
+                    let button = if lines > 0 { input::MOUSE_WHEEL_UP } else { input::MOUSE_WHEEL_DOWN };
+                    let (col, line) = self.mouse_cell;
+                    drop(term);
+                    if let (Some(bytes), Some(pty)) = (mouse_report(button, true, col, line, self.mods, mode.contains(TermMode::SGR_MOUSE)), self.pty.as_mut()) {
+                        for _ in 0..lines.abs() {
+                            pty.write(&bytes);
+                        }
+                    }
+                } else if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) {
+                    // Full-screen apps without mouse support (less, man) get arrow keys instead.
+                    let arrow: &[u8] = match (lines > 0, mode.contains(TermMode::APP_CURSOR)) {
+                        (true, true) => b"\x1bOA",
+                        (true, false) => b"\x1b[A",
+                        (false, true) => b"\x1bOB",
+                        (false, false) => b"\x1b[B",
+                    };
+                    drop(term);
+                    if let Some(pty) = self.pty.as_mut() {
+                        pty.write(&arrow.repeat(lines.unsigned_abs() as usize));
+                    }
+                } else {
+                    term.scroll_display(Scroll::Delta(lines));
                     self.dirty = true;
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let Some(term) = &self.term else { return };
+                let term = term.lock();
+                let col = ((position.x.max(0.0) as f32 / renderer.font.cell_w) as usize).min(term.columns() - 1);
+                let line = ((position.y.max(0.0) as f32 / renderer.font.cell_h) as usize).min(term.screen_lines() - 1);
+                if (col, line) == self.mouse_cell {
+                    return;
+                }
+                self.mouse_cell = (col, line);
+                let mode = *term.mode();
+                drop(term);
+                let report = match self.mouse_held {
+                    Some(b) if mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) => Some(b),
+                    None if mode.contains(TermMode::MOUSE_MOTION) => Some(input::MOUSE_RELEASE),
+                    _ => None,
+                };
+                if let (Some(button), Some(pty)) = (report, self.pty.as_mut()) {
+                    let sgr = mode.contains(TermMode::SGR_MOUSE);
+                    if let Some(bytes) = mouse_report(button + input::MOUSE_MOTION, true, col, line, self.mods, sgr) {
+                        pty.write(&bytes);
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
+                let mode = *term.lock().mode();
+                // Shift bypasses mouse reporting so you can still select text in vim/tmux.
+                if !mode.intersects(TermMode::MOUSE_MODE) || self.mods.shift_key() {
+                    return;
+                }
+                let code = match button {
+                    MouseButton::Left => input::MOUSE_LEFT,
+                    MouseButton::Middle => input::MOUSE_MIDDLE,
+                    MouseButton::Right => input::MOUSE_RIGHT,
+                    _ => return,
+                };
+                let pressed = state == ElementState::Pressed;
+                self.mouse_held = pressed.then_some(code);
+                let (col, line) = self.mouse_cell;
+                if let Some(bytes) = mouse_report(code, pressed, col, line, self.mods, mode.contains(TermMode::SGR_MOUSE)) {
+                    pty.write(&bytes);
                 }
             }
             WindowEvent::RedrawRequested => {
