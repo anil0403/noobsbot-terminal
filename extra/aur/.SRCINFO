@@ -1,0 +1,27 @@
+pkgbase = noobsbot-git
+	pkgdesc = GPU-rendered terminal emulator with situation-aware color palettes
+	pkgver = r67.1fa30e9
+	pkgrel = 1
+	url = https://github.com/anil0403/noobsbot-terminal
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = git
+	makedepends = ncurses
+	depends = gcc-libs
+	depends = glibc
+	depends = libx11
+	depends = libxcursor
+	depends = libxi
+	depends = libxkbcommon-x11
+	depends = vulkan-icd-loader
+	optdepends = wayland: run on Wayland
+	optdepends = libglvnd: OpenGL fallback when Vulkan is unavailable
+	optdepends = kitty: kitten icat, to show images
+	provides = noobsbot
+	conflicts = noobsbot
+	source = git+https://github.com/anil0403/noobsbot-terminal.git
+	sha256sums = SKIP
+
+pkgname = noobsbot-git

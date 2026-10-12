@@ -247,11 +247,23 @@ commit.
    cropped at the pane edge. Also added: replies to `CSI 14 t` (pixel size)
    and OSC 10/11/4 color queries.
 
-### M13 — Polish + release
-1. Custom terminfo `noobsbot` (fallback `xterm-256color`).
-2. Performance pass: compare `cat` throughput and input latency with Alacritty.
-3. Wayland check.
-4. README with screenshots, AUR `PKGBUILD`.
+### M13 — Polish + release ✅
+1. Terminfo `noobsbot` (`extra/noobsbot.terminfo`): alacritty's entry renamed,
+   since the engine is alacritty_terminal. Compiled into `~/.terminfo` with
+   `tic` on first start when missing; TERM stays alacritty's pick if that
+   fails. bash/zsh integration makes `ssh` send `xterm-256color`. Also sets
+   `TERM_PROGRAM=noobsbot`.
+2. Throughput, `time cat` of 155 MB (3M lines) in a 1100x640 window, release
+   build: noobsbot 1.9 s, kitty 2.5 s. Alacritty isn't installed here, so kitty
+   stood in. Input latency not measured (needs a camera or hardware probe).
+   Found and fixed on the way: Ctrl+hover crashed after a split shrank the
+   pane under the pointer.
+3. Wayland: not run, there's no compositor on this machine. Reviewed instead:
+   the X11-only parts (quake hotkey, fade, focus) step aside when the window
+   isn't X11; winit and wgpu handle the rest.
+4. README screenshots (`extra/screenshots`), AUR `PKGBUILD` + `.SRCINFO` in
+   `extra/aur` (builds and passes `check()` with makepkg). Publishing to the
+   AUR needs the maintainer's AUR account.
 
 ## Testing
 

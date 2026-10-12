@@ -4,11 +4,24 @@ A GPU-rendered terminal emulator for Linux, written in Rust. Easy to use, fast,
 and it changes its color palette to match the situation: red when you SSH into
 production, amber as root, a different look on `main` or after dark.
 
-> Work in progress. See [PLAN.md](PLAN.md) for the roadmap and what's done.
+![Split panes with command marks and an inline image](extra/screenshots/main.png)
+
+| Command palette | CRT mode |
+|---|---|
+| ![Command palette](extra/screenshots/palette.png) | ![CRT mode](extra/screenshots/crt.png) |
+
+See [PLAN.md](PLAN.md) for how it was built, milestone by milestone.
 
 ## Install
 
-Needs Rust (`sudo pacman -S rustup && rustup default stable` on Arch).
+On Arch, build the package from [extra/aur](extra/aur):
+
+```sh
+git clone https://github.com/anil0403/noobsbot-terminal && cd noobsbot-terminal/extra/aur
+makepkg -si
+```
+
+Elsewhere, with Rust (`rustup default stable`):
 
 ```sh
 cargo build --release
@@ -18,6 +31,12 @@ install -Dm644 extra/noobsbot.desktop ~/.local/share/applications/noobsbot.deskt
 
 `~/.local/bin` must be on your `PATH`. "noobsbot terminal" then shows up in
 your desktop's app menu.
+
+Programs inside see `TERM=noobsbot` (on first start noobsbot compiles its
+terminfo into `~/.terminfo` if `tic` is around; otherwise TERM stays
+`alacritty` or `xterm-256color`). Other machines don't know `noobsbot`, so in
+bash and zsh `ssh` sends `TERM=xterm-256color` instead; fish users may want
+`alias ssh 'TERM=xterm-256color command ssh'`.
 
 ## Keys
 
