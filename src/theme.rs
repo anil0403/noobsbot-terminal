@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
@@ -179,6 +180,48 @@ impl Theme {
             selection: m(self.selection, other.selection),
             ansi: std::array::from_fn(|i| m(self.ansi[i], other.ansi[i])),
         }
+    }
+}
+
+const FADE: Duration = Duration::from_millis(150);
+
+/// A palette that cross-fades to a new target when switched.
+pub struct Fade {
+    target: Theme,
+    from: Theme,
+    start: Instant,
+    /// The fully faded-in theme hasn't been drawn yet.
+    pending: bool,
+}
+
+impl Fade {
+    pub fn new(theme: Theme) -> Self {
+        Self { from: theme.clone(), target: theme, start: Instant::now(), pending: false }
+    }
+
+    pub fn set(&mut self, theme: Theme) {
+        if theme != self.target {
+            self.from = self.current();
+            self.start = Instant::now();
+            self.target = theme;
+            self.pending = true;
+        }
+    }
+
+    /// Needs more frames to finish fading.
+    pub fn fading(&self) -> bool {
+        self.pending
+    }
+
+    /// The palette to draw this frame.
+    pub fn frame(&mut self) -> Theme {
+        self.pending = self.start.elapsed() < FADE;
+        self.current()
+    }
+
+    fn current(&self) -> Theme {
+        let t = self.start.elapsed().as_secs_f32() / FADE.as_secs_f32();
+        if t >= 1.0 { self.target.clone() } else { self.from.mix(&self.target, t) }
     }
 }
 

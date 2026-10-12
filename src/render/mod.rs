@@ -1,7 +1,6 @@
 mod atlas;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::CursorShape;
@@ -10,10 +9,8 @@ use winit::window::Window;
 
 use crate::font::Font;
 use crate::term::Term;
-use crate::theme::{self, Theme};
+use crate::theme::{self, Fade, Theme};
 use atlas::Atlas;
-
-const FADE: Duration = Duration::from_millis(150);
 
 const SOLID: u32 = 0;
 const MASK: u32 = 1;
@@ -40,12 +37,7 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     atlas: Atlas,
     pub font: Font,
-    /// Target palette; `fade_from` blends into it over FADE after a switch.
-    theme: Theme,
-    fade_from: Theme,
-    fade_start: Instant,
-    /// The fully faded-in theme hasn't been drawn yet.
-    fade_pending: bool,
+    theme: Fade,
     pub focused: bool,
     /// Blink phase; the app toggles it on a timer.
     pub cursor_on: bool,
@@ -121,26 +113,16 @@ impl Renderer {
         });
         let instances = instance_buffer(&device, 4096);
 
-        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, fade_from: theme.clone(), theme, fade_start: Instant::now(), fade_pending: false, focused: true, cursor_on: true }
+        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme: Fade::new(theme), focused: true, cursor_on: true }
     }
 
     /// Switch palette with a short cross-fade.
     pub fn set_theme(&mut self, theme: Theme) {
-        if theme != self.theme {
-            self.fade_from = self.shown_theme();
-            self.fade_start = Instant::now();
-            self.theme = theme;
-            self.fade_pending = true;
-        }
+        self.theme.set(theme);
     }
 
     pub fn fading(&self) -> bool {
-        self.fade_pending
-    }
-
-    fn shown_theme(&self) -> Theme {
-        let t = self.fade_start.elapsed().as_secs_f32() / FADE.as_secs_f32();
-        if t >= 1.0 { self.theme.clone() } else { self.fade_from.mix(&self.theme, t) }
+        self.theme.fading()
     }
 
     pub fn set_font(&mut self, family: &str, size: f32) {
@@ -155,8 +137,7 @@ impl Renderer {
     }
 
     pub fn render(&mut self, term: &Term) {
-        let theme = self.shown_theme();
-        self.fade_pending = self.fade_start.elapsed() < FADE;
+        let theme = self.theme.frame();
         let instances = self.build(term, &theme);
         let [r, g, b, _] = theme::to_f32(theme.bg);
         let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
