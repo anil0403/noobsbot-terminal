@@ -3,6 +3,7 @@ mod atlas;
 use std::sync::Arc;
 
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::term::search::Match;
 use alacritty_terminal::vte::ansi::{CursorShape, Rgb};
 use bytemuck::{Pod, Zeroable};
 use winit::window::Window;
@@ -205,7 +206,8 @@ impl Renderer {
 
     /// Queue one pane's grid: backgrounds and lines first, glyphs on top.
     /// Only the `active` pane gets a live cursor; the others are dimmed.
-    pub fn pane(&mut self, term: &Term, theme: &Theme, rect: Rect, active: bool) {
+    /// Search `matches` are highlighted, `current` most strongly.
+    pub fn pane(&mut self, term: &Term, theme: &Theme, rect: Rect, active: bool, matches: &[Match], current: Option<&Match>) {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
         let (ox, oy) = (rect.x, rect.y);
         self.fill(rect, theme::to_f32(theme.bg));
@@ -241,6 +243,10 @@ impl Renderer {
             }
             if content.selection.is_some_and(|s| s.contains(cell.point)) {
                 bg = theme.selection;
+            }
+            if let Some(m) = matches.iter().find(|m| m.contains(&cell.point)) {
+                let strong = current == Some(m);
+                (fg, bg) = (theme.bg, if strong { theme.cursor } else { theme.ansi[3] });
             }
             if cell.point == cursor.point {
                 match cursor_shape {
