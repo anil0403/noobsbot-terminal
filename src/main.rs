@@ -8,6 +8,7 @@ mod pane;
 mod pty;
 mod render;
 mod rules;
+mod search;
 mod term;
 mod theme;
 
