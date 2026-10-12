@@ -1,4 +1,4 @@
-# Noobsbot
+# <img src="extra/noobsbot.svg" width="48" align="top"> Noobsbot
 
 A GPU-rendered terminal emulator for Linux, written in Rust. Easy to use, fast,
 and it changes its color palette to match the situation: red when you SSH into
@@ -27,6 +27,7 @@ Elsewhere, with Rust (`rustup default stable`):
 cargo build --release
 install -Dm755 target/release/noobsbot ~/.local/bin/noobsbot
 install -Dm644 extra/noobsbot.desktop ~/.local/share/applications/noobsbot.desktop
+install -Dm644 extra/noobsbot.svg ~/.local/share/icons/hicolor/scalable/apps/noobsbot.svg
 ```
 
 `~/.local/bin` must be on your `PATH`. "Noobsbot" then shows up in

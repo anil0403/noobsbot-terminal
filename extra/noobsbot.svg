@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Noobsbot: a powerline prompt over a chevron and cursor, in One Half Dark. -->
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="#282c34"/>
+  <rect x="12.5" y="12.5" width="231" height="231" rx="51.5" fill="none" stroke="#3e4451" stroke-width="3"/>
+  <!-- Prompt pills: amber, orange, teal, blue; arrows point right like the prompt. -->
+  <g transform="translate(40 52)">
+    <path d="M 18 0 H 58 L 76 18 L 58 36 H 18 A 18 18 0 0 1 18 0 Z" fill="#f2ad36"/>
+    <path d="M 58 0 H 104 L 122 18 L 104 36 H 58 L 76 18 Z" fill="#ff8700"/>
+    <path d="M 104 0 H 140 L 158 18 L 140 36 H 104 L 122 18 Z" fill="#5bc8a6"/>
+    <path d="M 140 0 H 158 A 18 18 0 0 1 158 36 H 140 L 158 18 Z" fill="#4e92e8"/>
+  </g>
+  <!-- Chevron and cursor. -->
+  <path d="M 58 124 L 112 158 L 58 192" fill="none" stroke="#f2ad36" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="134" y="176" width="64" height="20" rx="6" fill="#dcdfe4"/>
+</svg>

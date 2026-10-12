@@ -344,7 +344,7 @@ fn read_file(medium: char, name: &str, keys: &Keys) -> Result<Vec<u8>, String> {
     Ok(data)
 }
 
-fn png(data: &[u8]) -> Result<Arc<Pic>, String> {
+pub fn png(data: &[u8]) -> Result<Arc<Pic>, String> {
     let limits = png::Limits { bytes: (MAX_SIDE * MAX_SIDE * 4) as usize };
     let mut decoder = png::Decoder::new_with_limits(std::io::Cursor::new(data), limits);
     decoder.set_transformations(png::Transformations::normalize_to_color8());

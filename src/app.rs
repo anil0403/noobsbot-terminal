@@ -897,7 +897,8 @@ impl ApplicationHandler<UserEvent> for App {
         if self.window.is_some() {
             return;
         }
-        let mut attrs = Window::default_attributes().with_title("Noobsbot");
+        let icon = crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
+        let mut attrs = Window::default_attributes().with_title("Noobsbot").with_window_icon(icon);
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.
