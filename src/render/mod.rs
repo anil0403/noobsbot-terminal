@@ -1,3 +1,5 @@
+mod atlas;
+
 use std::sync::Arc;
 
 use winit::window::Window;
