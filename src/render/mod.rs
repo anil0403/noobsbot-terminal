@@ -1,4 +1,5 @@
 mod atlas;
+pub mod crt;
 
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ use crate::pane::Rect;
 use crate::term::Term;
 use crate::theme::{self, Theme};
 use atlas::Atlas;
+use crt::Crt;
 
 const SOLID: u32 = 0;
 const MASK: u32 = 1;
@@ -45,6 +47,10 @@ pub struct Renderer {
     pub focused: bool,
     /// Blink phase; the app toggles it on a timer.
     pub cursor_on: bool,
+    crt: Crt,
+    /// CRT effect strengths when CRT mode is on.
+    pub crt_params: Option<crt::Params>,
+    started: std::time::Instant,
 }
 
 impl Renderer {
@@ -117,7 +123,25 @@ impl Renderer {
         });
         let instances = instance_buffer(&device, 4096);
 
-        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, quads: Vec::new(), focused: true, cursor_on: true }
+        let crt = Crt::new(&device, config.format);
+        Self {
+            surface,
+            device,
+            queue,
+            config,
+            pipeline,
+            globals,
+            bind_group,
+            instances,
+            atlas,
+            font,
+            quads: Vec::new(),
+            focused: true,
+            cursor_on: true,
+            crt,
+            crt_params: None,
+            started: std::time::Instant::now(),
+        }
     }
 
     pub fn set_font(&mut self, family: &str, size: f32) {
@@ -181,7 +205,12 @@ impl Renderer {
         let globals = [self.config.width as f32, self.config.height as f32, self.atlas.size(), self.atlas.size()];
         self.queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
 
-        let view = frame.texture.create_view(&Default::default());
+        let frame_view = frame.texture.create_view(&Default::default());
+        // With CRT on, cells go to a texture first and the effect pass draws that to the window.
+        let view = match self.crt_params {
+            Some(_) => self.crt.target(&self.device, (self.config.width, self.config.height)).clone(),
+            None => frame_view.clone(),
+        };
         let mut encoder = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -197,6 +226,11 @@ impl Renderer {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.instances.slice(..));
             pass.draw(0..4, 0..instances.len() as u32);
+        }
+        if let Some(params) = self.crt_params {
+            let screen = [self.config.width as f32, self.config.height as f32];
+            let time = self.started.elapsed().as_secs_f32();
+            self.crt.draw(&self.queue, &mut encoder, &frame_view, crt::Params { screen, time, ..params });
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
