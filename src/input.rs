@@ -7,6 +7,8 @@ pub enum Action {
     ScrollPageDown,
     ScrollTop,
     ScrollBottom,
+    Copy,
+    Paste,
 }
 
 /// Default keybindings. Checked before a key is sent to the shell.
@@ -18,6 +20,9 @@ pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
         (Key::Named(NamedKey::PageDown), m) if m == shift => Action::ScrollPageDown,
         (Key::Named(NamedKey::Home), m) if m == ctrl_shift => Action::ScrollTop,
         (Key::Named(NamedKey::End), m) if m == ctrl_shift => Action::ScrollBottom,
+        (Key::Character(c), m) if m == ctrl_shift && c.eq_ignore_ascii_case("c") => Action::Copy,
+        (Key::Character(c), m) if m == ctrl_shift && c.eq_ignore_ascii_case("v") => Action::Paste,
+        (Key::Named(NamedKey::Insert), m) if m == shift => Action::Paste,
         _ => return None,
     })
 }
@@ -103,6 +108,17 @@ pub fn key_bytes(key: &Key, text: Option<&str>, mods: ModifiersState, app_cursor
     }
 }
 
+/// Bytes for pasted text. With bracketed paste the app sees it as a paste, not typing,
+/// so a pasted newline can't run a command by itself.
+pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
+    if bracketed {
+        // Strip ESC so the text can't close the bracket early and inject keystrokes.
+        let clean = text.replace('\x1b', "");
+        return [b"\x1b[200~", clean.as_bytes(), b"\x1b[201~"].concat();
+    }
+    text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
+}
+
 pub const MOUSE_LEFT: u8 = 0;
 pub const MOUSE_MIDDLE: u8 = 1;
 pub const MOUSE_RIGHT: u8 = 2;
@@ -130,6 +146,13 @@ pub fn mouse_report(button: u8, pressed: bool, col: usize, line: usize, mods: Mo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encodes_paste() {
+        assert_eq!(paste_bytes("a\nb\r\nc", false), b"a\rb\rc");
+        assert_eq!(paste_bytes("ls\n", true), b"\x1b[200~ls\n\x1b[201~");
+        assert_eq!(paste_bytes("x\x1b[201~rm -rf ~\n", true), b"\x1b[200~x[201~rm -rf ~\n\x1b[201~");
+    }
 
     #[test]
     fn encodes_mouse() {

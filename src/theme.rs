@@ -6,6 +6,7 @@ pub struct Theme {
     pub fg: Rgb,
     pub bg: Rgb,
     pub cursor: Rgb,
+    pub selection: Rgb,
     pub ansi: [Rgb; 16],
 }
 
@@ -19,6 +20,7 @@ impl Default for Theme {
             fg: rgb(0xd9dee8),
             bg: rgb(0x121317),
             cursor: rgb(0xf5c2e7),
+            selection: rgb(0x3b4261),
             ansi: [
                 rgb(0x1d1f27), rgb(0xf7768e), rgb(0x9ece6a), rgb(0xe0af68),
                 rgb(0x7aa2f7), rgb(0xbb9af7), rgb(0x7dcfff), rgb(0xc0caf5),

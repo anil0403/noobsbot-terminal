@@ -205,6 +205,9 @@ impl Renderer {
             if flags.contains(Flags::INVERSE) {
                 std::mem::swap(&mut fg, &mut bg);
             }
+            if content.selection.is_some_and(|s| s.contains(cell.point)) {
+                bg = self.theme.selection;
+            }
             if cell.point == cursor.point {
                 match cursor_shape {
                     CursorShape::Block => (fg, bg) = (self.theme.bg, self.theme.cursor),

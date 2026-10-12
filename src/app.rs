@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::Line;
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::{Config, TermMode};
 use alacritty_terminal::term::test::TermSize;
@@ -13,8 +14,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
+use crate::clipboard::Clipboard;
 use crate::font::Font;
-use crate::input::{self, Action, binding, key_bytes, mouse_report};
+use crate::input::{self, Action, binding, key_bytes, mouse_report, paste_bytes};
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::term::{Listener, Term};
@@ -23,6 +25,7 @@ use crate::term::{Listener, Term};
 const FONT_FAMILY: &str = "JetBrainsMono Nerd Font Mono";
 const FONT_SIZE: f32 = 15.0;
 const BLINK: Duration = Duration::from_millis(530);
+const MULTI_CLICK: Duration = Duration::from_millis(400);
 
 pub struct App {
     proxy: EventLoopProxy<Event>,
@@ -42,6 +45,13 @@ pub struct App {
     mouse_cell: (usize, usize),
     /// Button held down, for drag reporting.
     mouse_held: Option<u8>,
+    /// Pointer x within its cell is past the middle → selection side.
+    mouse_side: Side,
+    /// Dragging out a selection with the left button.
+    selecting: bool,
+    last_click: Instant,
+    clicks: u8,
+    clipboard: Clipboard,
 }
 
 impl App {
@@ -53,7 +63,30 @@ impl App {
             scroll_px: 0.0,
             mouse_cell: (0, 0),
             mouse_held: None,
+            mouse_side: Side::Left,
+            selecting: false,
+            last_click: Instant::now(),
+            clicks: 0,
+            clipboard: Clipboard::new(),
         }
+    }
+}
+
+impl App {
+    /// Grid point under the pointer (accounts for scrollback offset).
+    fn mouse_point(&self, term: &Term) -> Point {
+        let (col, line) = self.mouse_cell;
+        Point::new(Line(line as i32 - term.grid().display_offset() as i32), Column(col))
+    }
+
+    fn paste(&mut self, primary: bool) {
+        let (Some(text), Some(term), Some(pty)) = (self.clipboard.get(primary), &self.term, self.pty.as_mut()) else { return };
+        let mut term = term.lock();
+        let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
+        term.scroll_display(Scroll::Bottom);
+        drop(term);
+        pty.write(&paste_bytes(&text, bracketed));
+        self.dirty = true;
     }
 }
 
@@ -109,6 +142,16 @@ impl ApplicationHandler<Event> for App {
                 // Drawn from about_to_wait at most once per refresh, so a flood of output
                 // doesn't make the renderer hog the terminal lock.
                 self.dirty = true;
+            }
+            Event::ClipboardStore(ty, text) => {
+                self.clipboard.set(ty == alacritty_terminal::term::ClipboardType::Selection, text);
+            }
+            Event::ClipboardLoad(ty, format) => {
+                // OSC 52 read. ponytail: always allowed; make it a config option with the config file.
+                let text = self.clipboard.get(ty == alacritty_terminal::term::ClipboardType::Selection).unwrap_or_default();
+                if let Some(pty) = self.pty.as_mut() {
+                    pty.write(format(&text).as_bytes());
+                }
             }
             Event::Exit | Event::ChildExit(_) => event_loop.exit(),
             _ => {}
@@ -177,6 +220,13 @@ impl ApplicationHandler<Event> for App {
                         Action::ScrollPageDown => Scroll::PageDown,
                         Action::ScrollTop => Scroll::Top,
                         Action::ScrollBottom => Scroll::Bottom,
+                        Action::Copy => {
+                            if let Some(text) = term.lock().selection_to_string() {
+                                self.clipboard.set(false, text);
+                            }
+                            return;
+                        }
+                        Action::Paste => return self.paste(false),
                     };
                     term.lock().scroll_display(scroll);
                     self.dirty = true;
@@ -241,13 +291,25 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let Some(term) = &self.term else { return };
-                let term = term.lock();
-                let col = ((position.x.max(0.0) as f32 / renderer.font.cell_w) as usize).min(term.columns() - 1);
-                let line = ((position.y.max(0.0) as f32 / renderer.font.cell_h) as usize).min(term.screen_lines() - 1);
-                if (col, line) == self.mouse_cell {
+                let mut term = term.lock();
+                let (cw, ch) = (renderer.font.cell_w, renderer.font.cell_h);
+                let x = position.x.max(0.0) as f32;
+                let col = ((x / cw) as usize).min(term.columns() - 1);
+                let line = ((position.y.max(0.0) as f32 / ch) as usize).min(term.screen_lines() - 1);
+                let side = if x - col as f32 * cw > cw / 2.0 { Side::Right } else { Side::Left };
+                if (col, line, side) == (self.mouse_cell.0, self.mouse_cell.1, self.mouse_side) {
                     return;
                 }
+                self.mouse_side = side;
                 self.mouse_cell = (col, line);
+                if self.selecting {
+                    // ponytail: no auto-scroll when dragging past the window edge yet.
+                    let point = self.mouse_point(&term);
+                    if let Some(sel) = term.selection.as_mut() {
+                        sel.update(point, side);
+                        self.dirty = true;
+                    }
+                }
                 let mode = *term.mode();
                 drop(term);
                 let report = match self.mouse_held {
@@ -267,6 +329,35 @@ impl ApplicationHandler<Event> for App {
                 let mode = *term.lock().mode();
                 // Shift bypasses mouse reporting so you can still select text in vim/tmux.
                 if !mode.intersects(TermMode::MOUSE_MODE) || self.mods.shift_key() {
+                    let pressed = state == ElementState::Pressed;
+                    match (button, pressed) {
+                        (MouseButton::Left, true) => {
+                            let now = Instant::now();
+                            self.clicks = if now - self.last_click < MULTI_CLICK { self.clicks % 3 + 1 } else { 1 };
+                            self.last_click = now;
+                            let ty = match self.clicks {
+                                1 => SelectionType::Simple,
+                                2 => SelectionType::Semantic,
+                                _ => SelectionType::Lines,
+                            };
+                            let mut term = term.lock();
+                            let point = self.mouse_point(&term);
+                            term.selection = Some(Selection::new(ty, point, self.mouse_side));
+                            self.selecting = true;
+                            self.dirty = true;
+                        }
+                        (MouseButton::Left, false) if self.selecting => {
+                            self.selecting = false;
+                            let mut term = term.lock();
+                            match term.selection_to_string().filter(|s| !s.is_empty()) {
+                                Some(text) => self.clipboard.set(true, text),
+                                None => term.selection = None,
+                            }
+                            self.dirty = true;
+                        }
+                        (MouseButton::Middle, true) => self.paste(true),
+                        _ => {}
+                    }
                     return;
                 }
                 let code = match button {
