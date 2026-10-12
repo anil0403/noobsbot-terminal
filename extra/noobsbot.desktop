@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=noobsbot terminal
+GenericName=Terminal
+Comment=GPU-rendered terminal with situation-aware color palettes
+Exec=noobsbot
+Icon=utilities-terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;cmd;terminal;
+StartupWMClass=noobsbot
