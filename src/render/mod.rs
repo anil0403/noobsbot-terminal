@@ -206,8 +206,8 @@ impl Renderer {
 
     /// Queue one pane's grid: backgrounds and lines first, glyphs on top.
     /// Only the `active` pane gets a live cursor; the others are dimmed.
-    /// Search `matches` are highlighted, `current` most strongly.
-    pub fn pane(&mut self, term: &Term, theme: &Theme, rect: Rect, active: bool, matches: &[Match], current: Option<&Match>) {
+    /// Search `matches` are highlighted, `current` most strongly; the hovered `link` is underlined.
+    pub fn pane(&mut self, term: &Term, theme: &Theme, rect: Rect, active: bool, matches: &[Match], current: Option<&Match>, link: Option<&Match>) {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
         let (ox, oy) = (rect.x, rect.y);
         self.fill(rect, theme::to_f32(theme.bg));
@@ -269,7 +269,7 @@ impl Renderer {
                 continue;
             }
             let fg = theme::to_f32(fg);
-            if flags.intersects(Flags::ALL_UNDERLINES) {
+            if flags.intersects(Flags::ALL_UNDERLINES) || link.is_some_and(|l| l.contains(&cell.point)) {
                 quads.push(solid(x, y + baseline + line_h, w, line_h, fg));
             }
             if flags.contains(Flags::STRIKEOUT) {

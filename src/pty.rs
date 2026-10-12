@@ -19,7 +19,7 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, listener: Listener, command: &[String], cwd: Option<PathBuf>) -> Self {
+    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, listener: Listener, command: &[String], cwd: Option<PathBuf>) -> std::io::Result<Self> {
         let Listener { proxy, pane } = listener;
         let options = tty::Options {
             // Empty command: the login shell.
@@ -27,7 +27,7 @@ impl Pty {
             working_directory: cwd,
             ..Default::default()
         };
-        let pty = tty::new(&options, size, 0).expect("spawn shell");
+        let pty = tty::new(&options, size, 0)?;
         let mut file: File = pty.file().try_clone().expect("clone pty fd");
         let mut reader = pty.file().try_clone().expect("clone pty fd");
         // alacritty sets O_NONBLOCK for its mio loop; we use a plain blocking thread.
@@ -68,7 +68,7 @@ impl Pty {
             })
             .expect("spawn writer thread");
 
-        Self { pty, writer }
+        Ok(Self { pty, writer })
     }
 
     pub fn write(&mut self, bytes: &[u8]) {

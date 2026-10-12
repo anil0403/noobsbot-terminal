@@ -21,6 +21,7 @@ use crate::config::{self, Config};
 use crate::context::{self, Context};
 use crate::font::Font;
 use crate::input::{self, Action, Vi, binding, key_bytes, mouse_report, paste_bytes, vi_binding};
+use crate::links::{self, Hints, Link, Target};
 use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::Renderer;
@@ -57,6 +58,9 @@ pub struct App {
     window_title: String,
     /// Scrollback search in the focused pane.
     search: Option<Search>,
+    hints: Hints,
+    /// Link under the pointer while Ctrl is held.
+    hover: Option<(PaneId, Link)>,
     mods: ModifiersState,
     next_blink: Instant,
     /// Something on screen changed since the last frame.
@@ -105,6 +109,8 @@ impl App {
             cursor_icon: CursorIcon::Default,
             window_title: String::new(),
             search: None,
+            hints: Hints::new(),
+            hover: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
             dirty: false,
@@ -197,7 +203,7 @@ impl App {
     }
 
     /// Start a shell (or `command`) in a new pane, not yet placed in any tab.
-    fn spawn_pane(&mut self, cwd: Option<PathBuf>, command: Option<Vec<String>>) -> PaneId {
+    fn spawn_pane(&mut self, cwd: Option<PathBuf>, command: Option<Vec<String>>) -> Option<PaneId> {
         let id = self.next_pane;
         self.next_pane += 1;
         let renderer = self.renderer.as_ref().expect("renderer exists");
@@ -210,7 +216,9 @@ impl App {
             let shell = &self.config.terminal.shell;
             if shell.is_empty() { Vec::new() } else { vec![shell.clone()] }
         });
-        let pty = Pty::spawn(term.clone(), size, listener, &command, cwd);
+        let pty = Pty::spawn(term.clone(), size, listener, &command, cwd)
+            .map_err(|e| log::error!("can't start {command:?}: {e}"))
+            .ok()?;
         let pane = Pane {
             term,
             pty,
@@ -223,7 +231,7 @@ impl App {
             rect: Rect::default(),
         };
         self.panes.insert(id, pane);
-        id
+        Some(id)
     }
 
     /// New panes start where the focused shell is.
@@ -234,7 +242,7 @@ impl App {
 
     fn new_tab(&mut self) {
         let cwd = self.new_cwd();
-        let id = self.spawn_pane(cwd, None);
+        let Some(id) = self.spawn_pane(cwd, None) else { return };
         let old = self.tabs.get(self.active).map(|t| t.focused);
         self.tabs.push(Tab { root: Node::Leaf(id), focused: id });
         self.active = self.tabs.len() - 1;
@@ -246,7 +254,7 @@ impl App {
 
     fn split(&mut self, across: bool, command: Option<Vec<String>>) {
         let cwd = self.new_cwd();
-        let id = self.spawn_pane(cwd, command);
+        let Some(id) = self.spawn_pane(cwd, command) else { return };
         let target = self.focused();
         self.tabs[self.active].root.split(target, id, across);
         self.relayout();
@@ -361,6 +369,61 @@ impl App {
 
     fn active_rects(&self) -> Vec<(PaneId, Rect)> {
         self.tabs[self.active].root.leaves().into_iter().map(|id| (id, self.panes[&id].rect)).collect()
+    }
+}
+
+// Links and the mouse pointer.
+impl App {
+    /// Find the link under the pointer. Links are only live while Ctrl is held,
+    /// so plain clicks still select.
+    fn update_hover(&mut self) {
+        let id = self.mouse_pane.filter(|id| self.panes.contains_key(id) && self.tabs[self.active].root.contains(*id));
+        let hover = match id {
+            Some(id) if self.mods.control_key() && !self.selecting && self.drag.is_none() => {
+                let pane = &self.panes[&id];
+                let cwd = pane.pty.shell_cwd();
+                let term = pane.term.lock();
+                let point = grid_point(&term, self.mouse_cell);
+                self.hints.at(&term, point, cwd.as_deref()).map(|link| (id, link))
+            }
+            _ => None,
+        };
+        let key = |h: &Option<(PaneId, Link)>| h.as_ref().map(|(id, l)| (*id, l.range.clone()));
+        if key(&hover) != key(&self.hover) {
+            self.dirty = true;
+        }
+        self.hover = hover;
+        self.update_icon();
+    }
+
+    fn update_icon(&mut self) {
+        let (x, y) = self.mouse_px;
+        let icon = match self.divider_at(x, y).map(|i| self.dividers[i].across) {
+            Some(true) => CursorIcon::ColResize,
+            Some(false) => CursorIcon::RowResize,
+            None if self.hover.is_some() => CursorIcon::Pointer,
+            None => CursorIcon::Default,
+        };
+        if icon != self.cursor_icon {
+            self.cursor_icon = icon;
+            if let Some(w) = &self.window {
+                w.set_cursor(icon);
+            }
+        }
+    }
+
+    /// URLs go to the browser; files open in `$EDITOR` in a split next to the output.
+    fn open_link(&mut self, target: Target) {
+        match target {
+            Target::Url(url) => links::xdg_open(&url),
+            Target::File { path, line } => match links::editor_command(&path, line) {
+                Some(cmd) => self.split(true, Some(cmd)),
+                None => links::xdg_open(&path.to_string_lossy()),
+            },
+        }
+        self.hover = None;
+        self.update_icon();
+        self.dirty = true;
     }
 }
 
@@ -627,6 +690,9 @@ impl ApplicationHandler<UserEvent> for App {
         self.renderer = Some(Renderer::new(window.clone(), font));
         self.window = Some(window);
         self.new_tab();
+        if self.tabs.is_empty() {
+            event_loop.exit(); // no shell to run
+        }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -723,7 +789,10 @@ impl ApplicationHandler<UserEvent> for App {
                 self.renderer.as_mut().unwrap().resize(px.width, px.height);
                 self.relayout();
             }
-            WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
+            WindowEvent::ModifiersChanged(m) => {
+                self.mods = m.state();
+                self.update_hover();
+            }
             WindowEvent::Focused(focused) => {
                 self.renderer.as_mut().unwrap().focused = focused;
                 focus_report(self.focused_pane(), focused);
@@ -811,17 +880,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.tabs[self.active].root.set_ratio(&path, ratio);
                     return self.relayout();
                 }
-                let icon = match self.divider_at(x, y).map(|i| self.dividers[i].across) {
-                    Some(true) => CursorIcon::ColResize,
-                    Some(false) => CursorIcon::RowResize,
-                    None => CursorIcon::Default,
-                };
-                if icon != self.cursor_icon {
-                    self.cursor_icon = icon;
-                    if let Some(w) = &self.window {
-                        w.set_cursor(icon);
-                    }
-                }
+                self.update_icon();
 
                 let id = if self.selecting || self.mouse_held.is_some() {
                     self.mouse_target()
@@ -835,18 +894,24 @@ impl ApplicationHandler<UserEvent> for App {
                 self.mouse_pane = Some(id);
                 let font = &self.renderer.as_ref().unwrap().font;
                 let (cw, ch) = (font.cell_w, font.cell_h);
-                let pane = self.panes.get_mut(&id).unwrap();
+                let pane = &self.panes[&id];
                 let r = pane.rect;
-                let mut term = pane.term.lock();
+                let (cols, lines) = {
+                    let term = pane.term.lock();
+                    (term.columns(), term.screen_lines())
+                };
                 let x = (x - r.x).max(0.0);
-                let col = ((x / cw) as usize).min(term.columns() - 1);
-                let line = (((y - r.y).max(0.0) / ch) as usize).min(term.screen_lines() - 1);
+                let col = ((x / cw) as usize).min(cols - 1);
+                let line = (((y - r.y).max(0.0) / ch) as usize).min(lines - 1);
                 let side = if x - col as f32 * cw > cw / 2.0 { Side::Right } else { Side::Left };
                 if same_pane && (col, line, side) == (self.mouse_cell.0, self.mouse_cell.1, self.mouse_side) {
                     return;
                 }
                 self.mouse_side = side;
                 self.mouse_cell = (col, line);
+                self.update_hover();
+                let pane = self.panes.get_mut(&id).unwrap();
+                let mut term = pane.term.lock();
                 if self.selecting {
                     // ponytail: no auto-scroll when dragging past the pane edge yet.
                     let point = grid_point(&term, self.mouse_cell);
@@ -891,6 +956,11 @@ impl ApplicationHandler<UserEvent> for App {
                 if pressed && id != self.focused() {
                     self.focus(id);
                 }
+                if pressed && button == MouseButton::Left
+                    && let Some((_, link)) = self.hover.take()
+                {
+                    return self.open_link(link.target);
+                }
                 let pane = self.panes.get_mut(&id).unwrap();
                 let mode = *pane.term.lock().mode();
                 // Shift bypasses mouse reporting so you can still select text in vim/tmux.
@@ -931,6 +1001,9 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Right => input::MOUSE_RIGHT,
                     _ => return,
                 };
+                if !pressed && self.mouse_held.is_none() {
+                    return; // its press wasn't reported (it opened a link)
+                }
                 self.mouse_held = pressed.then_some(code);
                 let (col, line) = self.mouse_cell;
                 if let Some(bytes) = mouse_report(code, pressed, col, line, self.mods, mode.contains(TermMode::SGR_MOUSE)) {
@@ -939,6 +1012,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::RedrawRequested => {
                 self.last_frame = Instant::now();
+                self.update_hover(); // the text under the pointer may have changed
                 let (bar_h, tab_w) = (self.bar_h(), self.tab_w());
                 let renderer = self.renderer.as_mut().unwrap();
                 let tab = &self.tabs[self.active];
@@ -952,7 +1026,8 @@ impl ApplicationHandler<UserEvent> for App {
                         Some(s) => (s.visible(&term), s.current.clone()),
                         None => (Vec::new(), None),
                     };
-                    renderer.pane(&term, &theme, pane.rect, id == tab.focused, &matches, current.as_ref());
+                    let link = self.hover.as_ref().filter(|(p, _)| *p == id).map(|(_, l)| &l.range);
+                    renderer.pane(&term, &theme, pane.rect, id == tab.focused, &matches, current.as_ref(), link);
                     let vi = term.mode().contains(TermMode::VI);
                     drop(term);
                     draw_pane_ui(renderer, pane.rect, &theme, vi, self.search.as_ref().filter(|s| s.pane == id && s.editing));

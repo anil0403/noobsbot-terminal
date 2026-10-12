@@ -16,7 +16,7 @@ const PATTERN: &str = concat!(
 #[derive(Debug, PartialEq)]
 pub enum Target {
     Url(String),
-    File { path: PathBuf, line: usize, col: Option<usize> },
+    File { path: PathBuf, line: usize },
 }
 
 pub struct Link {
@@ -45,9 +45,9 @@ impl Hints {
             let end = m.end().sub(term, Boundary::None, text.chars().count() - url.chars().count());
             return (point <= end).then(|| Link { range: *m.start()..=end, target: Target::Url(url.to_owned()) });
         }
-        let (path, line, col) = parse_file(&text)?;
+        let (path, line) = parse_file(&text)?;
         let path = resolve(path, cwd)?;
-        Some(Link { range: m, target: Target::File { path, line, col } })
+        Some(Link { range: m, target: Target::File { path, line } })
     }
 }
 
@@ -82,15 +82,10 @@ fn trim_url(url: &str) -> &str {
     }
 }
 
-/// `src/main.rs:12:5` → (`src/main.rs`, 12, Some(5)).
-fn parse_file(text: &str) -> Option<(&str, usize, Option<usize>)> {
-    let mut parts = text.rsplitn(3, ':');
-    let last = parts.next()?.parse().ok()?;
-    let mid = parts.next()?;
-    match (mid.parse().ok(), parts.next()) {
-        (Some(line), Some(path)) => Some((path, line, Some(last))),
-        _ => Some((text.rsplit_once(':')?.0, last, None)),
-    }
+/// `src/main.rs:12:5` → (`src/main.rs`, 12). The column is dropped: `+line` can't take it.
+fn parse_file(text: &str) -> Option<(&str, usize)> {
+    let (path, line) = text.split_once(':')?;
+    Some((path, line.split(':').next()?.parse().ok()?))
 }
 
 fn resolve(path: &str, cwd: Option<&Path>) -> Option<PathBuf> {
@@ -150,17 +145,17 @@ mod tests {
     #[test]
     fn files() {
         let cwd = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let file = |line, col| Target::File { path: cwd.join("src/main.rs"), line, col };
-        assert_eq!(at("--> src/main.rs:12:5 here", 6, Some(cwd)), Some((4, 19, file(12, Some(5)))));
-        assert_eq!(at("src/main.rs:3", 0, Some(cwd)), Some((0, 12, file(3, None))));
+        let file = |line| Target::File { path: cwd.join("src/main.rs"), line };
+        assert_eq!(at("--> src/main.rs:12:5 here", 6, Some(cwd)), Some((4, 19, file(12))));
+        assert_eq!(at("src/main.rs:3", 0, Some(cwd)), Some((0, 12, file(3))));
         assert!(at("src/nope.rs:3", 0, Some(cwd)).is_none());
         assert!(at("src/main.rs:3", 0, None).is_none());
     }
 
     #[test]
     fn parse() {
-        assert_eq!(parse_file("a/b.rs:12:5"), Some(("a/b.rs", 12, Some(5))));
-        assert_eq!(parse_file("a/b.rs:12"), Some(("a/b.rs", 12, None)));
+        assert_eq!(parse_file("a/b.rs:12:5"), Some(("a/b.rs", 12)));
+        assert_eq!(parse_file("a/b.rs:12"), Some(("a/b.rs", 12)));
         assert_eq!(trim_url("http://x/y)."), "http://x/y");
         assert_eq!(trim_url("http://x/(y)"), "http://x/(y)");
     }
