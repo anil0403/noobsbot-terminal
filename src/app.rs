@@ -257,7 +257,7 @@ impl App {
         let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, listener.clone())));
         let (shell, env) = match command {
             Some(cmd) => (cmd.split_first().map(|(program, args)| tty::Shell::new(program.clone(), args.to_vec())), HashMap::new()),
-            None => shell::login(&self.config.terminal.shell),
+            None => shell::login(&self.config.terminal.shell, self.config.terminal.pretty_prompt),
         };
         let what = format!("{shell:?}");
         let options = tty::Options { shell, working_directory: cwd, env, ..Default::default() };

@@ -89,6 +89,8 @@ pub struct Terminal {
     pub scrollback: usize,
     pub shell: String,
     pub clipboard: Clipboard,
+    /// Replace the shell's prompt with noobsbot's powerline one.
+    pub pretty_prompt: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -123,7 +125,7 @@ impl Default for Font {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy }
+        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false }
     }
 }
 

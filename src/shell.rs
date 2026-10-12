@@ -1,5 +1,6 @@
 //! Shell integration: start bash and zsh with our scripts so they report
-//! prompts, commands and the directory. Fish does this on its own.
+//! prompts, commands and the directory. Fish does this on its own; it only
+//! loads our script for the pretty prompt.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,7 +9,8 @@ use std::sync::OnceLock;
 
 use alacritty_terminal::tty::Shell;
 
-const FILES: [(&str, &str); 3] = [
+const FILES: [(&str, &str); 4] = [
+    ("noobsbot.fish", include_str!("../shell/noobsbot.fish")),
     ("noobsbot.bash", include_str!("../shell/noobsbot.bash")),
     ("zsh/.zshenv", include_str!("../shell/zsh/.zshenv")),
     ("zsh/noobsbot.zsh", include_str!("../shell/zsh/noobsbot.zsh")),
@@ -64,8 +66,12 @@ pub fn set_term() {
 }
 
 /// How to start `shell` (empty: `$SHELL`) with integration, and env to add.
-pub fn login(shell: &str) -> (Option<Shell>, HashMap<String, String>) {
+/// `pretty`: the scripts draw noobsbot's prompt instead of the shell's.
+pub fn login(shell: &str, pretty: bool) -> (Option<Shell>, HashMap<String, String>) {
     let mut env = HashMap::new();
+    if pretty {
+        env.insert("NOOBSBOT_PROMPT".into(), "pretty".into());
+    }
     let shell = match shell {
         "" => match std::env::var("SHELL") {
             Ok(s) => s,
@@ -83,6 +89,10 @@ pub fn login(shell: &str) -> (Option<Shell>, HashMap<String, String>) {
                 env.insert("NOOBSBOT_ZDOTDIR".into(), old);
             }
             env.insert("ZDOTDIR".into(), dir.join("zsh").to_string_lossy().into_owned());
+        }
+        // Fish marks prompts itself; it only needs us for the pretty prompt.
+        (Some("fish"), Some(dir)) if pretty => {
+            args = vec!["--init-command".into(), format!("source '{}'", dir.join("noobsbot.fish").display().to_string().replace('\\', "\\\\").replace('\'', "\\'"))];
         }
         _ => {}
     }
