@@ -70,6 +70,13 @@ another program already owns F12, or you're on Wayland, set `quake.hotkey`
 in the config (e.g. `"Ctrl+grave"`), or bind `noobsbot --quake` to a key in
 your desktop's keyboard shortcuts: running it again toggles the open one.
 
+## Images
+
+Programs can show pictures in the terminal using the kitty graphics protocol
+(`kitten icat photo.png`) or sixel (`magick photo.png sixel:-`, `img2sixel`).
+Images scroll with the text and stay in the scrollback until their lines
+scroll out or are cleared.
+
 ## CRT mode
 
 Scanlines, glow, a curved screen and dark corners, like an old monitor.

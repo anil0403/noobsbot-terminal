@@ -231,11 +231,21 @@ commit.
    pointer goes through the same warp so clicks land on what you see.
    Flicker defaults to 0: it needs a redraw every frame.
 
-### M12 — Inline images
-1. Kitty graphics protocol (APC `_G`): transmit (direct + file), place, delete.
-   Test with `kitten icat`.
-2. Sixel (DCS `q`) decode to RGBA. Test with `img2sixel`.
-3. Images anchored to grid cells, scroll with text, evicted with scrollback.
+### M12 — Inline images ✅
+1. Kitty graphics protocol (APC `_G`): transmit (direct, file, temp file,
+   shared memory; PNG / RGB / RGBA, zlib), chunks, place, delete, query
+   replies. `kitten icat` works in all its transfer modes. Not done: source
+   rectangles, pixel offsets, z-index, animation, Unicode placeholders; delete
+   targets other than id/number clear every image.
+2. Sixel (DCS `q`) decoded to RGBA by a small decoder in `images.rs`; unset
+   pixels stay transparent. Tested with `magick … sixel:-` (this machine's
+   `img2sixel` build prints nothing). DA1 now answers `?62;4;22c` so tools
+   see sixel support (kitten also ignored alacritty's short `?6c`).
+3. The image's cells are filled with blanks tagged by a hidden OSC 8 link
+   (same trick as prompt marks), so images scroll, sit in scrollback, and are
+   forgotten once their cells are gone. They scale with font zoom and are
+   cropped at the pane edge. Also added: replies to `CSI 14 t` (pixel size)
+   and OSC 10/11/4 color queries.
 
 ### M13 — Polish + release
 1. Custom terminfo `noobsbot` (fallback `xterm-256color`).
