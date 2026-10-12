@@ -4,13 +4,15 @@ use alacritty_terminal::event::{Event, WindowSize};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::Line;
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::Config;
+use alacritty_terminal::term::{Config, TermMode};
 use alacritty_terminal::term::test::TermSize;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
+use crate::input::key_bytes;
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::term::{Listener, Term};
@@ -26,11 +28,12 @@ pub struct App {
     renderer: Option<Renderer>,
     term: Option<Arc<FairMutex<Term>>>,
     pty: Option<Pty>,
+    mods: ModifiersState,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<Event>) -> Self {
-        Self { proxy, window: None, renderer: None, term: None, pty: None }
+        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty() }
     }
 }
 
@@ -92,7 +95,22 @@ impl ApplicationHandler<Event> for App {
         let Some(renderer) = self.renderer.as_mut() else { return };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
+            WindowEvent::Resized(px) => {
+                renderer.resize(px.width, px.height);
+                let size = window_size(px.width, px.height);
+                if let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) {
+                    term.lock().resize(TermSize::new(size.num_cols as usize, size.num_lines as usize));
+                    pty.resize(size);
+                }
+            }
+            WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
+                let app_cursor = term.lock().mode().contains(TermMode::APP_CURSOR);
+                if let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), self.mods, app_cursor) {
+                    pty.write(&bytes);
+                }
+            }
             WindowEvent::RedrawRequested => renderer.render(BG),
             _ => {}
         }
