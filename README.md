@@ -85,7 +85,8 @@ which directory you're in. Fish does this by itself. You get:
 
 Set `pretty_prompt = true` under `[terminal]` for a powerline prompt in bash,
 zsh or fish, in place of your shell's own: user (and host over SSH), folder,
-git branch, and a ✓ or ✗ with the exit code. Its colors come from the theme's
+git branch (with ● when there are uncommitted changes), and a ✓ or ✗ with
+the exit code. Its colors come from the theme's
 palette, so situation themes recolor it. Icons need a Nerd Font (the default
 font is one). It applies to shells started after the change.
 

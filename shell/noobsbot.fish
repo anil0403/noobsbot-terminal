@@ -23,7 +23,11 @@ function fish_prompt
     test "$PWD" = "$HOME"; and set dir '~'
     __noobsbot_seg 208 15 " $dir"
     set -l branch (git symbolic-ref --short HEAD 2>/dev/null; or git rev-parse --short HEAD 2>/dev/null)
-    test -n "$branch"; and __noobsbot_seg 14 0 " $branch"
+    if test -n "$branch"
+        # ● when there's uncommitted work (no index lock: don't race the user's git).
+        test -n "$(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1)"; and set branch "$branch ●"
+        __noobsbot_seg 14 0 " $branch"
+    end
     if test $s -eq 0
         __noobsbot_seg 12 15 
     else

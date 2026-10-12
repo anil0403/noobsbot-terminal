@@ -37,6 +37,8 @@ __noobsbot_pretty() {
         branch=${branch//\\/\\\\}
         branch=${branch//\$/\\\$}
         branch=${branch//\`/\\\`}
+        # ● when there's uncommitted work (no index lock: don't race the user's git).
+        [[ -n $(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1) ]] && branch+=" ●"
         __noobsbot_seg 14 0 $'\ue725'" $branch"
     fi
     if (( ${__noobsbot_last:-0} == 0 )); then
