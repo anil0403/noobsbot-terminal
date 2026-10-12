@@ -6,7 +6,7 @@ use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::{Config, TermMode};
+use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::test::TermSize;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
@@ -15,20 +15,20 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 use crate::clipboard::Clipboard;
+use crate::config::{self, Config};
 use crate::font::Font;
 use crate::input::{self, Action, binding, key_bytes, mouse_report, paste_bytes};
 use crate::pty::Pty;
 use crate::render::Renderer;
-use crate::term::{Listener, Term};
+use crate::term::{Listener, Term, UserEvent};
 
-// ponytail: hardcoded until the config file lands in M3.
-const FONT_FAMILY: &str = "JetBrainsMono Nerd Font Mono";
-const FONT_SIZE: f32 = 15.0;
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
 
 pub struct App {
-    proxy: EventLoopProxy<Event>,
+    proxy: EventLoopProxy<UserEvent>,
+    config: Config,
+    _config_watcher: Option<notify::RecommendedWatcher>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     term: Option<Arc<FairMutex<Term>>>,
@@ -55,8 +55,22 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<Event>) -> Self {
-        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty(), next_blink: Instant::now(),
+    pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+        let path = config::path();
+        let config = config::load(&path).unwrap_or_else(|e| {
+            log::error!("config error, using defaults: {e}");
+            Config::default()
+        });
+        Self {
+            _config_watcher: config::watch(&path, proxy.clone()),
+            config,
+            proxy,
+            window: None,
+            renderer: None,
+            term: None,
+            pty: None,
+            mods: ModifiersState::empty(),
+            next_blink: Instant::now(),
             dirty: false,
             last_frame: Instant::now(),
             frame_time: Duration::from_micros(16_667),
@@ -99,7 +113,43 @@ fn window_size(font: &Font, width: u32, height: u32) -> WindowSize {
     }
 }
 
-impl ApplicationHandler<Event> for App {
+impl App {
+    fn font(&self, window: &Window) -> Font {
+        Font::new(&self.config.font.family, self.config.font.size * window.scale_factor() as f32)
+    }
+
+    /// Fit the grid and PTY to the window after the window or the cell size changed.
+    fn resize_grid(&mut self) {
+        let (Some(window), Some(renderer), Some(term), Some(pty)) = (&self.window, &self.renderer, &self.term, self.pty.as_mut()) else { return };
+        let px = window.inner_size();
+        let size = window_size(&renderer.font, px.width, px.height);
+        term.lock().resize(TermSize::new(size.num_cols as usize, size.num_lines as usize));
+        pty.resize(size);
+        self.dirty = true;
+    }
+
+    fn reload_config(&mut self) {
+        let config = match config::load(&config::path()) {
+            Ok(c) => c,
+            Err(e) => return log::error!("config error, keeping previous config: {e}"),
+        };
+        log::info!("config reloaded");
+        let font_changed = config.font != self.config.font;
+        self.config = config;
+        let (Some(window), Some(term)) = (self.window.clone(), &self.term) else { return };
+        term.lock().set_options(self.config.term());
+        let font = font_changed.then(|| self.font(&window));
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.theme = self.config.theme();
+            if let Some(font) = font {
+                renderer.set_font(font);
+            }
+        }
+        self.resize_grid();
+    }
+}
+
+impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -109,19 +159,23 @@ impl ApplicationHandler<Event> for App {
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
             self.frame_time = Duration::from_secs_f64(1000.0 / mhz as f64);
         }
-        let font = Font::new(FONT_FAMILY, FONT_SIZE * window.scale_factor() as f32);
+        let font = self.font(&window);
         let px = window.inner_size();
         let size = window_size(&font, px.width, px.height);
 
         let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
-        let term = Arc::new(FairMutex::new(Term::new(Config::default(), &dims, Listener(self.proxy.clone()))));
-        self.pty = Some(Pty::spawn(term.clone(), size, self.proxy.clone()));
+        let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, Listener(self.proxy.clone()))));
+        self.pty = Some(Pty::spawn(term.clone(), size, self.proxy.clone(), &self.config.terminal.shell));
         self.term = Some(term);
-        self.renderer = Some(Renderer::new(window.clone(), font));
+        self.renderer = Some(Renderer::new(window.clone(), font, self.config.theme()));
         self.window = Some(window);
     }
 
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        let event = match event {
+            UserEvent::ConfigChanged => return self.reload_config(),
+            UserEvent::Term(event) => event,
+        };
         match event {
             Event::PtyWrite(text) => {
                 if let Some(pty) = self.pty.as_mut() {
@@ -147,7 +201,7 @@ impl ApplicationHandler<Event> for App {
                 self.clipboard.set(ty == alacritty_terminal::term::ClipboardType::Selection, text);
             }
             Event::ClipboardLoad(ty, format) => {
-                // OSC 52 read. ponytail: always allowed; make it a config option with the config file.
+                // OSC 52 read; only reaches us if `terminal.clipboard` allows pasting.
                 let text = self.clipboard.get(ty == alacritty_terminal::term::ClipboardType::Selection).unwrap_or_default();
                 if let Some(pty) = self.pty.as_mut() {
                     pty.write(format(&text).as_bytes());
@@ -193,12 +247,7 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(px) => {
                 renderer.resize(px.width, px.height);
-                let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
-                let size = window_size(&renderer.font, px.width, px.height);
-                {
-                    term.lock().resize(TermSize::new(size.num_cols as usize, size.num_lines as usize));
-                    pty.resize(size);
-                }
+                self.resize_grid();
             }
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::Focused(focused) => {

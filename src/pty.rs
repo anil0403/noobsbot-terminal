@@ -10,7 +10,7 @@ use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::Processor;
 use winit::event_loop::EventLoopProxy;
 
-use crate::term::Term;
+use crate::term::{Term, UserEvent};
 
 pub struct Pty {
     // Dropping this hangs up the shell.
@@ -19,8 +19,12 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, proxy: EventLoopProxy<Event>) -> Self {
-        let pty = tty::new(&tty::Options::default(), size, 0).expect("spawn shell");
+    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, proxy: EventLoopProxy<UserEvent>, shell: &str) -> Self {
+        let options = tty::Options {
+            shell: (!shell.is_empty()).then(|| tty::Shell::new(shell.to_owned(), Vec::new())),
+            ..Default::default()
+        };
+        let pty = tty::new(&options, size, 0).expect("spawn shell");
         let mut file: File = pty.file().try_clone().expect("clone pty fd");
         let mut reader = pty.file().try_clone().expect("clone pty fd");
         // alacritty sets O_NONBLOCK for its mio loop; we use a plain blocking thread.
@@ -42,9 +46,9 @@ impl Pty {
                         Ok(n) => n,
                     };
                     parser.advance(&mut *term.lock(), &buf[..n]);
-                    let _ = proxy.send_event(Event::Wakeup);
+                    let _ = proxy.send_event(UserEvent::Term(Event::Wakeup));
                 }
-                let _ = proxy.send_event(Event::Exit);
+                let _ = proxy.send_event(UserEvent::Term(Event::Exit));
             })
             .expect("spawn reader thread");
 

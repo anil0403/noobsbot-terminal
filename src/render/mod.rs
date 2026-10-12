@@ -44,7 +44,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>, font: Font) -> Self {
+    pub fn new(window: Arc<Window>, font: Font, theme: Theme) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let size = window.inner_size();
         let surface = instance.create_surface(window).expect("create surface");
@@ -113,7 +113,12 @@ impl Renderer {
         });
         let instances = instance_buffer(&device, 4096);
 
-        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme: Theme::default(), focused: true, cursor_on: true }
+        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme, focused: true, cursor_on: true }
+    }
+
+    pub fn set_font(&mut self, font: Font) {
+        self.font = font;
+        self.atlas.clear();
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

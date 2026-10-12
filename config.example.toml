@@ -1,0 +1,29 @@
+# noobsbot terminal config — ~/.config/noobsbot/config.toml
+# Saved changes apply immediately (except `shell`, which applies to new windows).
+
+[font]
+family = "JetBrainsMono Nerd Font Mono"
+size = 15.0
+
+[terminal]
+# Lines of history kept above the screen.
+scrollback = 10000
+# Program to run. Empty = your login shell ($SHELL).
+shell = ""
+# Let programs use the clipboard through escape codes (OSC 52):
+# "off", "copy" (default: programs may copy, not read), "paste", "copy-paste".
+clipboard = "copy"
+
+[cursor]
+# "block", "beam" or "underline". Programs like vim may override it.
+shape = "block"
+blink = false
+
+[colors]
+foreground = "#d9dee8"
+background = "#121317"
+cursor = "#f5c2e7"
+selection = "#3b4261"
+# black, red, green, yellow, blue, magenta, cyan, white
+normal = ["#1d1f27", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5"]
+bright = ["#565f89", "#ff899d", "#b9f27c", "#ffc777", "#8db0ff", "#c7a9ff", "#a4daff", "#e9ecf5"]

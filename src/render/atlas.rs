@@ -41,6 +41,12 @@ impl Atlas {
         Self { texture, view, packer: Shelf::new(SIZE), glyphs: HashMap::new() }
     }
 
+    /// Forget all glyphs, e.g. after a font change.
+    pub fn clear(&mut self) {
+        self.packer = Shelf::new(SIZE);
+        self.glyphs.clear();
+    }
+
     pub fn size(&self) -> f32 {
         SIZE as f32
     }
