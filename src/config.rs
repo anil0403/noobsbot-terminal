@@ -7,6 +7,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::Deserialize;
 use winit::event_loop::EventLoopProxy;
 
+use crate::rules::{Patterns, Rule, When};
 use crate::term::UserEvent;
 use crate::theme::{self, Theme, ThemePatch};
 
@@ -22,6 +23,8 @@ pub struct Config {
     pub theme: String,
     /// User themes and tweaks to built-in ones, layered on `default`.
     pub themes: HashMap<String, ThemePatch>,
+    /// Situation rules, first match wins.
+    pub rules: Vec<Rule>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -89,6 +92,10 @@ impl Default for Config {
             cursor: Cursor::default(),
             theme: "default".into(),
             themes: HashMap::new(),
+            rules: vec![
+                Rule { when: When { user: Some(Patterns::One("root".into())), ..Default::default() }, theme: "root".into() },
+                Rule { when: When { ssh_host: Some(Patterns::One("*prod*".into())), ..Default::default() }, theme: "danger".into() },
+            ],
         }
     }
 }

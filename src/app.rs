@@ -16,6 +16,7 @@ use winit::window::{Window, WindowId};
 
 use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
+use crate::context::{self, Context};
 use crate::font::Font;
 use crate::input::{self, Action, binding, key_bytes, mouse_report, paste_bytes};
 use crate::pty::Pty;
@@ -25,6 +26,10 @@ use crate::theme::Theme;
 
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
+/// Minimum gap between situation checks while output is streaming.
+const CONTEXT_THROTTLE: Duration = Duration::from_millis(200);
+/// Re-check at least this often when a rule depends on the time of day.
+const CONTEXT_CLOCK: Duration = Duration::from_secs(60);
 
 pub struct App {
     proxy: EventLoopProxy<UserEvent>,
@@ -55,6 +60,12 @@ pub struct App {
     clipboard: Clipboard,
     /// Font size change from Ctrl+=/Ctrl+-, in px on top of the config size.
     zoom: f32,
+    /// Situation the theme was last chosen for, and the theme's name.
+    context: Context,
+    theme_name: String,
+    last_context_check: Instant,
+    /// A situation check is owed at this time (throttled output, or the clock).
+    context_due: Option<Instant>,
 }
 
 impl App {
@@ -86,6 +97,10 @@ impl App {
             clicks: 0,
             clipboard: Clipboard::new(),
             zoom: 0.0,
+            context: Context::default(),
+            theme_name: String::new(),
+            last_context_check: Instant::now(),
+            context_due: None,
         }
     }
 }
@@ -155,6 +170,44 @@ impl App {
         })
     }
 
+    /// Re-detect the situation and switch theme if a different rule now matches.
+    fn check_context(&mut self, force: bool) {
+        let Some(pty) = &self.pty else { return };
+        let ctx = context::detect(pty.fd(), pty.shell_pid());
+        self.last_context_check = Instant::now();
+        self.context_due = self
+            .config
+            .rules
+            .iter()
+            .any(|r| r.when.uses_hours())
+            .then(|| self.last_context_check + CONTEXT_CLOCK);
+        if ctx == self.context && !force {
+            return;
+        }
+        let rule = crate::rules::pick(&self.config.rules, &ctx);
+        let name = rule.map_or(self.config.theme.clone(), |r| r.theme.clone());
+        if name != self.theme_name || force {
+            log::info!("theme → {name} ({})", if rule.is_some() { format!("{ctx:?}") } else { "no rule matched".into() });
+            let theme = self.theme(&name);
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.theme = theme;
+            }
+            self.theme_name = name;
+            self.dirty = true;
+        }
+        self.context = ctx;
+    }
+
+    /// Output arrived: the foreground program may have changed. Check now or soon.
+    fn context_poke(&mut self) {
+        let due = self.last_context_check + CONTEXT_THROTTLE;
+        if Instant::now() >= due {
+            self.check_context(false);
+        } else if self.context_due.is_none_or(|d| d > due) {
+            self.context_due = Some(due);
+        }
+    }
+
     fn reload_config(&mut self) {
         let config = match config::load(&config::path()) {
             Ok(c) => c,
@@ -163,10 +216,9 @@ impl App {
         log::info!("config reloaded");
         let font_changed = config.font != self.config.font;
         self.config = config;
-        let theme = self.theme(&self.config.theme);
-        let (Some(term), Some(renderer)) = (&self.term, self.renderer.as_mut()) else { return };
+        let Some(term) = &self.term else { return };
         term.lock().set_options(self.config.term());
-        renderer.theme = theme;
+        self.check_context(true);
         if font_changed {
             self.apply_font();
         }
@@ -194,6 +246,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.term = Some(term);
         self.renderer = Some(Renderer::new(window.clone(), font, self.theme(&self.config.theme)));
         self.window = Some(window);
+        self.check_context(true);
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -221,6 +274,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // Drawn from about_to_wait at most once per refresh, so a flood of output
                 // doesn't make the renderer hog the terminal lock.
                 self.dirty = true;
+                self.context_poke();
             }
             Event::ClipboardStore(ty, text) => {
                 self.clipboard.set(ty == alacritty_terminal::term::ClipboardType::Selection, text);
@@ -238,8 +292,12 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let (Some(term), Some(renderer), Some(window)) = (&self.term, self.renderer.as_mut(), &self.window) else { return };
         let now = Instant::now();
+        // First, so a theme switch it causes is drawn below.
+        if self.context_due.is_some_and(|due| now >= due) {
+            self.check_context(false);
+        }
+        let (Some(term), Some(renderer), Some(window)) = (&self.term, self.renderer.as_mut(), &self.window) else { return };
         let mut wake = None;
 
         if renderer.focused && term.lock().cursor_style().blinking {
@@ -262,6 +320,9 @@ impl ApplicationHandler<UserEvent> for App {
             } else {
                 wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
             }
+        }
+        if let Some(due) = self.context_due {
+            wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
         }
         event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }

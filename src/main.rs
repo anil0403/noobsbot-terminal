@@ -6,6 +6,7 @@ mod font;
 mod input;
 mod pty;
 mod render;
+mod rules;
 mod term;
 mod theme;
 

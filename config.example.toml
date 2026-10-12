@@ -42,3 +42,30 @@ blink = false
 # [themes.ocean]
 # background = "#0b1a2b"
 # cursor = "#5fd7ff"
+
+# ── Situation rules ───────────────────────────────────────────────────────
+# Checked top to bottom; the first rule whose conditions ALL hold picks the
+# theme. Conditions (any mix):
+#   ssh_host   = host you're ssh'd into        "prod-*" or ["prod-*", "db?"]
+#   user       = user of the running program   "root"
+#   git_branch = branch of the current repo    ["main", "master"]
+#   cwd        = current directory             "~/work/*"
+#   process    = running program               "vim"
+#   hours      = local time range              "22-6" (wraps past midnight)
+# Text conditions accept * and ? wildcards.
+
+[[rules]]
+when = { user = "root" }
+theme = "root"
+
+[[rules]]
+when = { ssh_host = "*prod*" }
+theme = "danger"
+
+# [[rules]]
+# when = { git_branch = ["main", "master"] }
+# theme = "careful"
+
+# [[rules]]
+# when = { hours = "22-6" }
+# theme = "night"
