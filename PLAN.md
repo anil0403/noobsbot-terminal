@@ -168,12 +168,13 @@ commit.
 2. Split tree: horizontal/vertical, resize with mouse/keys, focus movement.
 3. New tab/split opens in current pane's cwd.
 
-### M6 — Search + vi-mode copy
+### M6 — Search + vi-mode copy ✅
 1. Ctrl+Shift+F search overlay using `alacritty_terminal`'s `RegexSearch`.
 2. Highlight all matches, jump next/prev.
 3. Vi mode (Ctrl+Shift+Space): hjkl, w/b, v/V selection, y to copy. Built on
    `alacritty_terminal::vi_mode`.
-4. Scrollback limit configurable; `0` = unlimited (memory-capped).
+4. ~~Scrollback `0` = unlimited~~ — skipped: `terminal.scrollback` already
+   sets the size; unlimited history is a memory foot-gun nobody asked for.
 
 ### M7 — Links
 1. OSC 8 hyperlinks (already parsed by alacritty_terminal) → underline on hover.
