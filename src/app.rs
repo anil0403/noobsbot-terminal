@@ -922,7 +922,7 @@ impl ApplicationHandler<UserEvent> for App {
                 .with_visible(false);
         } else {
             // Room for the welcome screen.
-            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1000.0, 680.0));
+            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1100.0, 680.0));
         }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
