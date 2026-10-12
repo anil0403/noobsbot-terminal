@@ -43,6 +43,8 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     atlas: Atlas,
     pub font: Font,
+    /// The graphics card's name, for the welcome screen.
+    pub gpu: String,
     /// Quads for the frame being built.
     quads: Vec<Instance>,
     /// The window has keyboard focus.
@@ -71,6 +73,7 @@ impl Renderer {
         }))
         .expect("no GPU adapter");
         log::info!("adapter: {:?}", adapter.get_info());
+        let gpu = adapter.get_info().name;
         let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
             .expect("request device");
         let mut config = surface
@@ -137,6 +140,7 @@ impl Renderer {
             ..Default::default()
         });
         Self {
+            gpu,
             textures: HashMap::new(),
             image_draws: Vec::new(),
             image_sampler,

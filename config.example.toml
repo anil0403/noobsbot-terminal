@@ -20,6 +20,9 @@ clipboard = "copy"
 # of your shell's own, for bash, zsh and fish. Needs a Nerd Font for the icons.
 # Applies to new shells.
 pretty_prompt = false
+# Greet each new window with a cat, your system's specs and resource meters
+# (new tabs and splits stay clean).
+welcome = true
 
 [cursor]
 # "block", "beam" or "underline". Programs like vim may override it.

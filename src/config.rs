@@ -91,6 +91,8 @@ pub struct Terminal {
     pub clipboard: Clipboard,
     /// Replace the shell's prompt with noobsbot's powerline one.
     pub pretty_prompt: bool,
+    /// Greet each new window with the cat and the system summary.
+    pub welcome: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -125,7 +127,7 @@ impl Default for Font {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false }
+        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true }
     }
 }
 

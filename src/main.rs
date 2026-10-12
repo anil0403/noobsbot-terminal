@@ -18,6 +18,7 @@ mod tap;
 mod shell;
 mod term;
 mod theme;
+mod welcome;
 
 use winit::event_loop::EventLoop;
 

@@ -255,11 +255,21 @@ impl App {
         let listener = Listener { proxy: self.proxy.clone(), pane: id };
         let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
         let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, listener.clone())));
+        let command_is_shell = command.is_none();
         let (shell, env) = match command {
             Some(cmd) => (cmd.split_first().map(|(program, args)| tty::Shell::new(program.clone(), args.to_vec())), HashMap::new()),
             None => shell::login(&self.config.terminal.shell, self.config.terminal.pretty_prompt),
         };
         let what = format!("{shell:?}");
+        // The first shell of a window opens under the welcome screen.
+        if id == 0 && command_is_shell && self.config.terminal.welcome {
+            let name = match self.config.terminal.shell.as_str() {
+                "" => std::env::var("SHELL").unwrap_or_default(),
+                s => s.to_owned(),
+            };
+            let screen = crate::welcome::screen(dims.columns(), &renderer.gpu, name.rsplit('/').next().unwrap_or(""));
+            alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *term.lock(), screen.as_bytes());
+        }
         let options = tty::Options { shell, working_directory: cwd, env, ..Default::default() };
         let cell = (renderer.font.cell_w, renderer.font.cell_h);
         let images = Arc::new(Mutex::new(Images::default()));
@@ -910,6 +920,9 @@ impl ApplicationHandler<UserEvent> for App {
                 .with_inner_size(PhysicalSize::new(size.width, height as u32))
                 .with_position(m.position())
                 .with_visible(false);
+        } else {
+            // Room for the welcome screen.
+            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1000.0, 680.0));
         }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
