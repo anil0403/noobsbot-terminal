@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
+use std::sync::mpsc::{self, Sender};
 
 use alacritty_terminal::event::{Event, OnResize, WindowSize};
 use alacritty_terminal::sync::FairMutex;
@@ -14,16 +15,17 @@ use crate::term::Term;
 pub struct Pty {
     // Dropping this hangs up the shell.
     pty: tty::Pty,
-    writer: File,
+    writer: Sender<Vec<u8>>,
 }
 
 impl Pty {
     pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, proxy: EventLoopProxy<Event>) -> Self {
         let pty = tty::new(&tty::Options::default(), size, 0).expect("spawn shell");
-        let writer = pty.file().try_clone().expect("clone pty fd");
+        let mut file: File = pty.file().try_clone().expect("clone pty fd");
         let mut reader = pty.file().try_clone().expect("clone pty fd");
         // alacritty sets O_NONBLOCK for its mio loop; we use a plain blocking thread.
-        // ponytail: blocking writes too, since flags are per open file. Fine until a paste stalls the UI.
+        // That makes writes blocking too (flags are per open file), so they get their own thread:
+        // a big paste then never stalls the UI while the shell is busy.
         unsafe {
             let fd = reader.as_raw_fd();
             libc::fcntl(fd, libc::F_SETFL, libc::fcntl(fd, libc::F_GETFL) & !libc::O_NONBLOCK);
@@ -46,13 +48,24 @@ impl Pty {
             })
             .expect("spawn reader thread");
 
+        let (writer, rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::Builder::new()
+            .name("pty-writer".into())
+            .spawn(move || {
+                for bytes in rx {
+                    if let Err(e) = file.write_all(&bytes) {
+                        log::warn!("pty write failed: {e}");
+                        break;
+                    }
+                }
+            })
+            .expect("spawn writer thread");
+
         Self { pty, writer }
     }
 
     pub fn write(&mut self, bytes: &[u8]) {
-        if let Err(e) = self.writer.write_all(bytes) {
-            log::warn!("pty write failed: {e}");
-        }
+        let _ = self.writer.send(bytes.to_vec());
     }
 
     pub fn resize(&mut self, size: WindowSize) {
