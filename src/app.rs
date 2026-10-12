@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, WindowSize};
 use alacritty_terminal::grid::Dimensions;
@@ -8,7 +9,7 @@ use alacritty_terminal::term::{Config, TermMode};
 use alacritty_terminal::term::test::TermSize;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
@@ -21,6 +22,7 @@ use crate::term::{Listener, Term};
 // ponytail: hardcoded until the config file lands in M3.
 const FONT_FAMILY: &str = "JetBrainsMono Nerd Font Mono";
 const FONT_SIZE: f32 = 15.0;
+const BLINK: Duration = Duration::from_millis(530);
 
 pub struct App {
     proxy: EventLoopProxy<Event>,
@@ -29,11 +31,12 @@ pub struct App {
     term: Option<Arc<FairMutex<Term>>>,
     pty: Option<Pty>,
     mods: ModifiersState,
+    next_blink: Instant,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<Event>) -> Self {
-        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty() }
+        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty(), next_blink: Instant::now() }
     }
 }
 
@@ -92,6 +95,25 @@ impl ApplicationHandler<Event> for App {
         }
     }
 
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let (Some(term), Some(renderer), Some(window)) = (&self.term, self.renderer.as_mut(), &self.window) else { return };
+        if !(renderer.focused && term.lock().cursor_style().blinking) {
+            if !renderer.cursor_on {
+                renderer.cursor_on = true;
+                window.request_redraw();
+            }
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
+        let now = Instant::now();
+        if now >= self.next_blink {
+            renderer.cursor_on = !renderer.cursor_on;
+            self.next_blink = now + BLINK;
+            window.request_redraw();
+        }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_blink));
+    }
+
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let Some(renderer) = self.renderer.as_mut() else { return };
         match event {
@@ -117,6 +139,9 @@ impl ApplicationHandler<Event> for App {
                 let app_cursor = term.lock().mode().contains(TermMode::APP_CURSOR);
                 if let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), self.mods, app_cursor) {
                     pty.write(&bytes);
+                    // Keep the cursor solid while typing.
+                    renderer.cursor_on = true;
+                    self.next_blink = Instant::now() + BLINK;
                 }
             }
             WindowEvent::RedrawRequested => {
