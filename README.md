@@ -30,6 +30,12 @@ your desktop's app menu.
 | Shift+PgUp / Shift+PgDn, wheel | Scroll through history |
 | Ctrl+Shift+Home / End | Jump to top / bottom of history |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Bigger / smaller / reset font |
+| Ctrl+Shift+T | New tab (opens in the current shell's directory) |
+| Ctrl+Shift+E / Ctrl+Shift+O | Split right / split down |
+| Ctrl+Shift+W | Close pane (the last pane closes its tab) |
+| Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
+| Alt+Arrows, click | Move focus between split panes |
+| Ctrl+Shift+Arrows, drag the divider | Resize splits |
 
 ## Config
 
@@ -41,7 +47,9 @@ save.
 
 Built-in themes: `default`, `danger`, `root`, `careful`, `night`. Rules in the
 config pick one based on what's happening in the terminal; the first rule whose
-conditions all match wins, and the switch fades in over 150 ms.
+conditions all match wins, and the switch fades in over 150 ms. Every pane
+picks its own theme, and each tab carries its pane's accent color, so an SSH
+session to production stays red in the tab bar while you work elsewhere.
 
 ```toml
 [[rules]]
