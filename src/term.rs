@@ -1,6 +1,8 @@
 use alacritty_terminal::event::{Event, EventListener};
 use winit::event_loop::EventLoopProxy;
 
+pub type PaneId = u64;
+
 /// Everything that wakes the winit loop from another thread.
 pub enum UserEvent {
     Term(Event),
