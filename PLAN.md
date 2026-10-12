@@ -176,11 +176,13 @@ commit.
 4. ~~Scrollback `0` = unlimited~~ — skipped: `terminal.scrollback` already
    sets the size; unlimited history is a memory foot-gun nobody asked for.
 
-### M7 — Links
-1. OSC 8 hyperlinks (already parsed by alacritty_terminal) → underline on hover.
-2. Regex hints for URLs and `path:line[:col]`.
-3. Ctrl+click: URL → `xdg-open`; path → `$EDITOR +line path`, resolved
-   against the pane's cwd.
+### M7 — Links ✅
+1. OSC 8 hyperlinks (already parsed by alacritty_terminal) → underline on
+   Ctrl+hover (only with Ctrl, so plain clicks still select).
+2. Regex hints for URLs and `path:line[:col]`; paths only count if the file
+   exists, so `host:8080` isn't a link.
+3. Ctrl+click: URL → `xdg-open`; path → `$EDITOR +line path` in a split,
+   resolved against the pane's cwd (`/proc` for now, OSC 7 once M8 lands).
 
 ### M8 — Shell integration + command blocks
 1. `shell/noobsbot.{bash,zsh,fish}` emitting OSC 133 A/B/C/D and OSC 7;

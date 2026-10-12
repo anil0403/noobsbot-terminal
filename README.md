@@ -38,6 +38,7 @@ your desktop's app menu.
 | Ctrl+Shift+Arrows, drag the divider | Resize splits |
 | Ctrl+Shift+F | Search history (regex, or plain text if it isn't one). Enter / Shift+Enter: older / newer match, Esc: close |
 | Ctrl+Shift+Space | Vi mode: `hjkl` `wbe` `0$^` `g` `G` `Ctrl+U/D`, `v` / `V` / `Ctrl+V` select, `y` copy, `/` search, `n` / `N` next, Esc / `q` leave |
+| Ctrl + hover / click | Underline / open a link: URLs and terminal hyperlinks in the browser, `file.rs:12[:5]` in `$VISUAL`/`$EDITOR` (in a split, at that line; no editor set: the desktop's default app) |
 
 ## Config
 
