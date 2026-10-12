@@ -22,16 +22,16 @@ const fn rgb(hex: u32) -> Rgb {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            // One Half Dark, with the warm amber / teal / blue of powerline prompts
-            // (christitus.com/pretty-powershell) as accents and bright colors.
+            // One Half Dark's colors on neutral dark grey, with the warm amber / teal /
+            // blue of powerline prompts (christitus.com/pretty-powershell) as accents.
             fg: rgb(0xdcdfe4),
-            bg: rgb(0x282c34),
+            bg: rgb(0x2b2b2b),
             cursor: rgb(0xf2ad36),
-            selection: rgb(0x3e4451),
+            selection: rgb(0x454545),
             ansi: [
-                rgb(0x3e4451), rgb(0xe06c75), rgb(0x98c379), rgb(0xe5c07b),
+                rgb(0x3d3d3d), rgb(0xe06c75), rgb(0x98c379), rgb(0xe5c07b),
                 rgb(0x61afef), rgb(0xc678dd), rgb(0x56b6c2), rgb(0xdcdfe4),
-                rgb(0x5c6370), rgb(0xff7b86), rgb(0xb5e890), rgb(0xf2ad36),
+                rgb(0x686868), rgb(0xff7b86), rgb(0xb5e890), rgb(0xf2ad36),
                 rgb(0x4e92e8), rgb(0xd7a1f0), rgb(0x5bc8a6), rgb(0xffffff),
             ],
         }
@@ -266,7 +266,7 @@ mod tests {
         b.bg = rgb(0xffffff);
         assert_eq!(a.mix(&b, 0.0), a);
         assert_eq!(a.mix(&b, 1.0), b);
-        assert_eq!(a.mix(&b, 0.5).bg, Rgb { r: 0x94, g: 0x96, b: 0x9a });
+        assert_eq!(a.mix(&b, 0.5).bg, Rgb { r: 0x95, g: 0x95, b: 0x95 });
     }
 
     #[test]

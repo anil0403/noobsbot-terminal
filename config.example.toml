@@ -56,12 +56,12 @@ flicker = 0.0
 #
 # [themes.default]
 # foreground = "#dcdfe4"
-# background = "#282c34"
+# background = "#2b2b2b"
 # cursor = "#f2ad36"
-# selection = "#3e4451"
+# selection = "#454545"
 # # black, red, green, yellow, blue, magenta, cyan, white
-# normal = ["#3e4451", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#dcdfe4"]
-# bright = ["#5c6370", "#ff7b86", "#b5e890", "#f2ad36", "#4e92e8", "#d7a1f0", "#5bc8a6", "#ffffff"]
+# normal = ["#3d3d3d", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#dcdfe4"]
+# bright = ["#686868", "#ff7b86", "#b5e890", "#f2ad36", "#4e92e8", "#d7a1f0", "#5bc8a6", "#ffffff"]
 #
 # [themes.danger]
 # background = "#2b0d12"
