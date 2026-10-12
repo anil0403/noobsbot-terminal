@@ -4,6 +4,7 @@ mod clipboard;
 mod config;
 mod context;
 mod font;
+mod images;
 mod input;
 mod links;
 mod palette;

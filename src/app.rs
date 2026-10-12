@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, WindowSize};
@@ -23,6 +23,7 @@ use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
 use crate::context::{self, Context};
 use crate::font::Font;
+use crate::images::Images;
 use crate::input::{self, Action, Vi, binding, key_bytes, mouse_report, paste_bytes, vi_binding};
 use crate::links::{self, Hints, Link, Target};
 use crate::palette::{Item, Palette};
@@ -257,9 +258,13 @@ impl App {
         };
         let what = format!("{shell:?}");
         let options = tty::Options { shell, working_directory: cwd, env, ..Default::default() };
-        let pty = Pty::spawn(term.clone(), size, listener, &options).map_err(|e| log::error!("can't start {what}: {e}")).ok()?;
+        let cell = (renderer.font.cell_w, renderer.font.cell_h);
+        let images = Arc::new(Mutex::new(Images::default()));
+        images.lock().unwrap().cell = cell;
+        let pty = Pty::spawn(term.clone(), images.clone(), size, listener, &options).map_err(|e| log::error!("can't start {what}: {e}")).ok()?;
         let pane = Pane {
             term,
+            images,
             pty,
             theme: Fade::new(theme_named(&self.config, &self.config.theme)),
             theme_name: String::new(),
@@ -396,6 +401,7 @@ impl App {
             for (id, rect) in rects {
                 let Some(pane) = self.panes.get_mut(&id) else { continue };
                 pane.rect = rect;
+                pane.images.lock().unwrap().cell = (renderer.font.cell_w, renderer.font.cell_h);
                 let size = window_size(&renderer.font, rect.w, rect.h);
                 let (cols, lines) = (size.num_cols as usize, size.num_lines as usize);
                 let mut term = pane.term.lock();

@@ -1,13 +1,14 @@
 //! Tabs hold a tree of splits; the leaves are panes.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use alacritty_terminal::sync::FairMutex;
 
 use crate::blocks::Blocks;
 use crate::context::Context;
+use crate::images::Images;
 use crate::pty::Pty;
 use crate::term::{PaneId, Term};
 use crate::theme::Fade;
@@ -17,6 +18,8 @@ const DIVIDER: f32 = 2.0;
 
 pub struct Pane {
     pub term: Arc<FairMutex<Term>>,
+    /// Shared with the reader thread, which adds them.
+    pub images: Arc<Mutex<Images>>,
     pub pty: Pty,
     pub theme: Fade,
     pub theme_name: String,

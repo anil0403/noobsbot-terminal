@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
 
 use alacritty_terminal::event::{Event, OnResize, WindowSize};
@@ -10,6 +10,7 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::Processor;
 
+use crate::images::{self, Images};
 use crate::tap::{Mark, Tap};
 use crate::term::{Listener, Term, UserEvent};
 
@@ -23,7 +24,7 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, listener: Listener, options: &tty::Options) -> std::io::Result<Self> {
+    pub fn spawn(term: Arc<FairMutex<Term>>, images: Arc<Mutex<Images>>, size: WindowSize, listener: Listener, options: &tty::Options) -> std::io::Result<Self> {
         let Listener { proxy, pane } = listener;
         let pty = tty::new(options, size, 0)?;
         let mut file: File = pty.file().try_clone().expect("clone pty fd");
@@ -64,6 +65,24 @@ impl Pty {
                                 parser.advance(&mut *term, format!("\x1b]8;id={PROMPT_TAG}{prompt};{PROMPT_TAG}\x1b\\").as_bytes());
                             }
                             Mark::PromptEnd => parser.advance(&mut *term, b"\x1b]8;;\x1b\\"),
+                            // Images get a block of blank cells tagged the same way.
+                            Mark::Graphics(_) | Mark::Sixel(_) => {
+                                let mut images = images.lock().unwrap();
+                                let col = images::cursor_col(&term);
+                                let (place, reply) = match &mark {
+                                    Mark::Graphics(cmd) => images.kitty(cmd, col),
+                                    Mark::Sixel(dcs) => (images.sixel(dcs, col), None),
+                                    _ => unreachable!(),
+                                };
+                                if let Some(reply) = reply {
+                                    let _ = proxy.send_event(UserEvent::Term(pane, Event::PtyWrite(reply)));
+                                }
+                                if let Some(place) = place {
+                                    let room = images::room(&term, &place);
+                                    parser.advance(&mut *term, room.as_bytes());
+                                    images.evict(&term);
+                                }
+                            }
                             mark => {
                                 let _ = proxy.send_event(UserEvent::Shell(pane, prompt, mark));
                             }

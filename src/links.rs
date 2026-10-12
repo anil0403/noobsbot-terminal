@@ -6,7 +6,6 @@ use alacritty_terminal::Term;
 use alacritty_terminal::index::{Boundary, Direction, Point};
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 
-use crate::pty::PROMPT_TAG;
 
 /// URLs, or a file path with a line number. No uppercase, so the search is
 /// case-insensitive.
@@ -55,7 +54,7 @@ impl Hints {
 
 /// The run of cells around `point` carrying the same OSC 8 link.
 fn hyperlink<T>(term: &Term<T>, point: Point) -> Option<Link> {
-    let link = term.grid()[point].hyperlink().filter(|l| l.uri() != PROMPT_TAG)?;
+    let link = term.grid()[point].hyperlink().filter(|l| !l.uri().starts_with("noobsbot-"))?;
     let same = |p: Point| term.grid()[p].hyperlink().as_ref() == Some(&link);
     let (first, last) = (term.line_search_left(point), term.line_search_right(point));
     let (mut start, mut end) = (point, point);
