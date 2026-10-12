@@ -10,6 +10,7 @@ mod pty;
 mod render;
 mod rules;
 mod search;
+mod tap;
 mod shell;
 mod term;
 mod theme;
