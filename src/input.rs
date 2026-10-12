@@ -31,6 +31,7 @@ pub enum Action {
     Search,
     ViMode,
     CommandPalette,
+    ToggleCrt,
     /// Scroll to the previous / next command's prompt.
     PrevPrompt,
     NextPrompt,
@@ -157,6 +158,7 @@ pub fn actions() -> &'static [Entry] {
             (A::ZoomIn, "Bigger font", "Ctrl+= or Ctrl+Shift++"),
             (A::ZoomOut, "Smaller font", "Ctrl+-"),
             (A::ZoomReset, "Reset font size", "Ctrl+0"),
+            (A::ToggleCrt, "Toggle CRT effect", ""),
         ]
         .into_iter()
         .map(|(a, n, k)| (a, n.to_owned(), k.to_owned()))
@@ -179,6 +181,9 @@ pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
 
 /// Does a key spec like "Ctrl+Shift+T" describe this key press exactly?
 fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
+    if spec.is_empty() {
+        return false; // palette only
+    }
     let (prefix, name) = match spec.strip_suffix("++") {
         Some(prefix) => (prefix, "+"),
         None => spec.rsplit_once('+').unwrap_or(("", spec)),

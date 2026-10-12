@@ -7,6 +7,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::Deserialize;
 use winit::event_loop::EventLoopProxy;
 
+use crate::render::crt;
 use crate::rules::{Patterns, Rule, When};
 use crate::term::UserEvent;
 use crate::theme::{self, Theme, ThemePatch};
@@ -26,6 +27,38 @@ pub struct Config {
     /// Situation rules, first match wins.
     pub rules: Vec<Rule>,
     pub quake: Quake,
+    pub crt: Crt,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Crt {
+    pub enabled: bool,
+    pub scanlines: f32,
+    pub glow: f32,
+    pub curvature: f32,
+    pub vignette: f32,
+    pub flicker: f32,
+}
+
+impl Default for Crt {
+    fn default() -> Self {
+        Self { enabled: false, scanlines: 0.3, glow: 0.35, curvature: 0.06, vignette: 0.35, flicker: 0.0 }
+    }
+}
+
+impl Crt {
+    pub fn params(&self) -> crt::Params {
+        let c = |v: f32| v.clamp(0.0, 1.0);
+        crt::Params {
+            scanlines: c(self.scanlines),
+            glow: c(self.glow),
+            curvature: c(self.curvature),
+            vignette: c(self.vignette),
+            flicker: c(self.flicker),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -113,6 +146,7 @@ impl Default for Config {
                 Rule { when: When { ssh_host: Some(Patterns::One("*prod*".into())), ..Default::default() }, theme: "danger".into() },
             ],
             quake: Quake::default(),
+            crt: Crt::default(),
         }
     }
 }

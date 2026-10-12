@@ -31,6 +31,17 @@ hotkey = "F12"
 # Percent of the screen height.
 height = 40
 
+[crt]
+# Old-monitor look. Also toggled from the command palette (Ctrl+Shift+P).
+enabled = false
+# Strengths from 0 (off) to 1.
+scanlines = 0.3
+glow = 0.35
+curvature = 0.06
+vignette = 0.35
+# Above 0 it redraws every frame, which costs battery.
+flicker = 0.0
+
 # ── Themes ────────────────────────────────────────────────────────────────
 # Built in: default, danger, root, careful, night.
 # A theme only needs the colors it changes; the rest come from `default`.

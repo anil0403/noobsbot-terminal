@@ -28,7 +28,7 @@ use crate::links::{self, Hints, Link, Target};
 use crate::palette::{Item, Palette};
 use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
-use crate::render::Renderer;
+use crate::render::{Renderer, crt};
 use crate::search::Search;
 use crate::tap::Mark;
 use crate::shell;
@@ -108,6 +108,8 @@ pub struct App {
     zoom: f32,
     /// Running as the drop-down terminal (`--quake`).
     quake: Option<Quake>,
+    /// CRT effect on (config, flipped from the palette).
+    crt: bool,
 }
 
 impl App {
@@ -129,6 +131,7 @@ impl App {
             last_toggle: Instant::now() - Duration::from_secs(1),
         });
         Self {
+            crt: config.crt.enabled,
             quake,
             _config_watcher: config::watch(&path, proxy.clone()),
             config,
@@ -522,6 +525,10 @@ impl App {
                     self.dirty = true;
                 }
             }
+            Action::ToggleCrt => {
+                self.crt = !self.crt;
+                self.dirty = true;
+            }
             Action::CommandPalette => {
                 self.palette = Some(Palette::new(self.config.themes().into_keys().collect()));
                 self.dirty = true;
@@ -860,6 +867,9 @@ impl App {
         };
         log::info!("config reloaded");
         let font_changed = config.font != self.config.font;
+        if config.crt.enabled != self.config.crt.enabled {
+            self.crt = config.crt.enabled;
+        }
         self.config = config;
         let ids: Vec<PaneId> = self.panes.keys().copied().collect();
         for id in ids {
@@ -972,7 +982,8 @@ impl ApplicationHandler<UserEvent> for App {
             renderer.cursor_on = true;
             self.dirty = true;
         }
-        if self.panes.values().any(|p| p.theme.fading() || p.failed_at.is_some()) {
+        let flicker = self.crt && self.config.crt.flicker > 0.0;
+        if flicker || self.panes.values().any(|p| p.theme.fading() || p.failed_at.is_some()) {
             self.dirty = true;
         }
 
@@ -1086,7 +1097,11 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let (x, y) = (position.x as f32, position.y as f32);
+                let mut pos = (position.x as f32, position.y as f32);
+                if self.crt {
+                    pos = crt::warp(self.config.crt.params().curvature, self.renderer.as_ref().unwrap().size(), pos);
+                }
+                let (x, y) = pos;
                 self.mouse_px = (x, y);
                 if let Some(i) = self.drag {
                     let d = &self.dividers[i];
@@ -1266,6 +1281,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(p) = &self.palette {
                     draw_palette(renderer, p, &theme);
                 }
+                renderer.crt_params = self.crt.then(|| self.config.crt.params());
                 renderer.finish(theme.bg);
             }
             _ => {}
