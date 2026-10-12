@@ -6,6 +6,7 @@ mod context;
 mod font;
 mod input;
 mod links;
+mod palette;
 mod pane;
 mod pty;
 mod render;

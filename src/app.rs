@@ -24,6 +24,7 @@ use crate::context::{self, Context};
 use crate::font::Font;
 use crate::input::{self, Action, Vi, binding, key_bytes, mouse_report, paste_bytes, vi_binding};
 use crate::links::{self, Hints, Link, Target};
+use crate::palette::{Item, Palette};
 use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::Renderer;
@@ -67,6 +68,7 @@ pub struct App {
     /// Scrollback search in the focused pane.
     search: Option<Search>,
     hints: Hints,
+    palette: Option<Palette>,
     /// Link under the pointer while Ctrl is held.
     hover: Option<(PaneId, Link)>,
     mods: ModifiersState,
@@ -118,6 +120,7 @@ impl App {
             window_title: String::new(),
             search: None,
             hints: Hints::new(),
+            palette: None,
             hover: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
@@ -494,6 +497,10 @@ impl App {
                     self.dirty = true;
                 }
             }
+            Action::CommandPalette => {
+                self.palette = Some(Palette::new(self.config.themes().into_keys().collect()));
+                self.dirty = true;
+            }
             Action::PrevPrompt => return self.jump(true),
             Action::NextPrompt => return self.jump(false),
             Action::CopyOutput => {
@@ -571,6 +578,50 @@ fn human(d: Duration) -> String {
         s if s < 60 => format!("{s}s"),
         s if s < 3600 => format!("{}m {}s", s / 60, s % 60),
         s => format!("{}h {}m", s / 3600, s / 60 % 60),
+    }
+}
+
+// Command palette.
+impl App {
+    /// A key while the palette is open; it takes them all.
+    fn palette_key(&mut self, event_loop: &ActiveEventLoop, key: &Key, text: Option<&str>) -> bool {
+        let Some(p) = self.palette.as_mut() else { return false };
+        self.dirty = true;
+        match key {
+            Key::Named(NamedKey::Escape) => self.palette = None,
+            Key::Named(NamedKey::Enter) => {
+                let item = p.chosen().cloned();
+                self.palette = None;
+                match item {
+                    Some(Item::Action(action)) => {
+                        self.run(event_loop, action);
+                    }
+                    Some(Item::Theme(name)) => self.set_theme(name),
+                    None => {}
+                }
+            }
+            Key::Named(NamedKey::ArrowUp) => p.selected = p.selected.checked_sub(1).unwrap_or(p.len().saturating_sub(1)),
+            Key::Named(NamedKey::ArrowDown) => p.selected = if p.selected + 1 < p.len() { p.selected + 1 } else { 0 },
+            Key::Named(NamedKey::Backspace) => {
+                p.query.pop();
+                p.filter();
+            }
+            _ => {
+                if let Some(t) = text.filter(|t| !self.mods.control_key() && !self.mods.alt_key() && !t.chars().any(char::is_control)) {
+                    p.query.push_str(t);
+                    p.filter();
+                }
+            }
+        }
+        true
+    }
+
+    /// Theme picked by hand for the focused pane; holds until the situation changes.
+    fn set_theme(&mut self, name: String) {
+        let theme = theme_named(&self.config, &name);
+        let pane = self.focused_pane();
+        pane.theme.set(theme);
+        pane.theme_name = name;
     }
 }
 
@@ -878,6 +929,9 @@ impl ApplicationHandler<UserEvent> for App {
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if self.palette_key(event_loop, &event.logical_key, event.text.as_deref()) {
+                    return;
+                }
                 if self.search_key(&event.logical_key, event.text.as_deref()) {
                     return;
                 }
@@ -1127,6 +1181,9 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.tabs.len() > 1 {
                     draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w);
                 }
+                if let Some(p) = &self.palette {
+                    draw_palette(renderer, p, &theme);
+                }
                 renderer.finish(theme.bg);
             }
             _ => {}
@@ -1189,6 +1246,35 @@ fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, ui: PaneUi) {
         let fit = (rect.w / cw) as usize;
         let line: String = format!("Find: {}_{status}", s.query).chars().take(fit).collect();
         r.text(rect.x, y, &line, theme::to_f32(theme.fg));
+    }
+}
+
+/// The palette: a query line and the best matches, centered near the top.
+fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
+    const ROWS: usize = 12;
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let w = r.size().0;
+    let cols = ((w / cw) as usize).saturating_sub(4).min(64);
+    let (bw, pad) = (cols as f32 * cw, (cw / 2.0).round());
+    let (x, y) = (((w - bw) / 2.0).round(), ch);
+    let n = p.len().min(ROWS);
+    let (fg, bg) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg));
+    r.fill(Rect { x: x - pad, y: y - pad, w: bw + 2.0 * pad, h: (n + 1) as f32 * ch + 2.0 * pad }, theme::to_f32(theme.selection));
+    let query = format!("> {}_", p.query);
+    let skip = query.chars().count().saturating_sub(cols); // keep the end of a long query in view
+    r.text(x, y, &query.chars().skip(skip).collect::<String>(), fg);
+    let first = p.selected.saturating_sub(ROWS - 1);
+    for (i, row) in p.shown().skip(first).take(ROWS).enumerate() {
+        let ry = y + (i + 1) as f32 * ch;
+        let (name_fg, keys_fg) = if first + i == p.selected {
+            r.fill(Rect { x: x - pad, y: ry, w: bw + 2.0 * pad, h: ch }, theme::to_f32(theme.cursor));
+            (bg, bg)
+        } else {
+            (fg, theme::to_f32(theme::dim(theme.fg)))
+        };
+        let keys = row.keys.chars().count().min(cols);
+        r.text(x, ry, &row.name.chars().take(cols.saturating_sub(keys + 2)).collect::<String>(), name_fg);
+        r.text(x + (cols - keys) as f32 * cw, ry, &row.keys.chars().take(keys).collect::<String>(), keys_fg);
     }
 }
 

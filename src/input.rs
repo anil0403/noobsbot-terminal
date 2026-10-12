@@ -1,10 +1,12 @@
+use std::sync::OnceLock;
+
 use alacritty_terminal::selection::SelectionType;
 use alacritty_terminal::vi_mode::ViMotion;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::pane::Dir;
 
-/// Terminal-level actions. M9's command palette lists these.
+/// Terminal-level actions, each listed in [`actions`] with its name and keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     ScrollPageUp,
@@ -28,6 +30,7 @@ pub enum Action {
     Resize(Dir),
     Search,
     ViMode,
+    CommandPalette,
     /// Scroll to the previous / next command's prompt.
     PrevPrompt,
     NextPrompt,
@@ -119,42 +122,91 @@ fn arrow(key: &NamedKey) -> Option<Dir> {
     })
 }
 
-/// Default keybindings. Checked before a key is sent to the shell.
-pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
-    let shift = ModifiersState::SHIFT;
-    let ctrl = ModifiersState::CONTROL;
-    let alt = ModifiersState::ALT;
-    let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
-    let letter = |c: &str, l: &str| c.eq_ignore_ascii_case(l);
-    Some(match (key, mods) {
-        (Key::Named(NamedKey::PageUp), m) if m == shift => Action::ScrollPageUp,
-        (Key::Named(NamedKey::PageDown), m) if m == shift => Action::ScrollPageDown,
-        (Key::Named(NamedKey::Home), m) if m == ctrl_shift => Action::ScrollTop,
-        (Key::Named(NamedKey::End), m) if m == ctrl_shift => Action::ScrollBottom,
-        (Key::Character(c), m) if m == ctrl_shift && c.eq_ignore_ascii_case("c") => Action::Copy,
-        (Key::Character(c), m) if m == ctrl_shift && c.eq_ignore_ascii_case("v") => Action::Paste,
-        (Key::Named(NamedKey::Insert), m) if m == shift => Action::Paste,
-        (Key::Character(c), m) if (m == ctrl && c == "=") || (m == ctrl_shift && c == "+") => Action::ZoomIn,
-        (Key::Character(c), m) if m == ctrl && c == "-" => Action::ZoomOut,
-        (Key::Character(c), m) if m == ctrl && c == "0" => Action::ZoomReset,
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "t") => Action::NewTab,
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "w") => Action::ClosePane,
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "e") => Action::SplitRight,
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "o") => Action::SplitDown,
-        (Key::Named(NamedKey::Tab), m) if m == ctrl => Action::NextTab,
-        (Key::Named(NamedKey::Tab), m) if m == ctrl_shift => Action::PrevTab,
-        (Key::Character(c), m) if m == alt && c.len() == 1 && ("1"..="9").contains(&c.as_str()) => {
-            Action::GoToTab(c.parse::<usize>().unwrap() - 1)
+pub struct Entry {
+    pub action: Action,
+    /// What the command palette shows.
+    pub name: String,
+    /// Default keys, like "Ctrl+Shift+T"; alternatives separated by " or ".
+    pub keys: String,
+}
+
+/// Every action, registered once: name for the palette and default keys.
+pub fn actions() -> &'static [Entry] {
+    static ACTIONS: OnceLock<Vec<Entry>> = OnceLock::new();
+    ACTIONS.get_or_init(|| {
+        use Action as A;
+        let mut list: Vec<(Action, String, String)> = [
+            (A::CommandPalette, "Command palette", "Ctrl+Shift+P"),
+            (A::Copy, "Copy", "Ctrl+Shift+C"),
+            (A::Paste, "Paste", "Ctrl+Shift+V or Shift+Insert"),
+            (A::CopyOutput, "Copy last command's output", "Ctrl+Shift+G"),
+            (A::Search, "Search", "Ctrl+Shift+F"),
+            (A::ViMode, "Vi mode", "Ctrl+Shift+Space"),
+            (A::PrevPrompt, "Previous prompt", "Ctrl+Shift+Z"),
+            (A::NextPrompt, "Next prompt", "Ctrl+Shift+X"),
+            (A::NewTab, "New tab", "Ctrl+Shift+T"),
+            (A::SplitRight, "Split right", "Ctrl+Shift+E"),
+            (A::SplitDown, "Split down", "Ctrl+Shift+O"),
+            (A::ClosePane, "Close pane", "Ctrl+Shift+W"),
+            (A::NextTab, "Next tab", "Ctrl+Tab"),
+            (A::PrevTab, "Previous tab", "Ctrl+Shift+Tab"),
+            (A::ScrollPageUp, "Scroll page up", "Shift+PageUp"),
+            (A::ScrollPageDown, "Scroll page down", "Shift+PageDown"),
+            (A::ScrollTop, "Scroll to top", "Ctrl+Shift+Home"),
+            (A::ScrollBottom, "Scroll to bottom", "Ctrl+Shift+End"),
+            (A::ZoomIn, "Bigger font", "Ctrl+= or Ctrl+Shift++"),
+            (A::ZoomOut, "Smaller font", "Ctrl+-"),
+            (A::ZoomReset, "Reset font size", "Ctrl+0"),
+        ]
+        .into_iter()
+        .map(|(a, n, k)| (a, n.to_owned(), k.to_owned()))
+        .collect();
+        for (dir, name) in [(Dir::Left, "Left"), (Dir::Right, "Right"), (Dir::Up, "Up"), (Dir::Down, "Down")] {
+            list.push((A::Focus(dir), format!("Focus pane {}", name.to_lowercase()), format!("Alt+{name}")));
+            list.push((A::Resize(dir), format!("Resize split {}", name.to_lowercase()), format!("Ctrl+Shift+{name}")));
         }
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "f") => Action::Search,
-        (Key::Named(NamedKey::Space), m) if m == ctrl_shift => Action::ViMode,
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "z") => Action::PrevPrompt,
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "x") => Action::NextPrompt,
-        (Key::Character(c), m) if m == ctrl_shift && letter(c, "g") => Action::CopyOutput,
-        (Key::Named(k), m) if m == alt && arrow(k).is_some() => Action::Focus(arrow(k).unwrap()),
-        (Key::Named(k), m) if m == ctrl_shift && arrow(k).is_some() => Action::Resize(arrow(k).unwrap()),
-        _ => return None,
+        for i in 0..9 {
+            list.push((A::GoToTab(i), format!("Go to tab {}", i + 1), format!("Alt+{}", i + 1)));
+        }
+        list.into_iter().map(|(action, name, keys)| Entry { action, name, keys }).collect()
     })
+}
+
+/// The action bound to a key, checked before the key goes to the shell.
+pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
+    actions().iter().find(|e| e.keys.split(" or ").any(|spec| matches(spec, key, mods))).map(|e| e.action)
+}
+
+/// Does a key spec like "Ctrl+Shift+T" describe this key press exactly?
+fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
+    let (prefix, name) = match spec.strip_suffix("++") {
+        Some(prefix) => (prefix, "+"),
+        None => spec.rsplit_once('+').unwrap_or(("", spec)),
+    };
+    let mut want = ModifiersState::empty();
+    for m in prefix.split('+').filter(|m| !m.is_empty()) {
+        want |= match m {
+            "Ctrl" => ModifiersState::CONTROL,
+            "Shift" => ModifiersState::SHIFT,
+            "Alt" => ModifiersState::ALT,
+            _ => return false,
+        };
+    }
+    let named = match name {
+        "PageUp" => NamedKey::PageUp,
+        "PageDown" => NamedKey::PageDown,
+        "Home" => NamedKey::Home,
+        "End" => NamedKey::End,
+        "Insert" => NamedKey::Insert,
+        "Tab" => NamedKey::Tab,
+        "Space" => NamedKey::Space,
+        "Left" => NamedKey::ArrowLeft,
+        "Right" => NamedKey::ArrowRight,
+        "Up" => NamedKey::ArrowUp,
+        "Down" => NamedKey::ArrowDown,
+        _ => return mods == want && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case(name)),
+    };
+    mods == want && *key == Key::Named(named)
 }
 
 /// xterm modifier parameter: 1 + shift|alt<<1|ctrl<<2|super<<3. 1 means "no modifiers".
@@ -287,6 +339,12 @@ mod tests {
         assert_eq!(binding(&Key::Named(NamedKey::Tab), ctrl_shift), Some(Action::PrevTab));
         assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), alt), Some(Action::Focus(Dir::Up)));
         assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), ModifiersState::CONTROL), None);
+        assert_eq!(binding(&ch("+"), ctrl_shift), Some(Action::ZoomIn));
+        assert_eq!(binding(&ch("="), ModifiersState::CONTROL), Some(Action::ZoomIn));
+        assert_eq!(binding(&ch("-"), ModifiersState::CONTROL), Some(Action::ZoomOut));
+        assert_eq!(binding(&Key::Named(NamedKey::Insert), ModifiersState::SHIFT), Some(Action::Paste));
+        assert_eq!(binding(&Key::Named(NamedKey::Space), ctrl_shift), Some(Action::ViMode));
+        assert_eq!(binding(&ch("t"), ModifiersState::CONTROL), None);
     }
 
     #[test]
