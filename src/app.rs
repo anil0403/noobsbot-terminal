@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use alacritty_terminal::event::{Event, WindowSize};
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::Line;
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::Config;
 use alacritty_terminal::term::test::TermSize;
@@ -72,6 +74,11 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::Wakeup => {
+                if std::env::var_os("NOOBSBOT_DUMP").is_some() {
+                    if let Some(term) = &self.term {
+                        dump_grid(&term.lock());
+                    }
+                }
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
@@ -89,5 +96,15 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::RedrawRequested => renderer.render(BG),
             _ => {}
         }
+    }
+}
+
+/// Debug aid: print the visible grid to stdout. Enabled with NOOBSBOT_DUMP=1.
+fn dump_grid(term: &Term) {
+    let grid = term.grid();
+    println!("----- {}x{} -----", grid.columns(), grid.screen_lines());
+    for line in 0..grid.screen_lines() {
+        let row: String = grid[Line(line as i32)][..].iter().map(|cell| cell.c).collect();
+        println!("{}", row.trim_end());
     }
 }
