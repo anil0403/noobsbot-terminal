@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -6,23 +8,24 @@ use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::test::TermSize;
+use alacritty_terminal::term::{ClipboardType, TermMode};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
 use crate::context::{self, Context};
 use crate::font::Font;
 use crate::input::{self, Action, binding, key_bytes, mouse_report, paste_bytes};
+use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::Renderer;
-use crate::term::{Listener, Term, UserEvent};
-use crate::theme::Theme;
+use crate::term::{Listener, PaneId, Term, UserEvent};
+use crate::theme::{self, Fade, Theme};
 
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
@@ -30,6 +33,10 @@ const MULTI_CLICK: Duration = Duration::from_millis(400);
 const CONTEXT_THROTTLE: Duration = Duration::from_millis(200);
 /// Re-check at least this often when a rule depends on the time of day.
 const CONTEXT_CLOCK: Duration = Duration::from_secs(60);
+/// Widest a tab gets, in cells.
+const TAB_CELLS: f32 = 30.0;
+/// Step for keyboard split resizing, as a fraction of the split.
+const RESIZE_STEP: f32 = 0.05;
 
 pub struct App {
     proxy: EventLoopProxy<UserEvent>,
@@ -37,17 +44,28 @@ pub struct App {
     _config_watcher: Option<notify::RecommendedWatcher>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
-    term: Option<Arc<FairMutex<Term>>>,
-    pty: Option<Pty>,
+    panes: HashMap<PaneId, Pane>,
+    tabs: Vec<Tab>,
+    active: usize,
+    next_pane: PaneId,
+    /// Dividers of the active tab, from the last layout.
+    dividers: Vec<Divider>,
+    /// Index into `dividers` of the one being dragged.
+    drag: Option<usize>,
+    cursor_icon: CursorIcon,
+    window_title: String,
     mods: ModifiersState,
     next_blink: Instant,
-    /// Terminal content changed since the last frame.
+    /// Something on screen changed since the last frame.
     dirty: bool,
     last_frame: Instant,
     frame_time: Duration,
     /// Sub-line remainder of touchpad scrolling, in pixels.
     scroll_px: f64,
-    /// Pointer position in viewport cells (col, line).
+    mouse_px: (f32, f32),
+    /// Pane under the pointer; kept while a button is held so drags stay in their pane.
+    mouse_pane: Option<PaneId>,
+    /// Pointer position in that pane's viewport cells (col, line).
     mouse_cell: (usize, usize),
     /// Button held down, for drag reporting.
     mouse_held: Option<u8>,
@@ -60,12 +78,6 @@ pub struct App {
     clipboard: Clipboard,
     /// Font size change from Ctrl+=/Ctrl+-, in px on top of the config size.
     zoom: f32,
-    /// Situation the theme was last chosen for, and the theme's name.
-    context: Context,
-    theme_name: String,
-    last_context_check: Instant,
-    /// A situation check is owed at this time (throttled output, or the clock).
-    context_due: Option<Instant>,
 }
 
 impl App {
@@ -81,14 +93,22 @@ impl App {
             proxy,
             window: None,
             renderer: None,
-            term: None,
-            pty: None,
+            panes: HashMap::new(),
+            tabs: Vec::new(),
+            active: 0,
+            next_pane: 0,
+            dividers: Vec::new(),
+            drag: None,
+            cursor_icon: CursorIcon::Default,
+            window_title: String::new(),
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
             dirty: false,
             last_frame: Instant::now(),
             frame_time: Duration::from_micros(16_667),
             scroll_px: 0.0,
+            mouse_px: (0.0, 0.0),
+            mouse_pane: None,
             mouse_cell: (0, 0),
             mouse_held: None,
             mouse_side: Side::Left,
@@ -97,38 +117,299 @@ impl App {
             clicks: 0,
             clipboard: Clipboard::new(),
             zoom: 0.0,
-            context: Context::default(),
-            theme_name: String::new(),
-            last_context_check: Instant::now(),
-            context_due: None,
         }
     }
 }
 
-impl App {
-    /// Grid point under the pointer (accounts for scrollback offset).
-    fn mouse_point(&self, term: &Term) -> Point {
-        let (col, line) = self.mouse_cell;
-        Point::new(Line(line as i32 - term.grid().display_offset() as i32), Column(col))
-    }
+/// Grid point at a viewport cell (accounts for scrollback offset).
+fn grid_point(term: &Term, (col, line): (usize, usize)) -> Point {
+    Point::new(Line(line as i32 - term.grid().display_offset() as i32), Column(col))
+}
 
-    fn paste(&mut self, primary: bool) {
-        let (Some(text), Some(term), Some(pty)) = (self.clipboard.get(primary), &self.term, self.pty.as_mut()) else { return };
-        let mut term = term.lock();
-        let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
-        term.scroll_display(Scroll::Bottom);
-        drop(term);
-        pty.write(&paste_bytes(&text, bracketed));
-        self.dirty = true;
+fn window_size(font: &Font, width: f32, height: f32) -> WindowSize {
+    WindowSize {
+        num_cols: (width / font.cell_w).max(1.0) as u16,
+        num_lines: (height / font.cell_h).max(1.0) as u16,
+        cell_width: font.cell_w as u16,
+        cell_height: font.cell_h as u16,
     }
 }
 
-fn window_size(font: &Font, width: u32, height: u32) -> WindowSize {
-    WindowSize {
-        num_cols: (width as f32 / font.cell_w).max(1.0) as u16,
-        num_lines: (height as f32 / font.cell_h).max(1.0) as u16,
-        cell_width: font.cell_w as u16,
-        cell_height: font.cell_h as u16,
+/// Palette for the theme name, falling back to `default` for unknown names.
+fn theme_named(config: &Config, name: &str) -> Theme {
+    let themes = config.themes();
+    themes.get(name).cloned().unwrap_or_else(|| {
+        log::warn!("unknown theme {name:?}, using default");
+        themes["default"].clone()
+    })
+}
+
+/// Tell a program that asked (DECSET 1004) whether it has focus.
+fn focus_report(pane: &mut Pane, focused: bool) {
+    if pane.term.lock().mode().contains(TermMode::FOCUS_IN_OUT) {
+        pane.pty.write(if focused { b"\x1b[I" } else { b"\x1b[O" });
+    }
+}
+
+// Panes and tabs.
+impl App {
+    fn focused(&self) -> PaneId {
+        self.tabs[self.active].focused
+    }
+
+    fn focused_pane(&mut self) -> &mut Pane {
+        let id = self.focused();
+        self.panes.get_mut(&id).expect("focused pane exists")
+    }
+
+    /// Pane the mouse acts on.
+    fn mouse_target(&self) -> PaneId {
+        self.mouse_pane.filter(|id| self.panes.contains_key(id)).unwrap_or_else(|| self.focused())
+    }
+
+    fn pane_at(&self, x: f32, y: f32) -> Option<PaneId> {
+        self.tabs[self.active].root.leaves().into_iter().find(|id| self.panes[id].rect.contains(x, y))
+    }
+
+    fn divider_at(&self, x: f32, y: f32) -> Option<usize> {
+        const GRAB: f32 = 3.0;
+        self.dividers.iter().position(|d| {
+            let r = d.rect;
+            Rect { x: r.x - GRAB, y: r.y - GRAB, w: r.w + 2.0 * GRAB, h: r.h + 2.0 * GRAB }.contains(x, y)
+        })
+    }
+
+    /// Height of the tab bar; it only shows with more than one tab.
+    fn bar_h(&self) -> f32 {
+        match &self.renderer {
+            Some(r) if self.tabs.len() > 1 => (r.font.cell_h * 1.4).round(),
+            _ => 0.0,
+        }
+    }
+
+    fn tab_w(&self) -> f32 {
+        let Some(r) = &self.renderer else { return 1.0 };
+        (r.size().0 / self.tabs.len() as f32).min(r.font.cell_w * TAB_CELLS).floor()
+    }
+
+    /// Start a shell in a new pane (not yet placed in any tab).
+    fn spawn_pane(&mut self, cwd: Option<PathBuf>) -> PaneId {
+        let id = self.next_pane;
+        self.next_pane += 1;
+        let renderer = self.renderer.as_ref().expect("renderer exists");
+        let (w, h) = renderer.size();
+        let size = window_size(&renderer.font, w, h);
+        let listener = Listener { proxy: self.proxy.clone(), pane: id };
+        let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
+        let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, listener.clone())));
+        let pty = Pty::spawn(term.clone(), size, listener, &self.config.terminal.shell, cwd);
+        let pane = Pane {
+            term,
+            pty,
+            theme: Fade::new(theme_named(&self.config, &self.config.theme)),
+            theme_name: String::new(),
+            context: Context::default(),
+            title: None,
+            last_context_check: Instant::now(),
+            context_due: None,
+            rect: Rect::default(),
+        };
+        self.panes.insert(id, pane);
+        id
+    }
+
+    /// New panes start where the focused shell is.
+    fn new_cwd(&self) -> Option<PathBuf> {
+        let tab = self.tabs.get(self.active)?;
+        self.panes.get(&tab.focused)?.pty.shell_cwd()
+    }
+
+    fn new_tab(&mut self) {
+        let cwd = self.new_cwd();
+        let id = self.spawn_pane(cwd);
+        let old = self.tabs.get(self.active).map(|t| t.focused);
+        self.tabs.push(Tab { root: Node::Leaf(id), focused: id });
+        self.active = self.tabs.len() - 1;
+        self.mouse_pane = None;
+        self.relayout();
+        self.focus_changed(old);
+        self.check_context(id, true);
+    }
+
+    fn split(&mut self, across: bool) {
+        let cwd = self.new_cwd();
+        let id = self.spawn_pane(cwd);
+        let target = self.focused();
+        self.tabs[self.active].root.split(target, id, across);
+        self.relayout();
+        self.focus(id);
+        self.check_context(id, true);
+    }
+
+    /// Close a pane (its shell exited, or Ctrl+Shift+W). The last pane closes the
+    /// tab, the last tab closes the window.
+    fn close_pane(&mut self, event_loop: &ActiveEventLoop, id: PaneId) {
+        let Some(pane) = self.panes.remove(&id) else { return };
+        // Dropping hangs up the shell and waits for it; a stubborn one mustn't freeze the UI.
+        std::thread::spawn(move || drop(pane));
+        let Some(ti) = self.tabs.iter().position(|t| t.root.contains(id)) else { return };
+        let old = self.focused();
+        let tab = &mut self.tabs[ti];
+        match tab.root.remove(id) {
+            Some(next) if tab.focused == id => tab.focused = next,
+            Some(_) => {}
+            None => {
+                self.tabs.remove(ti);
+                if self.tabs.is_empty() {
+                    return event_loop.exit();
+                }
+                if ti < self.active || self.active == self.tabs.len() {
+                    self.active -= 1;
+                }
+            }
+        }
+        self.relayout();
+        self.focus_changed(Some(old));
+    }
+
+    fn focus(&mut self, id: PaneId) {
+        let old = self.focused();
+        self.tabs[self.active].focused = id;
+        self.focus_changed(Some(old));
+    }
+
+    fn switch_tab(&mut self, i: usize) {
+        if i >= self.tabs.len() || i == self.active {
+            return;
+        }
+        let old = self.focused();
+        self.active = i;
+        self.mouse_pane = None;
+        self.relayout(); // for the new tab's dividers
+        self.focus_changed(Some(old));
+    }
+
+    /// Keyboard focus moved away from `old` (which may be gone by now).
+    fn focus_changed(&mut self, old: Option<PaneId>) {
+        let new = self.focused();
+        if old != Some(new) && self.renderer.as_ref().is_some_and(|r| r.focused) {
+            if let Some(pane) = old.and_then(|id| self.panes.get_mut(&id)) {
+                focus_report(pane, false);
+            }
+            focus_report(self.focused_pane(), true);
+        }
+        if let Some(r) = self.renderer.as_mut() {
+            r.cursor_on = true;
+        }
+        self.next_blink = Instant::now() + BLINK;
+        self.update_title();
+        self.dirty = true;
+    }
+
+    fn update_title(&mut self) {
+        let Some(pane) = self.tabs.get(self.active).and_then(|t| self.panes.get(&t.focused)) else { return };
+        let title = match pane.title() {
+            "" => "noobsbot terminal",
+            t => t,
+        };
+        if title != self.window_title {
+            if let Some(w) = &self.window {
+                w.set_title(title);
+            }
+            self.window_title = title.to_owned();
+        }
+    }
+
+    /// Lay out every tab and fit each pane's grid and PTY to its rect.
+    fn relayout(&mut self) {
+        let bar = self.bar_h();
+        let Some(renderer) = &self.renderer else { return };
+        let (w, h) = renderer.size();
+        let area = Rect { x: 0.0, y: bar, w, h: h - bar };
+        for (i, tab) in self.tabs.iter().enumerate() {
+            let (mut rects, mut dividers) = (Vec::new(), Vec::new());
+            tab.root.layout(area, &mut rects, &mut dividers);
+            if i == self.active {
+                self.dividers = dividers;
+            }
+            for (id, rect) in rects {
+                let Some(pane) = self.panes.get_mut(&id) else { continue };
+                pane.rect = rect;
+                let size = window_size(&renderer.font, rect.w, rect.h);
+                let (cols, lines) = (size.num_cols as usize, size.num_lines as usize);
+                let mut term = pane.term.lock();
+                if (term.columns(), term.screen_lines()) != (cols, lines) {
+                    term.resize(TermSize::new(cols, lines));
+                    drop(term);
+                    pane.pty.resize(size);
+                }
+            }
+        }
+        self.dirty = true;
+    }
+
+    fn active_rects(&self) -> Vec<(PaneId, Rect)> {
+        self.tabs[self.active].root.leaves().into_iter().map(|id| (id, self.panes[&id].rect)).collect()
+    }
+}
+
+impl App {
+    fn paste(&mut self, primary: bool) {
+        let Some(text) = self.clipboard.get(primary) else { return };
+        let pane = self.focused_pane();
+        let mut term = pane.term.lock();
+        let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
+        term.scroll_display(Scroll::Bottom);
+        drop(term);
+        pane.pty.write(&paste_bytes(&text, bracketed));
+        self.dirty = true;
+    }
+
+    fn scroll(&mut self, scroll: Scroll) {
+        self.focused_pane().term.lock().scroll_display(scroll);
+        self.dirty = true;
+    }
+
+    /// Run a bound action. False means it didn't apply and the key goes to the shell.
+    fn run(&mut self, event_loop: &ActiveEventLoop, action: Action) -> bool {
+        match action {
+            Action::ScrollPageUp => self.scroll(Scroll::PageUp),
+            Action::ScrollPageDown => self.scroll(Scroll::PageDown),
+            Action::ScrollTop => self.scroll(Scroll::Top),
+            Action::ScrollBottom => self.scroll(Scroll::Bottom),
+            Action::Copy => {
+                let text = self.focused_pane().term.lock().selection_to_string();
+                if let Some(text) = text {
+                    self.clipboard.set(false, text);
+                }
+            }
+            Action::Paste => self.paste(false),
+            Action::ZoomIn => self.set_zoom(self.zoom + 1.0),
+            Action::ZoomOut => self.set_zoom(self.zoom - 1.0),
+            Action::ZoomReset => self.set_zoom(0.0),
+            Action::NewTab => self.new_tab(),
+            Action::ClosePane => self.close_pane(event_loop, self.focused()),
+            Action::NextTab => self.switch_tab((self.active + 1) % self.tabs.len()),
+            Action::PrevTab => self.switch_tab((self.active + self.tabs.len() - 1) % self.tabs.len()),
+            // With a single tab, Alt+digit stays readline's digit argument.
+            Action::GoToTab(i) if i < self.tabs.len() && self.tabs.len() > 1 => self.switch_tab(i),
+            Action::GoToTab(_) => return false,
+            Action::SplitRight => self.split(true),
+            Action::SplitDown => self.split(false),
+            Action::Focus(dir) => match pane::neighbor(&self.active_rects(), self.focused(), dir) {
+                Some(id) => self.focus(id),
+                None => return false,
+            },
+            Action::Resize(dir) => {
+                let delta = if matches!(dir, Dir::Left | Dir::Up) { -RESIZE_STEP } else { RESIZE_STEP };
+                let id = self.focused();
+                if !self.tabs[self.active].root.resize(id, dir.across(), delta) {
+                    return false;
+                }
+                self.relayout();
+            }
+        }
+        true
     }
 }
 
@@ -143,7 +424,7 @@ impl App {
         let Some(px) = self.window.as_ref().map(|w| self.font_px(w)) else { return };
         let Some(renderer) = self.renderer.as_mut() else { return };
         renderer.set_font(&self.config.font.family, px);
-        self.resize_grid();
+        self.relayout();
     }
 
     fn set_zoom(&mut self, zoom: f32) {
@@ -151,60 +432,40 @@ impl App {
         self.apply_font();
     }
 
-    /// Fit the grid and PTY to the window after the window or the cell size changed.
-    fn resize_grid(&mut self) {
-        let (Some(window), Some(renderer), Some(term), Some(pty)) = (&self.window, &self.renderer, &self.term, self.pty.as_mut()) else { return };
-        let px = window.inner_size();
-        let size = window_size(&renderer.font, px.width, px.height);
-        term.lock().resize(TermSize::new(size.num_cols as usize, size.num_lines as usize));
-        pty.resize(size);
-        self.dirty = true;
-    }
-
-    /// Palette for the theme name, falling back to `default` for unknown names.
-    fn theme(&self, name: &str) -> Theme {
-        let themes = self.config.themes();
-        themes.get(name).cloned().unwrap_or_else(|| {
-            log::warn!("unknown theme {name:?}, using default");
-            themes["default"].clone()
-        })
-    }
-
-    /// Re-detect the situation and switch theme if a different rule now matches.
-    fn check_context(&mut self, force: bool) {
-        let Some(pty) = &self.pty else { return };
-        let ctx = context::detect(pty.fd(), pty.shell_pid());
-        self.last_context_check = Instant::now();
-        self.context_due = self
+    /// Re-detect a pane's situation and switch its theme if a different rule now matches.
+    fn check_context(&mut self, id: PaneId, force: bool) {
+        let Some(pane) = self.panes.get_mut(&id) else { return };
+        let ctx = context::detect(pane.pty.fd(), pane.pty.shell_pid());
+        pane.last_context_check = Instant::now();
+        pane.context_due = self
             .config
             .rules
             .iter()
             .any(|r| r.when.uses_hours())
-            .then(|| self.last_context_check + CONTEXT_CLOCK);
-        if ctx == self.context && !force {
+            .then(|| pane.last_context_check + CONTEXT_CLOCK);
+        if ctx == pane.context && !force {
             return;
         }
         let rule = crate::rules::pick(&self.config.rules, &ctx);
         let name = rule.map_or(self.config.theme.clone(), |r| r.theme.clone());
-        if name != self.theme_name || force {
-            log::info!("theme → {name} ({})", if rule.is_some() { format!("{ctx:?}") } else { "no rule matched".into() });
-            let theme = self.theme(&name);
-            if let Some(renderer) = self.renderer.as_mut() {
-                renderer.set_theme(theme);
-            }
-            self.theme_name = name;
-            self.dirty = true;
+        if name != pane.theme_name || force {
+            log::info!("pane {id}: theme → {name} ({})", if rule.is_some() { format!("{ctx:?}") } else { "no rule matched".into() });
+            pane.theme.set(theme_named(&self.config, &name));
+            pane.theme_name = name;
         }
-        self.context = ctx;
+        pane.context = ctx; // the foreground program is also the tab title
+        self.dirty = true;
+        self.update_title();
     }
 
     /// Output arrived: the foreground program may have changed. Check now or soon.
-    fn context_poke(&mut self) {
-        let due = self.last_context_check + CONTEXT_THROTTLE;
+    fn context_poke(&mut self, id: PaneId) {
+        let Some(pane) = self.panes.get_mut(&id) else { return };
+        let due = pane.last_context_check + CONTEXT_THROTTLE;
         if Instant::now() >= due {
-            self.check_context(false);
-        } else if self.context_due.is_none_or(|d| d > due) {
-            self.context_due = Some(due);
+            self.check_context(id, false);
+        } else if pane.context_due.is_none_or(|d| d > due) {
+            pane.context_due = Some(due);
         }
     }
 
@@ -216,9 +477,11 @@ impl App {
         log::info!("config reloaded");
         let font_changed = config.font != self.config.font;
         self.config = config;
-        let Some(term) = &self.term else { return };
-        term.lock().set_options(self.config.term());
-        self.check_context(true);
+        let ids: Vec<PaneId> = self.panes.keys().copied().collect();
+        for id in ids {
+            self.panes[&id].term.lock().set_options(self.config.term());
+            self.check_context(id, true);
+        }
         if font_changed {
             self.apply_font();
         }
@@ -237,70 +500,66 @@ impl ApplicationHandler<UserEvent> for App {
             self.frame_time = Duration::from_secs_f64(1000.0 / mhz as f64);
         }
         let font = Font::new(&self.config.font.family, self.font_px(&window));
-        let px = window.inner_size();
-        let size = window_size(&font, px.width, px.height);
-
-        let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
-        let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, Listener(self.proxy.clone()))));
-        self.pty = Some(Pty::spawn(term.clone(), size, self.proxy.clone(), &self.config.terminal.shell));
-        self.term = Some(term);
-        self.renderer = Some(Renderer::new(window.clone(), font, self.theme(&self.config.theme)));
+        self.renderer = Some(Renderer::new(window.clone(), font));
         self.window = Some(window);
-        self.check_context(true);
+        self.new_tab();
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        let event = match event {
+        let (id, event) = match event {
             UserEvent::ConfigChanged => return self.reload_config(),
-            UserEvent::Term(event) => event,
+            UserEvent::Term(id, event) => (id, event),
         };
+        if matches!(event, Event::Exit | Event::ChildExit(_)) {
+            return self.close_pane(event_loop, id);
+        }
+        let Some(pane) = self.panes.get_mut(&id) else { return };
         match event {
-            Event::PtyWrite(text) => {
-                if let Some(pty) = self.pty.as_mut() {
-                    pty.write(text.as_bytes());
-                }
-            }
+            Event::PtyWrite(text) => pane.pty.write(text.as_bytes()),
             Event::Title(title) => {
-                if let Some(w) = &self.window {
-                    w.set_title(&title);
-                }
+                pane.title = Some(title);
+                self.update_title();
+                self.dirty = true;
+            }
+            Event::ResetTitle => {
+                pane.title = None;
+                self.update_title();
+                self.dirty = true;
             }
             Event::Wakeup => {
                 if std::env::var_os("NOOBSBOT_DUMP").is_some() {
-                    if let Some(term) = &self.term {
-                        dump_grid(&term.lock());
-                    }
+                    dump_grid(&pane.term.lock());
                 }
                 // Drawn from about_to_wait at most once per refresh, so a flood of output
                 // doesn't make the renderer hog the terminal lock.
-                self.dirty = true;
-                self.context_poke();
+                self.dirty |= self.tabs.get(self.active).is_some_and(|t| t.root.contains(id));
+                self.context_poke(id);
             }
-            Event::ClipboardStore(ty, text) => {
-                self.clipboard.set(ty == alacritty_terminal::term::ClipboardType::Selection, text);
-            }
+            Event::ClipboardStore(ty, text) => self.clipboard.set(ty == ClipboardType::Selection, text),
             Event::ClipboardLoad(ty, format) => {
                 // OSC 52 read; only reaches us if `terminal.clipboard` allows pasting.
-                let text = self.clipboard.get(ty == alacritty_terminal::term::ClipboardType::Selection).unwrap_or_default();
-                if let Some(pty) = self.pty.as_mut() {
-                    pty.write(format(&text).as_bytes());
-                }
+                let text = self.clipboard.get(ty == ClipboardType::Selection).unwrap_or_default();
+                pane.pty.write(format(&text).as_bytes());
             }
-            Event::Exit | Event::ChildExit(_) => event_loop.exit(),
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.tabs.is_empty() {
+            return;
+        }
         let now = Instant::now();
         // First, so a theme switch it causes is drawn below.
-        if self.context_due.is_some_and(|due| now >= due) {
-            self.check_context(false);
+        let due: Vec<PaneId> = self.panes.iter().filter(|(_, p)| p.context_due.is_some_and(|d| now >= d)).map(|(id, _)| *id).collect();
+        for id in due {
+            self.check_context(id, false);
         }
-        let (Some(term), Some(renderer), Some(window)) = (&self.term, self.renderer.as_mut(), &self.window) else { return };
+        let blinking = self.focused_pane().term.lock().cursor_style().blinking;
+        let (Some(renderer), Some(window)) = (self.renderer.as_mut(), &self.window) else { return };
         let mut wake = None;
 
-        if renderer.focused && term.lock().cursor_style().blinking {
+        if renderer.focused && blinking {
             if now >= self.next_blink {
                 renderer.cursor_on = !renderer.cursor_on;
                 self.next_blink = now + BLINK;
@@ -311,7 +570,7 @@ impl ApplicationHandler<UserEvent> for App {
             renderer.cursor_on = true;
             self.dirty = true;
         }
-        if renderer.fading() {
+        if self.panes.values().any(|p| p.theme.fading()) {
             self.dirty = true;
         }
 
@@ -324,76 +583,55 @@ impl ApplicationHandler<UserEvent> for App {
                 wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
             }
         }
-        if let Some(due) = self.context_due {
+        for due in self.panes.values().filter_map(|p| p.context_due) {
             wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
         }
         event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let Some(renderer) = self.renderer.as_mut() else { return };
+        if self.tabs.is_empty() || self.renderer.is_none() {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(px) => {
-                renderer.resize(px.width, px.height);
-                self.resize_grid();
+                self.renderer.as_mut().unwrap().resize(px.width, px.height);
+                self.relayout();
             }
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::Focused(focused) => {
-                renderer.focused = focused;
-                if let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) {
-                    if term.lock().mode().contains(TermMode::FOCUS_IN_OUT) {
-                        pty.write(if focused { b"\x1b[I" } else { b"\x1b[O" });
-                    }
-                }
-                if let Some(w) = &self.window {
-                    w.request_redraw();
-                }
+                self.renderer.as_mut().unwrap().focused = focused;
+                focus_report(self.focused_pane(), focused);
+                self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
-                if let Some(action) = binding(&event.logical_key, self.mods) {
-                    let scroll = match action {
-                        Action::ScrollPageUp => Scroll::PageUp,
-                        Action::ScrollPageDown => Scroll::PageDown,
-                        Action::ScrollTop => Scroll::Top,
-                        Action::ScrollBottom => Scroll::Bottom,
-                        Action::Copy => {
-                            if let Some(text) = term.lock().selection_to_string() {
-                                self.clipboard.set(false, text);
-                            }
-                            return;
-                        }
-                        Action::Paste => return self.paste(false),
-                        Action::ZoomIn => return self.set_zoom(self.zoom + 1.0),
-                        Action::ZoomOut => return self.set_zoom(self.zoom - 1.0),
-                        Action::ZoomReset => return self.set_zoom(0.0),
-                    };
-                    term.lock().scroll_display(scroll);
-                    self.dirty = true;
+                if let Some(action) = binding(&event.logical_key, self.mods)
+                    && self.run(event_loop, action)
+                {
                     return;
                 }
-                let mut term = term.lock();
+                let mods = self.mods;
+                let pane = self.panes.get_mut(&self.tabs[self.active].focused).unwrap();
+                let mut term = pane.term.lock();
                 let app_cursor = term.mode().contains(TermMode::APP_CURSOR);
-                if let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), self.mods, app_cursor) {
-                    if term.grid().display_offset() != 0 {
-                        term.scroll_display(Scroll::Bottom);
-                        self.dirty = true;
-                    }
-                    drop(term);
-                    pty.write(&bytes);
-                    // Keep the cursor solid while typing.
-                    renderer.cursor_on = true;
-                    self.next_blink = Instant::now() + BLINK;
+                let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor) else { return };
+                if term.grid().display_offset() != 0 {
+                    term.scroll_display(Scroll::Bottom);
+                    self.dirty = true;
                 }
+                drop(term);
+                pane.pty.write(&bytes);
+                // Keep the cursor solid while typing.
+                self.renderer.as_mut().unwrap().cursor_on = true;
+                self.next_blink = Instant::now() + BLINK;
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let Some(term) = &self.term else { return };
+                let cell_h = self.renderer.as_ref().unwrap().font.cell_h as f64;
                 let lines = match delta {
                     MouseScrollDelta::LineDelta(_, y) => (y * 3.0) as i32,
                     MouseScrollDelta::PixelDelta(p) => {
                         self.scroll_px += p.y;
-                        let cell_h = renderer.font.cell_h as f64;
                         let lines = (self.scroll_px / cell_h).trunc();
                         self.scroll_px -= lines * cell_h;
                         lines as i32
@@ -402,15 +640,16 @@ impl ApplicationHandler<UserEvent> for App {
                 if lines == 0 {
                     return;
                 }
-                let mut term = term.lock();
+                let (mods, (col, line)) = (self.mods, self.mouse_cell);
+                let pane = self.panes.get_mut(&self.mouse_target()).unwrap();
+                let mut term = pane.term.lock();
                 let mode = *term.mode();
                 if mode.intersects(TermMode::MOUSE_MODE) {
                     let button = if lines > 0 { input::MOUSE_WHEEL_UP } else { input::MOUSE_WHEEL_DOWN };
-                    let (col, line) = self.mouse_cell;
                     drop(term);
-                    if let (Some(bytes), Some(pty)) = (mouse_report(button, true, col, line, self.mods, mode.contains(TermMode::SGR_MOUSE)), self.pty.as_mut()) {
+                    if let Some(bytes) = mouse_report(button, true, col, line, mods, mode.contains(TermMode::SGR_MOUSE)) {
                         for _ in 0..lines.abs() {
-                            pty.write(&bytes);
+                            pane.pty.write(&bytes);
                         }
                     }
                 } else if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) {
@@ -422,30 +661,61 @@ impl ApplicationHandler<UserEvent> for App {
                         (false, false) => b"\x1b[B",
                     };
                     drop(term);
-                    if let Some(pty) = self.pty.as_mut() {
-                        pty.write(&arrow.repeat(lines.unsigned_abs() as usize));
-                    }
+                    pane.pty.write(&arrow.repeat(lines.unsigned_abs() as usize));
                 } else {
                     term.scroll_display(Scroll::Delta(lines));
                     self.dirty = true;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let Some(term) = &self.term else { return };
-                let mut term = term.lock();
-                let (cw, ch) = (renderer.font.cell_w, renderer.font.cell_h);
-                let x = position.x.max(0.0) as f32;
+                let (x, y) = (position.x as f32, position.y as f32);
+                self.mouse_px = (x, y);
+                if let Some(i) = self.drag {
+                    let d = &self.dividers[i];
+                    let ratio = if d.across { (x - d.area.x) / d.area.w } else { (y - d.area.y) / d.area.h };
+                    let path = d.path.clone();
+                    self.tabs[self.active].root.set_ratio(&path, ratio);
+                    return self.relayout();
+                }
+                let icon = match self.divider_at(x, y).map(|i| self.dividers[i].across) {
+                    Some(true) => CursorIcon::ColResize,
+                    Some(false) => CursorIcon::RowResize,
+                    None => CursorIcon::Default,
+                };
+                if icon != self.cursor_icon {
+                    self.cursor_icon = icon;
+                    if let Some(w) = &self.window {
+                        w.set_cursor(icon);
+                    }
+                }
+
+                let id = if self.selecting || self.mouse_held.is_some() {
+                    self.mouse_target()
+                } else {
+                    match self.pane_at(x, y) {
+                        Some(id) => id,
+                        None => return,
+                    }
+                };
+                let same_pane = self.mouse_pane == Some(id);
+                self.mouse_pane = Some(id);
+                let font = &self.renderer.as_ref().unwrap().font;
+                let (cw, ch) = (font.cell_w, font.cell_h);
+                let pane = self.panes.get_mut(&id).unwrap();
+                let r = pane.rect;
+                let mut term = pane.term.lock();
+                let x = (x - r.x).max(0.0);
                 let col = ((x / cw) as usize).min(term.columns() - 1);
-                let line = ((position.y.max(0.0) as f32 / ch) as usize).min(term.screen_lines() - 1);
+                let line = (((y - r.y).max(0.0) / ch) as usize).min(term.screen_lines() - 1);
                 let side = if x - col as f32 * cw > cw / 2.0 { Side::Right } else { Side::Left };
-                if (col, line, side) == (self.mouse_cell.0, self.mouse_cell.1, self.mouse_side) {
+                if same_pane && (col, line, side) == (self.mouse_cell.0, self.mouse_cell.1, self.mouse_side) {
                     return;
                 }
                 self.mouse_side = side;
                 self.mouse_cell = (col, line);
                 if self.selecting {
-                    // ponytail: no auto-scroll when dragging past the window edge yet.
-                    let point = self.mouse_point(&term);
+                    // ponytail: no auto-scroll when dragging past the pane edge yet.
+                    let point = grid_point(&term, self.mouse_cell);
                     if let Some(sel) = term.selection.as_mut() {
                         sel.update(point, side);
                         self.dirty = true;
@@ -458,19 +728,39 @@ impl ApplicationHandler<UserEvent> for App {
                     None if mode.contains(TermMode::MOUSE_MOTION) => Some(input::MOUSE_RELEASE),
                     _ => None,
                 };
-                if let (Some(button), Some(pty)) = (report, self.pty.as_mut()) {
+                if let Some(button) = report {
                     let sgr = mode.contains(TermMode::SGR_MOUSE);
                     if let Some(bytes) = mouse_report(button + input::MOUSE_MOTION, true, col, line, self.mods, sgr) {
-                        pty.write(&bytes);
+                        pane.pty.write(&bytes);
                     }
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
-                let mode = *term.lock().mode();
+                let pressed = state == ElementState::Pressed;
+                let (x, y) = self.mouse_px;
+                if !pressed && button == MouseButton::Left && self.drag.take().is_some() {
+                    return;
+                }
+                if pressed && y < self.bar_h() {
+                    if button == MouseButton::Left {
+                        self.switch_tab((x / self.tab_w()) as usize);
+                    }
+                    return;
+                }
+                if pressed && button == MouseButton::Left
+                    && let Some(i) = self.divider_at(x, y)
+                {
+                    self.drag = Some(i);
+                    return;
+                }
+                let id = self.mouse_target();
+                if pressed && id != self.focused() {
+                    self.focus(id);
+                }
+                let pane = self.panes.get_mut(&id).unwrap();
+                let mode = *pane.term.lock().mode();
                 // Shift bypasses mouse reporting so you can still select text in vim/tmux.
                 if !mode.intersects(TermMode::MOUSE_MODE) || self.mods.shift_key() {
-                    let pressed = state == ElementState::Pressed;
                     match (button, pressed) {
                         (MouseButton::Left, true) => {
                             let now = Instant::now();
@@ -481,15 +771,15 @@ impl ApplicationHandler<UserEvent> for App {
                                 2 => SelectionType::Semantic,
                                 _ => SelectionType::Lines,
                             };
-                            let mut term = term.lock();
-                            let point = self.mouse_point(&term);
+                            let mut term = pane.term.lock();
+                            let point = grid_point(&term, self.mouse_cell);
                             term.selection = Some(Selection::new(ty, point, self.mouse_side));
                             self.selecting = true;
                             self.dirty = true;
                         }
                         (MouseButton::Left, false) if self.selecting => {
                             self.selecting = false;
-                            let mut term = term.lock();
+                            let mut term = pane.term.lock();
                             match term.selection_to_string().filter(|s| !s.is_empty()) {
                                 Some(text) => self.clipboard.set(true, text),
                                 None => term.selection = None,
@@ -507,21 +797,56 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Right => input::MOUSE_RIGHT,
                     _ => return,
                 };
-                let pressed = state == ElementState::Pressed;
                 self.mouse_held = pressed.then_some(code);
                 let (col, line) = self.mouse_cell;
                 if let Some(bytes) = mouse_report(code, pressed, col, line, self.mods, mode.contains(TermMode::SGR_MOUSE)) {
-                    pty.write(&bytes);
+                    pane.pty.write(&bytes);
                 }
             }
             WindowEvent::RedrawRequested => {
                 self.last_frame = Instant::now();
-                if let Some(term) = &self.term {
-                    renderer.render(&term.lock());
+                let (bar_h, tab_w) = (self.bar_h(), self.tab_w());
+                let renderer = self.renderer.as_mut().unwrap();
+                let tab = &self.tabs[self.active];
+                let mut focused_theme = None;
+                for id in tab.root.leaves() {
+                    let pane = self.panes.get_mut(&id).unwrap();
+                    let theme = pane.theme.frame();
+                    renderer.pane(&pane.term.lock(), &theme, pane.rect, id == tab.focused);
+                    if id == tab.focused {
+                        focused_theme = Some(theme);
+                    }
                 }
+                let theme = focused_theme.expect("focused pane is in its tab");
+                for d in &self.dividers {
+                    renderer.fill(d.rect, theme::to_f32(theme.selection));
+                }
+                if self.tabs.len() > 1 {
+                    draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w);
+                }
+                renderer.finish(theme.bg);
             }
             _ => {}
         }
+    }
+}
+
+/// One tab per slot, each tinted with its focused pane's situation theme, so a
+/// red production tab stays visible while you work in another one.
+fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32) {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let backdrop = theme::dim(theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg));
+    r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, theme::to_f32(backdrop));
+    for (i, tab) in tabs.iter().enumerate() {
+        let pane = panes.get_mut(&tab.focused).unwrap();
+        let theme = pane.theme.frame();
+        let x = i as f32 * tab_w;
+        let (bg, fg) = if i == active { (theme.bg, theme.fg) } else { (theme::dim(theme.bg), theme::dim(theme.fg)) };
+        r.fill(Rect { x, y: 0.0, w: tab_w - 1.0, h: bar_h }, theme::to_f32(bg));
+        r.fill(Rect { x, y: 0.0, w: tab_w - 1.0, h: 2.0 }, theme::to_f32(theme.cursor));
+        let fit = ((tab_w - cw) / cw).max(0.0) as usize;
+        let label: String = format!("{} {}", i + 1, pane.title()).chars().take(fit).collect();
+        r.text(x + (cw / 2.0).round(), ((bar_h - ch) / 2.0).round() + 1.0, &label, theme::to_f32(fg));
     }
 }
 
