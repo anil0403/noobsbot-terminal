@@ -10,6 +10,7 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{ClipboardType, TermMode};
+use alacritty_terminal::tty;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
@@ -26,6 +27,7 @@ use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::search::Search;
+use crate::shell;
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
 
@@ -212,13 +214,13 @@ impl App {
         let listener = Listener { proxy: self.proxy.clone(), pane: id };
         let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
         let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, listener.clone())));
-        let command = command.unwrap_or_else(|| {
-            let shell = &self.config.terminal.shell;
-            if shell.is_empty() { Vec::new() } else { vec![shell.clone()] }
-        });
-        let pty = Pty::spawn(term.clone(), size, listener, &command, cwd)
-            .map_err(|e| log::error!("can't start {command:?}: {e}"))
-            .ok()?;
+        let (shell, env) = match command {
+            Some(cmd) => (cmd.split_first().map(|(program, args)| tty::Shell::new(program.clone(), args.to_vec())), HashMap::new()),
+            None => shell::login(&self.config.terminal.shell),
+        };
+        let what = format!("{shell:?}");
+        let options = tty::Options { shell, working_directory: cwd, env, ..Default::default() };
+        let pty = Pty::spawn(term.clone(), size, listener, &options).map_err(|e| log::error!("can't start {what}: {e}")).ok()?;
         let pane = Pane {
             term,
             pty,
