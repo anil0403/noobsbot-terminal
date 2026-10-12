@@ -11,6 +11,7 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{ClipboardType, TermMode};
 use alacritty_terminal::tty;
+use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
@@ -933,6 +934,9 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let Some(pane) = self.panes.get_mut(&id) else { return };
         match event {
+            // alacritty_terminal answers DA1 as a VT102; say VT220 with sixel (4) and color (22),
+            // so image tools find our graphics (kitten icat also ignores answers as short as `?6c`).
+            Event::PtyWrite(text) if text == "\x1b[?6c" => pane.pty.write(b"\x1b[?62;4;22c"),
             Event::PtyWrite(text) => pane.pty.write(text.as_bytes()),
             Event::Title(title) => {
                 pane.title = Some(title);
@@ -952,6 +956,22 @@ impl ApplicationHandler<UserEvent> for App {
                 // doesn't make the renderer hog the terminal lock.
                 self.dirty |= self.tabs.get(self.active).is_some_and(|t| t.root.contains(id));
                 self.context_poke(id);
+            }
+            // CSI 14 t; image tools ask to size pictures.
+            Event::TextAreaSizeRequest(reply) => {
+                let Some(r) = &self.renderer else { return };
+                pane.pty.write(reply(window_size(&r.font, pane.rect.w, pane.rect.h)).as_bytes());
+            }
+            // OSC 4/10/11/12 queries: 0..=255 palette, then foreground, background, cursor.
+            Event::ColorRequest(index, reply) => {
+                let color = match index {
+                    0..=255 => Color::Indexed(index as u8),
+                    256 => Color::Named(NamedColor::Foreground),
+                    257 => Color::Named(NamedColor::Background),
+                    _ => Color::Named(NamedColor::Cursor),
+                };
+                let rgb = pane.theme.target().resolve(color, pane.term.lock().colors());
+                pane.pty.write(reply(rgb).as_bytes());
             }
             Event::ClipboardStore(ty, text) => self.clipboard.set(ty == ClipboardType::Selection, text),
             Event::ClipboardLoad(ty, format) => {
@@ -1263,7 +1283,7 @@ impl ApplicationHandler<UserEvent> for App {
                         None => (Vec::new(), None),
                     };
                     let link = self.hover.as_ref().filter(|(p, _)| *p == id).map(|(_, l)| &l.range);
-                    renderer.pane(&term, &theme, pane.rect, id == tab.focused, &matches, current.as_ref(), link);
+                    renderer.pane(&term, &pane.images.lock().unwrap(), &theme, pane.rect, id == tab.focused, &matches, current.as_ref(), link);
                     let vi = term.mode().contains(TermMode::VI);
                     let gutter = gutter(&term, &pane.blocks, &theme);
                     drop(term);

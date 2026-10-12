@@ -1,6 +1,7 @@
 mod atlas;
 pub mod crt;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use alacritty_terminal::term::cell::Flags;
@@ -10,6 +11,7 @@ use bytemuck::{Pod, Zeroable};
 use winit::window::Window;
 
 use crate::font::Font;
+use crate::images::{self, Images};
 use crate::pane::Rect;
 use crate::term::Term;
 use crate::theme::{self, Theme};
@@ -47,6 +49,11 @@ pub struct Renderer {
     pub focused: bool,
     /// Blink phase; the app toggles it on a timer.
     pub cursor_on: bool,
+    /// Inline images: GPU copies by picture uid, and this frame's draws
+    /// (position among `quads`, picture, quad).
+    textures: HashMap<u64, Texture>,
+    image_draws: Vec<(usize, u64, Instance)>,
+    image_sampler: wgpu::Sampler,
     crt: Crt,
     /// CRT effect strengths when CRT mode is on.
     pub crt_params: Option<crt::Params>,
@@ -124,7 +131,15 @@ impl Renderer {
         let instances = instance_buffer(&device, 4096);
 
         let crt = Crt::new(&device, config.format);
+        let image_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         Self {
+            textures: HashMap::new(),
+            image_draws: Vec::new(),
+            image_sampler,
             surface,
             device,
             queue,
@@ -197,6 +212,16 @@ impl Renderer {
             _ => return,
         };
 
+        // Image quads go after the cells', drawn in between them in order below.
+        let draws = std::mem::take(&mut self.image_draws);
+        let mut instances = instances;
+        let cells = instances.len();
+        instances.extend(draws.iter().map(|d| d.2));
+        for (_, uid, _) in &draws {
+            let t = &self.textures[uid];
+            let globals = [self.config.width as f32, self.config.height as f32, t.size.0, t.size.1];
+            self.queue.write_buffer(&t.globals, 0, bytemuck::cast_slice(&globals));
+        }
         let bytes: &[u8] = bytemuck::cast_slice(&instances);
         if bytes.len() as u64 > self.instances.size() {
             self.instances = instance_buffer(&self.device, instances.len().next_power_of_two());
@@ -225,8 +250,19 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.instances.slice(..));
-            pass.draw(0..4, 0..instances.len() as u32);
+            let mut done = 0;
+            for (i, (at, uid, _)) in draws.iter().enumerate() {
+                pass.draw(0..4, done as u32..*at as u32);
+                done = *at;
+                pass.set_bind_group(0, &self.textures[uid].bind_group, &[]);
+                let n = (cells + i) as u32;
+                pass.draw(0..4, n..n + 1);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+            }
+            pass.draw(0..4, done as u32..cells as u32);
         }
+        // Keep only the textures still on screen; scrolling back re-uploads.
+        self.textures.retain(|_, t| std::mem::take(&mut t.used));
         if let Some(params) = self.crt_params {
             let screen = [self.config.width as f32, self.config.height as f32];
             let time = self.started.elapsed().as_secs_f32();
@@ -234,14 +270,18 @@ impl Renderer {
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
+        instances.clear();
         self.quads = instances;
-        self.quads.clear();
+        self.image_draws = draws;
+        self.image_draws.clear();
     }
 
     /// Queue one pane's grid: backgrounds and lines first, glyphs on top.
     /// Only the `active` pane gets a live cursor; the others are dimmed.
     /// Search `matches` are highlighted, `current` most strongly; the hovered `link` is underlined.
-    pub fn pane(&mut self, term: &Term, theme: &Theme, rect: Rect, active: bool, matches: &[Match], current: Option<&Match>, link: Option<&Match>) {
+    /// Images tagged on the grid are drawn over their cells.
+    #[allow(clippy::too_many_arguments)]
+    pub fn pane(&mut self, term: &Term, images: &Images, theme: &Theme, rect: Rect, active: bool, matches: &[Match], current: Option<&Match>, link: Option<&Match>) {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
         let (ox, oy) = (rect.x, rect.y);
         self.fill(rect, theme::to_f32(theme.bg));
@@ -258,8 +298,16 @@ impl Renderer {
         let cursor_color = theme::to_f32(theme.cursor);
         let mut quads = std::mem::take(&mut self.quads);
         let mut glyphs = Vec::new();
+        // (screen line, placement, image row) for image cells on screen.
+        let mut tags: Vec<(i32, u64, usize)> = Vec::new();
         for cell in content.display_iter {
             let flags = cell.flags;
+            if let Some((n, row)) = images::tag(cell.cell) {
+                let t = (cell.point.line.0 + offset, n, row);
+                if !tags.contains(&t) {
+                    tags.push(t);
+                }
+            }
             if flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
                 continue;
             }
@@ -326,11 +374,89 @@ impl Renderer {
         // Cursor outlines were pushed into `glyphs` so they land on top of the text.
         // ponytail: every underline style draws as a single line; undercurl etc. when someone misses them.
         quads.append(&mut glyphs);
+        self.quads = quads;
+        for (line, n, row) in tags {
+            let Some(placed) = images.placed.get(&n) else { continue };
+            // This row's slice of the image, clipped to the pane's right edge.
+            let (dw, dh) = (placed.cols * cw, placed.rows * ch);
+            let top = row as f32 * ch;
+            let slice_h = (dh - top).min(ch);
+            let x = ox + placed.col as f32 * cw;
+            let vis_w = dw.min(rect.x + rect.w - x);
+            if slice_h <= 0.0 || vis_w <= 0.0 {
+                continue;
+            }
+            let pic = &placed.pic;
+            let (pw, ph) = (pic.w as f32, pic.h as f32);
+            self.upload(pic);
+            let quad = Instance {
+                pos: [x, oy + line as f32 * ch],
+                size: [vis_w, slice_h],
+                uv: [0.0, top / dh * ph, vis_w / dw * pw, slice_h / dh * ph],
+                color: [1.0; 4],
+                kind: COLOR,
+            };
+            self.image_draws.push((self.quads.len(), pic.uid, quad));
+        }
+        let mut quads = std::mem::take(&mut self.quads);
         if !active {
             let [r, g, b, _] = theme::to_f32(theme.bg);
             quads.push(solid(rect.x, rect.y, rect.w, rect.h, [r, g, b, 0.4]));
         }
         self.quads = quads;
+    }
+}
+
+struct Texture {
+    /// The cells shader's globals, with this image's size in place of the atlas's.
+    globals: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    size: (f32, f32),
+    /// Drawn this frame.
+    used: bool,
+}
+
+impl Renderer {
+    /// Put a picture on the GPU unless it's there already.
+    fn upload(&mut self, pic: &images::Pic) {
+        if let Some(t) = self.textures.get_mut(&pic.uid) {
+            t.used = true;
+            return;
+        }
+        let size = wgpu::Extent3d { width: pic.w, height: pic.h, depth_or_array_layers: 1 };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("image"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            texture.as_image_copy(),
+            &pic.rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(pic.w * 4), rows_per_image: None },
+            size,
+        );
+        let view = texture.create_view(&Default::default());
+        let globals = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("image globals"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.image_sampler) },
+            ],
+        });
+        self.textures.insert(pic.uid, Texture { globals, bind_group, size: (pic.w as f32, pic.h as f32), used: true });
     }
 }
 

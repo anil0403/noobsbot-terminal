@@ -320,7 +320,8 @@ fn load(keys: &Keys, payload: &[u8]) -> Result<Arc<Pic>, String> {
 fn read_file(medium: char, name: &str, keys: &Keys) -> Result<Vec<u8>, String> {
     use std::io::{Read, Seek, SeekFrom};
     let path = match medium {
-        's' if !name.contains('/') => std::path::PathBuf::from("/dev/shm").join(name.trim_start_matches('/')),
+        // POSIX shared memory names are `/name`.
+        's' if !name.trim_start_matches('/').contains('/') => std::path::PathBuf::from("/dev/shm").join(name.trim_start_matches('/')),
         's' => return Err("EINVAL:bad shm name".into()),
         _ => std::path::PathBuf::from(name),
     };
@@ -523,6 +524,32 @@ mod tests {
         // Bad sizes and data are refused, quietly if asked.
         assert!(im.kitty(b"a=T,f=24,s=2,v=2,i=1;AAAA", 0).1.unwrap().contains("EINVAL"));
         assert!(im.kitty(b"a=T,f=24,s=2,v=2,i=1,q=2;AAAA", 0).1.is_none());
+    }
+
+    #[test]
+    fn tags_cells_and_evicts() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::index::Column;
+        use alacritty_terminal::term::Config;
+        use alacritty_terminal::term::test::TermSize;
+        use alacritty_terminal::vte::ansi::Processor;
+        let mut term = Term::new(Config::default(), &TermSize::new(10, 5), VoidListener);
+        let mut parser: Processor = Processor::new();
+        parser.advance(&mut term, b"ab");
+        let mut im = images();
+        // 30x30 px = 3x2 cells at 10x20, placed at column 2.
+        let place = im.add(Pic::new(30, 30, vec![0; 3600]).unwrap(), None, 2, 3.0, 1.5);
+        let cells = room(&term, &place);
+        parser.advance(&mut term, cells.as_bytes());
+        let tags = |term: &Term<VoidListener>, line| (0..10).filter_map(|c| tag(&term.grid()[Line(line)][Column(c)]).map(|t| (c, t))).collect::<Vec<_>>();
+        assert_eq!(tags(&term, 0), [(2, (1, 0)), (3, (1, 0)), (4, (1, 0))]);
+        assert_eq!(tags(&term, 1), [(2, (1, 1)), (3, (1, 1)), (4, (1, 1))]);
+        assert_eq!(term.grid().cursor.point, alacritty_terminal::index::Point::new(Line(1), Column(5)));
+        im.evict(&term);
+        assert_eq!(im.placed.len(), 1);
+        parser.advance(&mut term, b"\x1b[2J\x1b[3J");
+        im.evict(&term);
+        assert!(im.placed.is_empty());
     }
 
     #[test]

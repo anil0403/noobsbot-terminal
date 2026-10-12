@@ -208,6 +208,11 @@ impl Fade {
         }
     }
 
+    /// The theme being faded to.
+    pub fn target(&self) -> &Theme {
+        &self.target
+    }
+
     /// Needs more frames to finish fading.
     pub fn fading(&self) -> bool {
         self.pending
