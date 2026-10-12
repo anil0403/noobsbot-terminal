@@ -1,6 +1,7 @@
 mod atlas;
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::CursorShape;
@@ -11,6 +12,8 @@ use crate::font::Font;
 use crate::term::Term;
 use crate::theme::{self, Theme};
 use atlas::Atlas;
+
+const FADE: Duration = Duration::from_millis(150);
 
 const SOLID: u32 = 0;
 const MASK: u32 = 1;
@@ -37,7 +40,12 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     atlas: Atlas,
     pub font: Font,
-    pub theme: Theme,
+    /// Target palette; `fade_from` blends into it over FADE after a switch.
+    theme: Theme,
+    fade_from: Theme,
+    fade_start: Instant,
+    /// The fully faded-in theme hasn't been drawn yet.
+    fade_pending: bool,
     pub focused: bool,
     /// Blink phase; the app toggles it on a timer.
     pub cursor_on: bool,
@@ -113,7 +121,26 @@ impl Renderer {
         });
         let instances = instance_buffer(&device, 4096);
 
-        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme, focused: true, cursor_on: true }
+        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, fade_from: theme.clone(), theme, fade_start: Instant::now(), fade_pending: false, focused: true, cursor_on: true }
+    }
+
+    /// Switch palette with a short cross-fade.
+    pub fn set_theme(&mut self, theme: Theme) {
+        if theme != self.theme {
+            self.fade_from = self.shown_theme();
+            self.fade_start = Instant::now();
+            self.theme = theme;
+            self.fade_pending = true;
+        }
+    }
+
+    pub fn fading(&self) -> bool {
+        self.fade_pending
+    }
+
+    fn shown_theme(&self) -> Theme {
+        let t = self.fade_start.elapsed().as_secs_f32() / FADE.as_secs_f32();
+        if t >= 1.0 { self.theme.clone() } else { self.fade_from.mix(&self.theme, t) }
     }
 
     pub fn set_font(&mut self, family: &str, size: f32) {
@@ -128,8 +155,10 @@ impl Renderer {
     }
 
     pub fn render(&mut self, term: &Term) {
-        let instances = self.build(term);
-        let [r, g, b, _] = theme::to_f32(self.theme.bg);
+        let theme = self.shown_theme();
+        self.fade_pending = self.fade_start.elapsed() < FADE;
+        let instances = self.build(term, &theme);
+        let [r, g, b, _] = theme::to_f32(theme.bg);
         let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
 
         let frame = match self.surface.get_current_texture() {
@@ -171,7 +200,7 @@ impl Renderer {
     }
 
     /// Turn the visible grid into quads: backgrounds and lines first, glyphs on top.
-    fn build(&mut self, term: &Term) -> Vec<Instance> {
+    fn build(&mut self, term: &Term, theme: &Theme) -> Vec<Instance> {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
         let line_h = (ch / 14.0).round().max(1.0);
         let content = term.renderable_content();
@@ -183,7 +212,7 @@ impl Renderer {
             _ if !self.focused => CursorShape::HollowBlock,
             shape => shape,
         };
-        let cursor_color = theme::to_f32(self.theme.cursor);
+        let cursor_color = theme::to_f32(theme.cursor);
         let mut quads = Vec::new();
         let mut glyphs = Vec::new();
         let solid = |x: f32, y: f32, w: f32, h: f32, color: [f32; 4]| Instance {
@@ -202,8 +231,8 @@ impl Renderer {
             let y = (cell.point.line.0 + offset) as f32 * ch;
             let w = if flags.contains(Flags::WIDE_CHAR) { cw * 2.0 } else { cw };
 
-            let mut fg = self.theme.resolve(cell.fg, content.colors);
-            let mut bg = self.theme.resolve(cell.bg, content.colors);
+            let mut fg = theme.resolve(cell.fg, content.colors);
+            let mut bg = theme.resolve(cell.bg, content.colors);
             if flags.contains(Flags::DIM) {
                 fg = theme::dim(fg);
             }
@@ -211,11 +240,11 @@ impl Renderer {
                 std::mem::swap(&mut fg, &mut bg);
             }
             if content.selection.is_some_and(|s| s.contains(cell.point)) {
-                bg = self.theme.selection;
+                bg = theme.selection;
             }
             if cell.point == cursor.point {
                 match cursor_shape {
-                    CursorShape::Block => (fg, bg) = (self.theme.bg, self.theme.cursor),
+                    CursorShape::Block => (fg, bg) = (theme.bg, theme.cursor),
                     CursorShape::Beam => glyphs.push(solid(x, y, line_h * 2.0, ch, cursor_color)),
                     CursorShape::Underline => glyphs.push(solid(x, y + ch - line_h * 2.0, w, line_h * 2.0, cursor_color)),
                     CursorShape::HollowBlock => {
@@ -227,7 +256,7 @@ impl Renderer {
                     CursorShape::Hidden => {}
                 }
             }
-            if bg != self.theme.bg {
+            if bg != theme.bg {
                 quads.push(solid(x, y, w, ch, theme::to_f32(bg)));
             }
             if flags.contains(Flags::HIDDEN) {

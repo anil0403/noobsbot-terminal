@@ -165,6 +165,23 @@ impl Theme {
     }
 }
 
+impl Theme {
+    /// Blend from `self` (t = 0) to `other` (t = 1).
+    pub fn mix(&self, other: &Theme, t: f32) -> Theme {
+        let m = |a: Rgb, b: Rgb| {
+            let ch = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+            Rgb { r: ch(a.r, b.r), g: ch(a.g, b.g), b: ch(a.b, b.b) }
+        };
+        Theme {
+            fg: m(self.fg, other.fg),
+            bg: m(self.bg, other.bg),
+            cursor: m(self.cursor, other.cursor),
+            selection: m(self.selection, other.selection),
+            ansi: std::array::from_fn(|i| m(self.ansi[i], other.ansi[i])),
+        }
+    }
+}
+
 pub fn dim(c: Rgb) -> Rgb {
     Rgb { r: (c.r as u16 * 2 / 3) as u8, g: (c.g as u16 * 2 / 3) as u8, b: (c.b as u16 * 2 / 3) as u8 }
 }
@@ -188,6 +205,15 @@ mod tests {
         assert_eq!(t.resolve(Color::Named(NamedColor::Red), &none), t.ansi[1]);
         assert_eq!(t.resolve(Color::Named(NamedColor::Background), &none), t.bg);
         assert_eq!(t.resolve(Color::Named(NamedColor::DimRed), &none), dim(t.ansi[1]));
+    }
+
+    #[test]
+    fn mixes_themes() {
+        let (a, mut b) = (Theme::default(), Theme::default());
+        b.bg = rgb(0xffffff);
+        assert_eq!(a.mix(&b, 0.0), a);
+        assert_eq!(a.mix(&b, 1.0), b);
+        assert_eq!(a.mix(&b, 0.5).bg, Rgb { r: 0x89, g: 0x89, b: 0x8b });
     }
 
     #[test]

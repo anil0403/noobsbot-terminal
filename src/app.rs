@@ -190,7 +190,7 @@ impl App {
             log::info!("theme → {name} ({})", if rule.is_some() { format!("{ctx:?}") } else { "no rule matched".into() });
             let theme = self.theme(&name);
             if let Some(renderer) = self.renderer.as_mut() {
-                renderer.theme = theme;
+                renderer.set_theme(theme);
             }
             self.theme_name = name;
             self.dirty = true;
@@ -309,6 +309,9 @@ impl ApplicationHandler<UserEvent> for App {
             wake = Some(self.next_blink);
         } else if !renderer.cursor_on {
             renderer.cursor_on = true;
+            self.dirty = true;
+        }
+        if renderer.fading() {
             self.dirty = true;
         }
 
