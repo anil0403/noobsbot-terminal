@@ -8,6 +8,7 @@ use winit::window::Window;
 
 use crate::font::Font;
 use crate::term::Term;
+use crate::theme::{self, Theme};
 use atlas::Atlas;
 
 const SOLID: u32 = 0;
@@ -35,6 +36,7 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     atlas: Atlas,
     pub font: Font,
+    pub theme: Theme,
 }
 
 impl Renderer {
@@ -107,7 +109,7 @@ impl Renderer {
         });
         let instances = instance_buffer(&device, 4096);
 
-        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font }
+        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme: Theme::default() }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -116,8 +118,10 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn render(&mut self, term: &Term, bg: wgpu::Color) {
+    pub fn render(&mut self, term: &Term) {
         let instances = self.build(term);
+        let [r, g, b, _] = theme::to_f32(self.theme.bg);
+        let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
@@ -157,31 +161,68 @@ impl Renderer {
         self.queue.present(frame);
     }
 
-    /// Turn the visible grid into quads: backgrounds first, glyphs on top.
+    /// Turn the visible grid into quads: backgrounds and lines first, glyphs on top.
     fn build(&mut self, term: &Term) -> Vec<Instance> {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
+        let line_h = (ch / 14.0).round().max(1.0);
         let content = term.renderable_content();
         let offset = content.display_offset as i32;
+        let mut quads = Vec::new();
         let mut glyphs = Vec::new();
+        let solid = |x: f32, y: f32, w: f32, h: f32, color: [f32; 4]| Instance {
+            pos: [x, y],
+            size: [w, h],
+            uv: [0.0; 4],
+            color,
+            kind: SOLID,
+        };
         for cell in content.display_iter {
-            if cell.c == ' ' || cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+            let flags = cell.flags;
+            if flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
                 continue;
             }
-            let bold = cell.flags.contains(Flags::BOLD);
-            let italic = cell.flags.contains(Flags::ITALIC);
+            let x = cell.point.column.0 as f32 * cw;
+            let y = (cell.point.line.0 + offset) as f32 * ch;
+            let w = if flags.contains(Flags::WIDE_CHAR) { cw * 2.0 } else { cw };
+
+            let mut fg = self.theme.resolve(cell.fg, content.colors);
+            let mut bg = self.theme.resolve(cell.bg, content.colors);
+            if flags.contains(Flags::DIM) {
+                fg = theme::dim(fg);
+            }
+            if flags.contains(Flags::INVERSE) {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+            if bg != self.theme.bg {
+                quads.push(solid(x, y, w, ch, theme::to_f32(bg)));
+            }
+            if flags.contains(Flags::HIDDEN) {
+                continue;
+            }
+            let fg = theme::to_f32(fg);
+            if flags.intersects(Flags::ALL_UNDERLINES) {
+                quads.push(solid(x, y + baseline + line_h, w, line_h, fg));
+            }
+            if flags.contains(Flags::STRIKEOUT) {
+                quads.push(solid(x, y + baseline - (baseline / 3.0).round(), w, line_h, fg));
+            }
+            if cell.c == ' ' {
+                continue;
+            }
+            let bold = flags.contains(Flags::BOLD);
+            let italic = flags.contains(Flags::ITALIC);
             let Some(e) = self.atlas.get(&self.queue, &mut self.font, cell.c, bold, italic) else { continue };
-            let x = cell.point.column.0 as f32 * cw + e.left;
-            let y = (cell.point.line.0 + offset) as f32 * ch + baseline - e.top;
             glyphs.push(Instance {
-                pos: [x, y],
+                pos: [x + e.left, y + baseline - e.top],
                 size: [e.rect[2], e.rect[3]],
                 uv: e.rect,
-                color: [0.85, 0.87, 0.9, 1.0],
+                color: fg,
                 kind: if e.color { COLOR } else { MASK },
             });
         }
-        let _ = SOLID; // backgrounds arrive with colors
-        glyphs
+        // ponytail: every underline style draws as a single line; undercurl etc. when someone misses them.
+        quads.append(&mut glyphs);
+        quads
     }
 }
 

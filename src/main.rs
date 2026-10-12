@@ -4,6 +4,7 @@ mod input;
 mod pty;
 mod render;
 mod term;
+mod theme;
 
 use winit::event_loop::EventLoop;
 

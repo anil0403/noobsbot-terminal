@@ -18,7 +18,6 @@ use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::term::{Listener, Term};
 
-const BG: wgpu::Color = wgpu::Color { r: 0.07, g: 0.07, b: 0.09, a: 1.0 };
 // ponytail: hardcoded until the config file lands in M3.
 const FONT_FAMILY: &str = "JetBrainsMono Nerd Font Mono";
 const FONT_SIZE: f32 = 15.0;
@@ -116,7 +115,7 @@ impl ApplicationHandler<Event> for App {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(term) = &self.term {
-                    renderer.render(&term.lock(), BG);
+                    renderer.render(&term.lock());
                 }
             }
             _ => {}
