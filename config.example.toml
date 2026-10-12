@@ -1,4 +1,4 @@
-# Noobsbot config — ~/.config/noobsbot/config.toml
+# noobsbot terminal config — ~/.config/noobsbot/config.toml
 # Saved changes apply immediately (except `shell`, which applies to new windows).
 
 # Theme used when no situation rule matches (see [themes] and [[rules]] below).
