@@ -3,13 +3,14 @@ mod atlas;
 use std::sync::Arc;
 
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::vte::ansi::CursorShape;
+use alacritty_terminal::vte::ansi::{CursorShape, Rgb};
 use bytemuck::{Pod, Zeroable};
 use winit::window::Window;
 
 use crate::font::Font;
+use crate::pane::Rect;
 use crate::term::Term;
-use crate::theme::{self, Fade, Theme};
+use crate::theme::{self, Theme};
 use atlas::Atlas;
 
 const SOLID: u32 = 0;
@@ -37,14 +38,16 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     atlas: Atlas,
     pub font: Font,
-    theme: Fade,
+    /// Quads for the frame being built.
+    quads: Vec<Instance>,
+    /// The window has keyboard focus.
     pub focused: bool,
     /// Blink phase; the app toggles it on a timer.
     pub cursor_on: bool,
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>, font: Font, theme: Theme) -> Self {
+    pub fn new(window: Arc<Window>, font: Font) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let size = window.inner_size();
         let surface = instance.create_surface(window).expect("create surface");
@@ -113,16 +116,7 @@ impl Renderer {
         });
         let instances = instance_buffer(&device, 4096);
 
-        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, theme: Fade::new(theme), focused: true, cursor_on: true }
-    }
-
-    /// Switch palette with a short cross-fade.
-    pub fn set_theme(&mut self, theme: Theme) {
-        self.theme.set(theme);
-    }
-
-    pub fn fading(&self) -> bool {
-        self.theme.fading()
+        Self { surface, device, queue, config, pipeline, globals, bind_group, instances, atlas, font, quads: Vec::new(), focused: true, cursor_on: true }
     }
 
     pub fn set_font(&mut self, family: &str, size: f32) {
@@ -136,10 +130,37 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn render(&mut self, term: &Term) {
-        let theme = self.theme.frame();
-        let instances = self.build(term, &theme);
-        let [r, g, b, _] = theme::to_f32(theme.bg);
+    pub fn size(&self) -> (f32, f32) {
+        (self.config.width as f32, self.config.height as f32)
+    }
+
+    pub fn fill(&mut self, r: Rect, color: [f32; 4]) {
+        self.quads.push(solid(r.x, r.y, r.w, r.h, color));
+    }
+
+    /// One line of UI text (tab titles); returns the x where it ends.
+    pub fn text(&mut self, mut x: f32, y: f32, text: &str, color: [f32; 4]) -> f32 {
+        for c in text.chars() {
+            if c != ' ' {
+                if let Some(e) = self.atlas.get(&self.queue, &mut self.font, c, false, false) {
+                    self.quads.push(Instance {
+                        pos: [x + e.left, y + self.font.baseline - e.top],
+                        size: [e.rect[2], e.rect[3]],
+                        uv: e.rect,
+                        color,
+                        kind: if e.color { COLOR } else { MASK },
+                    });
+                }
+            }
+            x += self.font.cell_w;
+        }
+        x
+    }
+
+    /// Draw everything queued since the last frame on a `bg`-cleared window.
+    pub fn finish(&mut self, bg: Rgb) {
+        let instances = std::mem::take(&mut self.quads);
+        let [r, g, b, _] = theme::to_f32(bg);
         let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
 
         let frame = match self.surface.get_current_texture() {
@@ -178,38 +199,36 @@ impl Renderer {
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
+        self.quads = instances;
+        self.quads.clear();
     }
 
-    /// Turn the visible grid into quads: backgrounds and lines first, glyphs on top.
-    fn build(&mut self, term: &Term, theme: &Theme) -> Vec<Instance> {
+    /// Queue one pane's grid: backgrounds and lines first, glyphs on top.
+    /// Only the `active` pane gets a live cursor; the others are dimmed.
+    pub fn pane(&mut self, term: &Term, theme: &Theme, rect: Rect, active: bool) {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
+        let (ox, oy) = (rect.x, rect.y);
+        self.fill(rect, theme::to_f32(theme.bg));
         let line_h = (ch / 14.0).round().max(1.0);
         let content = term.renderable_content();
         let offset = content.display_offset as i32;
         let cursor = content.cursor;
         let cursor_shape = match cursor.shape {
-            _ if !self.cursor_on => CursorShape::Hidden,
             CursorShape::Hidden => CursorShape::Hidden,
-            _ if !self.focused => CursorShape::HollowBlock,
+            _ if !active || !self.focused => CursorShape::HollowBlock,
+            _ if !self.cursor_on => CursorShape::Hidden,
             shape => shape,
         };
         let cursor_color = theme::to_f32(theme.cursor);
-        let mut quads = Vec::new();
+        let mut quads = std::mem::take(&mut self.quads);
         let mut glyphs = Vec::new();
-        let solid = |x: f32, y: f32, w: f32, h: f32, color: [f32; 4]| Instance {
-            pos: [x, y],
-            size: [w, h],
-            uv: [0.0; 4],
-            color,
-            kind: SOLID,
-        };
         for cell in content.display_iter {
             let flags = cell.flags;
             if flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
                 continue;
             }
-            let x = cell.point.column.0 as f32 * cw;
-            let y = (cell.point.line.0 + offset) as f32 * ch;
+            let x = ox + cell.point.column.0 as f32 * cw;
+            let y = oy + (cell.point.line.0 + offset) as f32 * ch;
             let w = if flags.contains(Flags::WIDE_CHAR) { cw * 2.0 } else { cw };
 
             let mut fg = theme.resolve(cell.fg, content.colors);
@@ -267,8 +286,16 @@ impl Renderer {
         // Cursor outlines were pushed into `glyphs` so they land on top of the text.
         // ponytail: every underline style draws as a single line; undercurl etc. when someone misses them.
         quads.append(&mut glyphs);
-        quads
+        if !active {
+            let [r, g, b, _] = theme::to_f32(theme.bg);
+            quads.push(solid(rect.x, rect.y, rect.w, rect.h, [r, g, b, 0.4]));
+        }
+        self.quads = quads;
     }
+}
+
+fn solid(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Instance {
+    Instance { pos: [x, y], size: [w, h], uv: [0.0; 4], color, kind: SOLID }
 }
 
 fn instance_buffer(device: &wgpu::Device, count: usize) -> wgpu::Buffer {
