@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
 
@@ -8,9 +9,8 @@ use alacritty_terminal::event::{Event, OnResize, WindowSize};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::Processor;
-use winit::event_loop::EventLoopProxy;
 
-use crate::term::{Term, UserEvent};
+use crate::term::{Listener, Term, UserEvent};
 
 pub struct Pty {
     // Dropping this hangs up the shell.
@@ -19,9 +19,11 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, proxy: EventLoopProxy<UserEvent>, shell: &str) -> Self {
+    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, listener: Listener, shell: &str, cwd: Option<PathBuf>) -> Self {
+        let Listener { proxy, pane } = listener;
         let options = tty::Options {
             shell: (!shell.is_empty()).then(|| tty::Shell::new(shell.to_owned(), Vec::new())),
+            working_directory: cwd,
             ..Default::default()
         };
         let pty = tty::new(&options, size, 0).expect("spawn shell");
@@ -46,9 +48,9 @@ impl Pty {
                         Ok(n) => n,
                     };
                     parser.advance(&mut *term.lock(), &buf[..n]);
-                    let _ = proxy.send_event(UserEvent::Term(Event::Wakeup));
+                    let _ = proxy.send_event(UserEvent::Term(pane, Event::Wakeup));
                 }
-                let _ = proxy.send_event(UserEvent::Term(Event::Exit));
+                let _ = proxy.send_event(UserEvent::Term(pane, Event::Exit));
             })
             .expect("spawn reader thread");
 
@@ -78,6 +80,11 @@ impl Pty {
 
     pub fn shell_pid(&self) -> u32 {
         self.pty.child().id()
+    }
+
+    /// The shell's working directory, for opening a new pane next to it.
+    pub fn shell_cwd(&self) -> Option<PathBuf> {
+        std::fs::read_link(format!("/proc/{}/cwd", self.shell_pid())).ok()
     }
 
     pub fn resize(&mut self, size: WindowSize) {
