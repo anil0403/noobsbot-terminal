@@ -1,5 +1,6 @@
 //! Watches the PTY byte stream for escape codes alacritty_terminal ignores:
-//! OSC 133 (prompt and command marks from shell integration) and OSC 7 (cwd).
+//! OSC 133 (prompt and command marks from shell integration), OSC 7 (cwd),
+//! and images: kitty graphics (APC `G`) and sixel (DCS `q`).
 
 use std::path::PathBuf;
 
@@ -10,14 +11,21 @@ pub enum Mark {
     CommandStart,
     CommandEnd(Option<i32>),
     Cwd(PathBuf),
+    /// Kitty graphics command: everything after the `G`.
+    Graphics(Vec<u8>),
+    /// Sixel image: parameters, `q`, data.
+    Sixel(Vec<u8>),
 }
 
 /// Longest OSC we bother to collect; longer ones aren't ours.
 const MAX: usize = 4096;
+/// Longest image sequence we collect.
+const MAX_IMAGE: usize = 64 << 20;
 
 #[derive(Default)]
 pub struct Tap {
     state: State,
+    kind: Kind,
     osc: Vec<u8>,
 }
 
@@ -26,9 +34,18 @@ enum State {
     #[default]
     Ground,
     Esc,
+    Str,
+    /// ESC inside a string ends it; a following `\` belongs to it too.
+    StrEnd,
+}
+
+/// Which kind of string sequence is being collected.
+#[derive(Default, Clone, Copy, PartialEq)]
+enum Kind {
+    #[default]
     Osc,
-    /// ESC inside an OSC ends it; a following `\` belongs to it too.
-    OscEnd,
+    Apc,
+    Dcs,
 }
 
 impl Tap {
@@ -36,7 +53,7 @@ impl Tap {
     /// the caller can feed the parser up to there before acting on it.
     pub fn scan(&mut self, bytes: &[u8], out: &mut Vec<(usize, Mark)>) {
         for (i, &b) in bytes.iter().enumerate() {
-            if self.state == State::OscEnd {
+            if self.state == State::StrEnd {
                 self.state = State::Esc;
                 if b == b'\\' {
                     self.finish(i + 1, out);
@@ -46,20 +63,26 @@ impl Tap {
                 self.finish(i, out);
             }
             self.state = match (self.state, b) {
-                (State::Osc, 0x07) => {
+                (State::Str, 0x07) if self.kind == Kind::Osc => {
                     self.finish(i + 1, out);
                     State::Ground
                 }
-                (State::Osc, 0x1b) => State::OscEnd,
-                (State::Osc, _) => {
-                    if self.osc.len() <= MAX {
+                (State::Str, 0x1b) => State::StrEnd,
+                (State::Str, _) => {
+                    let max = if self.kind == Kind::Osc { MAX } else { MAX_IMAGE };
+                    if self.osc.len() <= max {
                         self.osc.push(b);
                     }
-                    State::Osc
+                    State::Str
                 }
-                (State::Esc, b']') => {
+                (State::Esc, b']' | b'_' | b'P') => {
                     self.osc.clear();
-                    State::Osc
+                    self.kind = match b {
+                        b']' => Kind::Osc,
+                        b'_' => Kind::Apc,
+                        _ => Kind::Dcs,
+                    };
+                    State::Str
                 }
                 (_, 0x1b) => State::Esc,
                 _ => State::Ground,
@@ -68,10 +91,20 @@ impl Tap {
     }
 
     fn finish(&mut self, end: usize, out: &mut Vec<(usize, Mark)>) {
-        if let Some(mark) = parse(&self.osc) {
+        let s = std::mem::take(&mut self.osc);
+        let mark = match self.kind {
+            _ if s.len() > MAX_IMAGE => None,
+            Kind::Osc => parse(&s),
+            Kind::Apc => s.strip_prefix(b"G").map(|g| Mark::Graphics(g.to_vec())),
+            // `ESC P 0;1;0 q data`: digits and `;`, then `q`.
+            Kind::Dcs => {
+                let q = s.iter().position(|&b| !(b.is_ascii_digit() || b == b';'));
+                (q.map(|q| s[q]) == Some(b'q')).then(|| Mark::Sixel(s))
+            }
+        };
+        if let Some(mark) = mark {
             out.push((end, mark));
         }
-        self.osc.clear();
     }
 }
 
@@ -155,5 +188,14 @@ mod tests {
         assert_eq!(cwd("\x1b]7;file://h/home/a%20b%2Fc\x1b\\"), Some(Mark::Cwd("/home/a b/c".into())));
         assert_eq!(cwd("\x1b]0;title\x07"), None);
         assert_eq!(cwd("\x1b]7;bogus\x07"), None);
+    }
+
+    #[test]
+    fn images() {
+        assert_eq!(scan(&[b"a\x1b_Ga=T,f=100;AAAA\x1b\\b"]), vec![(20, Mark::Graphics(b"a=T,f=100;AAAA".to_vec()))]);
+        assert_eq!(scan(&[b"\x1bP0;1;0q#0~-\x1b\\"]), vec![(14, Mark::Sixel(b"0;1;0q#0~-".to_vec()))]);
+        // BEL doesn't end these, and other DCS/APC aren't ours.
+        assert_eq!(scan(&[b"\x1b_Gq=1\x07;x\x1b\\"]), vec![(11, Mark::Graphics(b"q=1\x07;x".to_vec()))]);
+        assert_eq!(scan(&[b"\x1bP=1s\x1b\\\x1b_X\x1b\\"]), vec![]);
     }
 }
