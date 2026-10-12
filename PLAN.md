@@ -17,7 +17,7 @@ Target machine first: Arch Linux, X11, Cinnamon. Wayland later through winit.
 | PTY | `alacritty_terminal::tty` | Spawns shell on a pseudo-terminal |
 | Config | `serde` + `toml`, `notify` | TOML file, hot reload |
 | Clipboard | `arboard` | X11/Wayland clipboard |
-| Desktop notifications | `notify-rust` | Long-command-finished alerts |
+| Desktop notifications | `notify-send` (libnotify CLI) | Long-command-finished alerts, no D-Bus crate needed |
 | Global hotkey (Quake mode) | `global-hotkey` | Works on X11 |
 | Logging | `log` + `env_logger` | `RUST_LOG=debug` |
 
@@ -184,14 +184,22 @@ commit.
 3. Ctrl+click: URL → `xdg-open`; path → `$EDITOR +line path` in a split,
    resolved against the pane's cwd (`/proc` for now, OSC 7 once M8 lands).
 
-### M8 — Shell integration + command blocks
-1. `shell/noobsbot.{bash,zsh,fish}` emitting OSC 133 A/B/C/D and OSC 7;
-   auto-injected via `--rcfile`/`ZDOTDIR` so users don't edit dotfiles.
-2. `blocks.rs`: record prompt/output ranges per command with exit code + duration.
-3. Gutter marks per block (green/red), jump prev/next command (Ctrl+Shift+↑/↓).
-4. Copy last command's output; collapse/expand a block.
-5. Notification via notify-rust when a command > 10 s finishes and the window
-   isn't focused.
+### M8 — Shell integration + command blocks ✅
+1. `shell/noobsbot.bash`, `shell/zsh/` emitting OSC 133 A/B/C/D and OSC 7;
+   auto-injected via `--rcfile`/`ZDOTDIR` so users don't edit dotfiles. Fish
+   ≥ 4 emits both itself, so it needs nothing. (zsh script untested: no zsh on
+   the dev machine.)
+2. `tap.rs` scans the PTY stream; on 133;A the reader injects a hidden OSC 8
+   hyperlink (`id=noobsbot-prompt-<n>`) that stays open until 133;B, so prompt
+   cells carry their number through scrolling and reflow. `blocks.rs` finds
+   blocks from those tags and keeps exit code + duration per prompt number.
+3. Gutter marks per block (green/red, yellow while running), jump prev/next
+   command with Ctrl+Shift+Z/X (Ctrl+Shift+↑/↓ already resize splits).
+4. Copy last command's output (Ctrl+Shift+G). ~~Collapse/expand a block~~ —
+   skipped: hiding grid rows breaks the 1:1 screen↔grid mapping that mouse,
+   selection and vi mode rely on; jump + copy cover the use.
+5. `notify-send` when a command ≥ 10 s finishes and the window isn't focused.
+6. Exit-code red border flash (moved here from M4).
 
 ### M9 — Command palette
 1. Every action registered once in an `Action` enum with a name + default key.
