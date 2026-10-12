@@ -1,4 +1,4 @@
-# noobsbot terminal — build plan
+# Noobsbot — build plan
 
 GPU-rendered Linux terminal emulator in Rust. Easy to use, with color palettes
 that switch automatically based on the situation (SSH, root, git branch, time,
@@ -254,7 +254,7 @@ commit.
    fails. bash/zsh integration makes `ssh` send `xterm-256color`. Also sets
    `TERM_PROGRAM=noobsbot`.
 2. Throughput, `time cat` of 155 MB (3M lines) in a 1100x640 window, release
-   build: noobsbot 1.9 s, kitty 2.5 s. Alacritty isn't installed here, so kitty
+   build: Noobsbot 1.9 s, kitty 2.5 s. Alacritty isn't installed here, so kitty
    stood in. Input latency not measured (needs a camera or hardware probe).
    Found and fixed on the way: Ctrl+hover crashed after a split shrank the
    pane under the pointer.

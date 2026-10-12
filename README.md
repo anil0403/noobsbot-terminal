@@ -1,4 +1,4 @@
-# noobsbot terminal
+# Noobsbot
 
 A GPU-rendered terminal emulator for Linux, written in Rust. Easy to use, fast,
 and it changes its color palette to match the situation: red when you SSH into
@@ -29,10 +29,10 @@ install -Dm755 target/release/noobsbot ~/.local/bin/noobsbot
 install -Dm644 extra/noobsbot.desktop ~/.local/share/applications/noobsbot.desktop
 ```
 
-`~/.local/bin` must be on your `PATH`. "noobsbot terminal" then shows up in
+`~/.local/bin` must be on your `PATH`. "Noobsbot" then shows up in
 your desktop's app menu.
 
-Programs inside see `TERM=noobsbot` (on first start noobsbot compiles its
+Programs inside see `TERM=noobsbot` (on first start Noobsbot compiles its
 terminfo into `~/.terminfo` if `tic` is around; otherwise TERM stays
 `alacritty` or `xterm-256color`). Other machines don't know `noobsbot`, so in
 bash and zsh `ssh` sends `TERM=xterm-256color` instead; fish users may want

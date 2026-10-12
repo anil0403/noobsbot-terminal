@@ -378,7 +378,7 @@ impl App {
     fn update_title(&mut self) {
         let Some(pane) = self.tabs.get(self.active).and_then(|t| self.panes.get(&t.focused)) else { return };
         let title = match pane.title() {
-            "" => "noobsbot terminal",
+            "" => "Noobsbot",
             t => t,
         };
         if title != self.window_title {
@@ -607,7 +607,7 @@ impl App {
 /// Desktop notification, without waiting for it.
 fn notify(summary: String, body: String) {
     std::thread::spawn(move || {
-        if let Err(e) = std::process::Command::new("notify-send").args(["-a", "noobsbot", &summary, &body]).status() {
+        if let Err(e) = std::process::Command::new("notify-send").args(["-a", "Noobsbot", &summary, &body]).status() {
             log::warn!("notify-send: {e}");
         }
     });
@@ -897,7 +897,7 @@ impl ApplicationHandler<UserEvent> for App {
         if self.window.is_some() {
             return;
         }
-        let mut attrs = Window::default_attributes().with_title("noobsbot terminal");
+        let mut attrs = Window::default_attributes().with_title("Noobsbot");
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.

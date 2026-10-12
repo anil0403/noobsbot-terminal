@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=noobsbot terminal
+Name=Noobsbot
 GenericName=Terminal
 Comment=GPU-rendered terminal with situation-aware color palettes
 Exec=noobsbot
