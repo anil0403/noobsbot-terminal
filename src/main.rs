@@ -1,4 +1,5 @@
 mod app;
+mod blocks;
 mod clipboard;
 mod config;
 mod context;

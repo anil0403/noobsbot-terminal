@@ -10,7 +10,11 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::Processor;
 
+use crate::tap::{Mark, Tap};
 use crate::term::{Listener, Term, UserEvent};
+
+/// Hyperlink id prefix (and URI) marking prompt cells; the id ends in the prompt's number.
+pub const PROMPT_TAG: &str = "noobsbot-prompt-"; // no `:`, it separates OSC 8 params
 
 pub struct Pty {
     // Dropping this hangs up the shell.
@@ -37,12 +41,36 @@ impl Pty {
             .spawn(move || {
                 let mut parser: Processor = Processor::new();
                 let mut buf = vec![0u8; 64 * 1024];
+                let mut tap = Tap::default();
+                let mut marks = Vec::new();
+                let mut prompt = 0;
                 loop {
                     let n = match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break, // EIO once the shell exits
                         Ok(n) => n,
                     };
-                    parser.advance(&mut *term.lock(), &buf[..n]);
+                    tap.scan(&buf[..n], &mut marks);
+                    let mut term = term.lock();
+                    let mut done = 0;
+                    for (end, mark) in marks.drain(..) {
+                        parser.advance(&mut *term, &buf[done..end]);
+                        done = end;
+                        match mark {
+                            // Tag the prompt's cells with a hidden hyperlink: the tag moves
+                            // with the text through scrolling and reflow, and is gone when
+                            // the text is, so blocks can be found on the grid later.
+                            Mark::PromptStart => {
+                                prompt += 1;
+                                parser.advance(&mut *term, format!("\x1b]8;id={PROMPT_TAG}{prompt};{PROMPT_TAG}\x1b\\").as_bytes());
+                            }
+                            Mark::PromptEnd => parser.advance(&mut *term, b"\x1b]8;;\x1b\\"),
+                            mark => {
+                                let _ = proxy.send_event(UserEvent::Shell(pane, prompt, mark));
+                            }
+                        }
+                    }
+                    parser.advance(&mut *term, &buf[done..n]);
+                    drop(term);
                     let _ = proxy.send_event(UserEvent::Term(pane, Event::Wakeup));
                 }
                 let _ = proxy.send_event(UserEvent::Term(pane, Event::Exit));

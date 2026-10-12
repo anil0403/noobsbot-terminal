@@ -17,6 +17,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
+use crate::blocks::{self, Blocks};
 use crate::clipboard::Clipboard;
 use crate::config::{self, Config};
 use crate::context::{self, Context};
@@ -27,6 +28,7 @@ use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::search::Search;
+use crate::tap::Mark;
 use crate::shell;
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
@@ -41,6 +43,10 @@ const CONTEXT_CLOCK: Duration = Duration::from_secs(60);
 const TAB_CELLS: f32 = 30.0;
 /// Step for keyboard split resizing, as a fraction of the split.
 const RESIZE_STEP: f32 = 0.05;
+/// A command running at least this long notifies when it ends while the window is unfocused.
+const NOTIFY_AFTER: Duration = Duration::from_secs(10);
+/// Red border after a failed command.
+const FLASH: Duration = Duration::from_millis(400);
 
 pub struct App {
     proxy: EventLoopProxy<UserEvent>,
@@ -231,6 +237,9 @@ impl App {
             last_context_check: Instant::now(),
             context_due: None,
             rect: Rect::default(),
+            blocks: Blocks::default(),
+            cwd: None,
+            failed_at: None,
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -239,7 +248,7 @@ impl App {
     /// New panes start where the focused shell is.
     fn new_cwd(&self) -> Option<PathBuf> {
         let tab = self.tabs.get(self.active)?;
-        self.panes.get(&tab.focused)?.pty.shell_cwd()
+        self.panes.get(&tab.focused)?.cwd()
     }
 
     fn new_tab(&mut self) {
@@ -383,7 +392,7 @@ impl App {
         let hover = match id {
             Some(id) if self.mods.control_key() && !self.selecting && self.drag.is_none() => {
                 let pane = &self.panes[&id];
-                let cwd = pane.pty.shell_cwd();
+                let cwd = pane.cwd();
                 let term = pane.term.lock();
                 let point = grid_point(&term, self.mouse_cell);
                 self.hints.at(&term, point, cwd.as_deref()).map(|link| (id, link))
@@ -485,6 +494,14 @@ impl App {
                     self.dirty = true;
                 }
             }
+            Action::PrevPrompt => return self.jump(true),
+            Action::NextPrompt => return self.jump(false),
+            Action::CopyOutput => {
+                let text = blocks::last_output(&self.focused_pane().term.lock());
+                if let Some(text) = text.filter(|t| !t.is_empty()) {
+                    self.clipboard.set(false, text);
+                }
+            }
             Action::Resize(dir) => {
                 let delta = if matches!(dir, Dir::Left | Dir::Up) { -RESIZE_STEP } else { RESIZE_STEP };
                 let id = self.focused();
@@ -495,6 +512,65 @@ impl App {
             }
         }
         true
+    }
+}
+
+// Shell integration.
+impl App {
+    fn shell_mark(&mut self, id: PaneId, prompt: u64, mark: Mark) {
+        let window_focused = self.renderer.as_ref().is_some_and(|r| r.focused);
+        let Some(pane) = self.panes.get_mut(&id) else { return };
+        self.dirty = true;
+        if let Mark::Cwd(path) = mark {
+            pane.cwd = Some(path);
+            return;
+        }
+        let Some((code, took)) = pane.blocks.mark(prompt, &mark) else { return };
+        if code.is_some_and(|c| c != 0) {
+            pane.failed_at = Some(Instant::now());
+        }
+        if took >= NOTIFY_AFTER && !window_focused {
+            let cmd = blocks::command_text(&pane.term.lock(), prompt).unwrap_or_else(|| "Command".into());
+            let status = match code {
+                Some(0) => "done".to_owned(),
+                Some(c) => format!("failed ({c})"),
+                None => "finished".to_owned(),
+            };
+            notify(format!("{cmd} {status}"), format!("after {}", human(took)));
+        }
+    }
+
+    /// Scroll so the previous (`up`) or next prompt is at the top.
+    fn jump(&mut self, up: bool) -> bool {
+        let mut term = self.focused_pane().term.lock();
+        let offset = term.grid().display_offset() as i32;
+        let top = Line(-offset);
+        let prompts = blocks::prompts(&term);
+        let target = if up { prompts.iter().rev().find(|(l, _)| *l < top) } else { prompts.iter().find(|(l, _)| *l > top) };
+        let Some(&(line, _)) = target else { return false };
+        let wanted = (-line.0).clamp(0, term.history_size() as i32);
+        term.scroll_display(Scroll::Delta(wanted - offset));
+        drop(term);
+        self.dirty = true;
+        true
+    }
+}
+
+/// Desktop notification, without waiting for it.
+fn notify(summary: String, body: String) {
+    std::thread::spawn(move || {
+        if let Err(e) = std::process::Command::new("notify-send").args(["-a", "noobsbot", &summary, &body]).status() {
+            log::warn!("notify-send: {e}");
+        }
+    });
+}
+
+/// 75 s → "1m 15s".
+fn human(d: Duration) -> String {
+    match d.as_secs() {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m {}s", s / 60, s % 60),
+        s => format!("{}h {}m", s / 3600, s / 60 % 60),
     }
 }
 
@@ -700,6 +776,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         let (id, event) = match event {
             UserEvent::ConfigChanged => return self.reload_config(),
+            UserEvent::Shell(id, prompt, mark) => return self.shell_mark(id, prompt, mark),
             UserEvent::Term(id, event) => (id, event),
         };
         if matches!(event, Event::Exit | Event::ChildExit(_)) {
@@ -762,7 +839,7 @@ impl ApplicationHandler<UserEvent> for App {
             renderer.cursor_on = true;
             self.dirty = true;
         }
-        if self.panes.values().any(|p| p.theme.fading()) {
+        if self.panes.values().any(|p| p.theme.fading() || p.failed_at.is_some()) {
             self.dirty = true;
         }
 
@@ -1031,8 +1108,14 @@ impl ApplicationHandler<UserEvent> for App {
                     let link = self.hover.as_ref().filter(|(p, _)| *p == id).map(|(_, l)| &l.range);
                     renderer.pane(&term, &theme, pane.rect, id == tab.focused, &matches, current.as_ref(), link);
                     let vi = term.mode().contains(TermMode::VI);
+                    let gutter = gutter(&term, &pane.blocks, &theme);
                     drop(term);
-                    draw_pane_ui(renderer, pane.rect, &theme, vi, self.search.as_ref().filter(|s| s.pane == id && s.editing));
+                    let flash = pane.failed_at.map(|t| 1.0 - t.elapsed().as_secs_f32() / FLASH.as_secs_f32()).filter(|&a| a > 0.0);
+                    if flash.is_none() {
+                        pane.failed_at = None;
+                    }
+                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash };
+                    draw_pane_ui(renderer, pane.rect, &theme, ui);
                     if id == tab.focused {
                         focused_theme = Some(theme);
                     }
@@ -1051,9 +1134,49 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// Vi mode badge (top right) and the search bar (bottom row) over a pane.
-fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, vi: bool, search: Option<&Search>) {
+/// Colored marks for the prompts on screen: (viewport line, color) for
+/// commands that ran or are running at that prompt.
+fn gutter(term: &Term, blocks: &Blocks, theme: &Theme) -> Vec<(usize, [f32; 4])> {
+    let offset = term.grid().display_offset() as i32;
+    (0..term.screen_lines())
+        .filter_map(|i| {
+            let cmd = blocks.get(blocks::prompt_at(term, Line(i as i32 - offset))?)?;
+            let color = match cmd.done {
+                None => theme.ansi[3],
+                Some((Some(0), _)) => theme.ansi[2],
+                Some(_) => theme.ansi[1],
+            };
+            Some((i, theme::to_f32(color)))
+        })
+        .collect()
+}
+
+struct PaneUi<'a> {
+    vi: bool,
+    search: Option<&'a Search>,
+    gutter: Vec<(usize, [f32; 4])>,
+    /// Failed-command border, fading from 1 to 0.
+    flash: Option<f32>,
+}
+
+/// Prompt marks (left edge), failure flash (border), vi mode badge (top right)
+/// and the search bar (bottom row) over a pane.
+fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, ui: PaneUi) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let bar = (cw / 4.0).round().max(2.0);
+    for (line, color) in ui.gutter {
+        r.fill(Rect { x: rect.x, y: rect.y + line as f32 * ch, w: bar, h: ch }, color);
+    }
+    if let Some(a) = ui.flash {
+        let [red, g, b, _] = theme::to_f32(theme.ansi[1]);
+        let c = [red, g, b, a];
+        let w = bar;
+        r.fill(Rect { x: rect.x, y: rect.y, w: rect.w, h: w }, c);
+        r.fill(Rect { x: rect.x, y: rect.y + rect.h - w, w: rect.w, h: w }, c);
+        r.fill(Rect { x: rect.x, y: rect.y, w, h: rect.h }, c);
+        r.fill(Rect { x: rect.x + rect.w - w, y: rect.y, w, h: rect.h }, c);
+    }
+    let (vi, search) = (ui.vi, ui.search);
     if vi {
         let w = cw * 4.0;
         r.fill(Rect { x: rect.x + rect.w - w, y: rect.y, w, h: ch }, theme::to_f32(theme.cursor));

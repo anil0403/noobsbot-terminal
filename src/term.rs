@@ -1,11 +1,16 @@
 use alacritty_terminal::event::{Event, EventListener};
 use winit::event_loop::EventLoopProxy;
 
+use crate::tap::Mark;
+
 pub type PaneId = u64;
 
 /// Everything that wakes the winit loop from another thread.
 pub enum UserEvent {
     Term(PaneId, Event),
+    /// Shell integration mark (not prompt start/end), with the number of the
+    /// prompt it belongs to.
+    Shell(PaneId, u64, Mark),
     ConfigChanged,
 }
 

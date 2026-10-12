@@ -1,10 +1,12 @@
 //! Tabs hold a tree of splits; the leaves are panes.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use alacritty_terminal::sync::FairMutex;
 
+use crate::blocks::Blocks;
 use crate::context::Context;
 use crate::pty::Pty;
 use crate::term::{PaneId, Term};
@@ -26,11 +28,22 @@ pub struct Pane {
     /// A situation check is owed at this time (throttled output, or the clock).
     pub context_due: Option<Instant>,
     pub rect: Rect,
+    pub blocks: Blocks,
+    /// Reported by the shell (OSC 7).
+    pub cwd: Option<PathBuf>,
+    /// When the last command failed, for the red border flash.
+    pub failed_at: Option<Instant>,
 }
 
 impl Pane {
     pub fn title(&self) -> &str {
         self.title.as_deref().unwrap_or(&self.context.process)
+    }
+
+    /// The shell's directory: what it reported if that exists here (not over
+    /// ssh), else what /proc says.
+    pub fn cwd(&self) -> Option<PathBuf> {
+        self.cwd.clone().filter(|p| p.is_dir()).or_else(|| self.pty.shell_cwd())
     }
 }
 

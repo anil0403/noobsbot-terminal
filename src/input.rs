@@ -28,6 +28,11 @@ pub enum Action {
     Resize(Dir),
     Search,
     ViMode,
+    /// Scroll to the previous / next command's prompt.
+    PrevPrompt,
+    NextPrompt,
+    /// Copy the last command's output.
+    CopyOutput,
 }
 
 /// Keys while vi mode is on.
@@ -143,6 +148,9 @@ pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
         }
         (Key::Character(c), m) if m == ctrl_shift && letter(c, "f") => Action::Search,
         (Key::Named(NamedKey::Space), m) if m == ctrl_shift => Action::ViMode,
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "z") => Action::PrevPrompt,
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "x") => Action::NextPrompt,
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "g") => Action::CopyOutput,
         (Key::Named(k), m) if m == alt && arrow(k).is_some() => Action::Focus(arrow(k).unwrap()),
         (Key::Named(k), m) if m == ctrl_shift && arrow(k).is_some() => Action::Resize(arrow(k).unwrap()),
         _ => return None,
