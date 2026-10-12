@@ -30,12 +30,11 @@ pub struct App {
     term: Option<Arc<FairMutex<Term>>>,
     pty: Option<Pty>,
     mods: ModifiersState,
-    font: Option<Font>,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<Event>) -> Self {
-        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty(), font: None }
+        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty() }
     }
 }
 
@@ -58,13 +57,12 @@ impl ApplicationHandler<Event> for App {
         let font = Font::new(FONT_FAMILY, FONT_SIZE * window.scale_factor() as f32);
         let px = window.inner_size();
         let size = window_size(&font, px.width, px.height);
-        self.font = Some(font);
 
         let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
         let term = Arc::new(FairMutex::new(Term::new(Config::default(), &dims, Listener(self.proxy.clone()))));
         self.pty = Some(Pty::spawn(term.clone(), size, self.proxy.clone()));
         self.term = Some(term);
-        self.renderer = Some(Renderer::new(window.clone()));
+        self.renderer = Some(Renderer::new(window.clone(), font));
         self.window = Some(window);
     }
 
@@ -101,8 +99,8 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(px) => {
                 renderer.resize(px.width, px.height);
-                let (Some(term), Some(pty), Some(font)) = (&self.term, self.pty.as_mut(), &self.font) else { return };
-                let size = window_size(font, px.width, px.height);
+                let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) else { return };
+                let size = window_size(&renderer.font, px.width, px.height);
                 {
                     term.lock().resize(TermSize::new(size.num_cols as usize, size.num_lines as usize));
                     pty.resize(size);
@@ -116,7 +114,11 @@ impl ApplicationHandler<Event> for App {
                     pty.write(&bytes);
                 }
             }
-            WindowEvent::RedrawRequested => renderer.render(BG),
+            WindowEvent::RedrawRequested => {
+                if let Some(term) = &self.term {
+                    renderer.render(&term.lock(), BG);
+                }
+            }
             _ => {}
         }
     }
