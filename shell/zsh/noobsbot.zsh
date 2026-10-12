@@ -19,6 +19,9 @@ __noobsbot_precmd() {
 # colors, so themes recolor it. Rebuilt every time for the git branch and status.
 __noobsbot_pretty() {
     local e=$'\e' p='' prev='' branch
+    # A blank line between prompts (not above the first), so their pills don't touch.
+    [[ -n $__noobsbot_gap ]] && print
+    __noobsbot_gap=1
     # seg BG FG TEXT: an arrow from the previous segment, or a rounded start.
     __noobsbot_seg() {
         if [[ -z $prev ]]; then

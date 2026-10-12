@@ -13,6 +13,13 @@ function __noobsbot_seg --argument-names bg fg text
     set -g __noobsbot_prev $bg
 end
 
+# A blank line between prompts (not above the first), so their pills don't touch.
+# Before the prompt event, so it lands outside fish's prompt mark.
+function __noobsbot_gap --on-event fish_prompt
+    set -q __noobsbot_gap; and echo
+    set -g __noobsbot_gap
+end
+
 function fish_prompt
     set -l s $status
     set -g __noobsbot_prev
