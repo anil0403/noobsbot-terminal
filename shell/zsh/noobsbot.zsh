@@ -8,6 +8,9 @@ __noobsbot_precmd() {
     # Run last, after whatever the user's hooks did to the prompt.
     local last=(__noobsbot_wrap)
     [[ $NOOBSBOT_PROMPT == pretty ]] && last=(__noobsbot_pretty __noobsbot_wrap)
+    # zsh runs a copy of the list, so the first prompt wouldn't see the change.
+    # ponytail: on that first prompt, hooks from .zshrc still run after ours.
+    [[ ${precmd_functions[-1]} == __noobsbot_wrap ]] || { for f in $last; do $f; done }
     precmd_functions=(${precmd_functions:#__noobsbot_(wrap|pretty)} $last)
     return $s
 }
