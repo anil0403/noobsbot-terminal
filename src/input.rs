@@ -1,3 +1,5 @@
+use alacritty_terminal::selection::SelectionType;
+use alacritty_terminal::vi_mode::ViMotion;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 use crate::pane::Dir;
@@ -24,6 +26,82 @@ pub enum Action {
     SplitDown,
     Focus(Dir),
     Resize(Dir),
+    Search,
+    ViMode,
+}
+
+/// Keys while vi mode is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Vi {
+    Motion(ViMotion),
+    /// Start a selection of this kind, or stop it if one is already going.
+    Select(SelectionType),
+    /// Copy the selection and leave vi mode.
+    Copy,
+    /// Drop the selection, or leave vi mode if there is none.
+    Escape,
+    Exit,
+    Search,
+    /// Next older / newer search match.
+    SearchPrev,
+    SearchNext,
+    Top,
+    Bottom,
+    HalfUp,
+    HalfDown,
+}
+
+pub fn vi_binding(key: &Key, mods: ModifiersState) -> Option<Vi> {
+    use ViMotion as M;
+    let ctrl = mods.control_key();
+    Some(match key {
+        Key::Named(NamedKey::Escape) => Vi::Escape,
+        Key::Named(k) => Vi::Motion(match arrow(k)? {
+            Dir::Left => M::Left,
+            Dir::Right => M::Right,
+            Dir::Up => M::Up,
+            Dir::Down => M::Down,
+        }),
+        Key::Character(c) if ctrl => match c.to_lowercase().as_str() {
+            "u" => Vi::HalfUp,
+            "d" => Vi::HalfDown,
+            "v" => Vi::Select(SelectionType::Block),
+            "c" => Vi::Escape,
+            _ => return None,
+        },
+        Key::Character(c) => match c.as_str() {
+            "h" => Vi::Motion(M::Left),
+            "j" => Vi::Motion(M::Down),
+            "k" => Vi::Motion(M::Up),
+            "l" => Vi::Motion(M::Right),
+            "w" => Vi::Motion(M::SemanticRight),
+            "b" => Vi::Motion(M::SemanticLeft),
+            "e" => Vi::Motion(M::SemanticRightEnd),
+            "W" => Vi::Motion(M::WordRight),
+            "B" => Vi::Motion(M::WordLeft),
+            "E" => Vi::Motion(M::WordRightEnd),
+            "0" => Vi::Motion(M::First),
+            "$" => Vi::Motion(M::Last),
+            "^" => Vi::Motion(M::FirstOccupied),
+            "H" => Vi::Motion(M::High),
+            "M" => Vi::Motion(M::Middle),
+            "L" => Vi::Motion(M::Low),
+            "%" => Vi::Motion(M::Bracket),
+            "{" => Vi::Motion(M::ParagraphUp),
+            "}" => Vi::Motion(M::ParagraphDown),
+            "g" => Vi::Top,
+            "G" => Vi::Bottom,
+            "v" => Vi::Select(SelectionType::Simple),
+            "V" => Vi::Select(SelectionType::Lines),
+            "y" => Vi::Copy,
+            "i" | "q" => Vi::Exit,
+            "/" | "?" => Vi::Search,
+            "n" => Vi::SearchPrev,
+            "N" => Vi::SearchNext,
+            _ => return None,
+        },
+        _ => return None,
+    })
 }
 
 fn arrow(key: &NamedKey) -> Option<Dir> {
@@ -63,6 +141,8 @@ pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
         (Key::Character(c), m) if m == alt && c.len() == 1 && ("1"..="9").contains(&c.as_str()) => {
             Action::GoToTab(c.parse::<usize>().unwrap() - 1)
         }
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "f") => Action::Search,
+        (Key::Named(NamedKey::Space), m) if m == ctrl_shift => Action::ViMode,
         (Key::Named(k), m) if m == alt && arrow(k).is_some() => Action::Focus(arrow(k).unwrap()),
         (Key::Named(k), m) if m == ctrl_shift && arrow(k).is_some() => Action::Resize(arrow(k).unwrap()),
         _ => return None,
@@ -199,6 +279,15 @@ mod tests {
         assert_eq!(binding(&Key::Named(NamedKey::Tab), ctrl_shift), Some(Action::PrevTab));
         assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), alt), Some(Action::Focus(Dir::Up)));
         assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), ModifiersState::CONTROL), None);
+    }
+
+    #[test]
+    fn binds_vi_keys() {
+        assert_eq!(vi_binding(&ch("G"), ModifiersState::SHIFT), Some(Vi::Bottom));
+        assert_eq!(vi_binding(&ch("w"), NONE), Some(Vi::Motion(ViMotion::SemanticRight)));
+        assert_eq!(vi_binding(&ch("v"), ModifiersState::CONTROL), Some(Vi::Select(SelectionType::Block)));
+        assert_eq!(vi_binding(&Key::Named(NamedKey::ArrowDown), NONE), Some(Vi::Motion(ViMotion::Down)));
+        assert_eq!(vi_binding(&ch("z"), NONE), None);
     }
 
     #[test]
