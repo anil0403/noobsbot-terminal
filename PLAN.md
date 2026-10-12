@@ -125,23 +125,25 @@ Each pane has its own context, so a split can be red while its neighbor isn't.
 Each milestone ends in something runnable. Commits stay small — one step per
 commit.
 
-### M0 — Toolchain + scaffold
+### M0 — Toolchain + scaffold ✅
 1. Install Rust: `sudo pacman -S rustup && rustup default stable`
 2. `cargo init`, add deps, `cargo run` opens an empty winit window.
 3. wgpu surface clears the window to the background color.
 
-### M1 — Shell runs (headless)
+### M1 — Shell runs (headless) ✅
 1. Spawn `$SHELL` on a PTY, reader thread feeds `Term`.
 2. Debug dump of the grid to stdout to prove parsing works.
 3. Write keyboard input to PTY; handle window resize → `TIOCSWINSZ`.
 
-### M2 — Text on screen
+### M2 — Text on screen ✅
 1. Font loading via cosmic-text, cell size from font metrics.
 2. Glyph atlas (R8 texture, LRU eviction later).
 3. Instanced quads: one draw for backgrounds, one for glyphs.
 4. Cursor (block/beam/underline, blink).
 5. Bold/italic/underline/strikethrough, 256-color + truecolor.
-6. Damage tracking: only rebuild changed rows. Frame pacing with vsync.
+6. ~~Damage tracking~~ — skipped: a full frame builds in ~70 µs. Frame pacing
+   to monitor refresh instead (this was the real bottleneck: 100 MB `cat`
+   went 4.1 s → 1.2 s; kitty is 1.7 s on the same machine).
 7. **Check:** `vttest` basics, `htop`, `vim`, `cat` of a 100 MB file without lockup.
 
 ### M3 — Daily-drivable
