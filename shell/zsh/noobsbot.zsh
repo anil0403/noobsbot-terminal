@@ -19,9 +19,9 @@ __noobsbot_pretty() {
     # seg BG FG TEXT: an arrow from the previous segment, or a rounded start.
     __noobsbot_seg() {
         if [[ -z $prev ]]; then
-            p+="%{$e[38;5;$1m%}"$'\ue0b6'"%{$e[48;5;$1;38;5;$2m%}"
+            p+="%{${e}[38;5;$1m%}"$'\ue0b6'"%{${e}[48;5;$1;38;5;$2m%}"
         else
-            p+="%{$e[38;5;${prev};48;5;$1m%}"$'\ue0b0'"%{$e[38;5;$2m%}"
+            p+="%{${e}[38;5;${prev};48;5;$1m%}"$'\ue0b0'"%{${e}[38;5;$2m%}"
         fi
         p+=" $3 "
         prev=$1
@@ -29,13 +29,10 @@ __noobsbot_pretty() {
     __noobsbot_seg 11 0 "%n${SSH_CONNECTION:+@%m}"
     __noobsbot_seg 208 15 $'\uf07b'" %1~"
     if branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null); then
-        # Shown, never expanded: % is a prompt escape, and with prompt_subst so is $(...).
-        branch=${branch//\%/%%}
-        if [[ -o promptsubst ]]; then
-            branch=${branch//\\/\\\\}
-            branch=${branch//\$/\\\$}
-            branch=${branch//\`/\\\`}
-        fi
+        # Shown, never expanded: % is a prompt escape, and with prompt_subst so
+        # is $(...), unless it comes from a parameter (expanded only once).
+        __noobsbot_branch=${branch//\%/%%}
+        [[ -o promptsubst ]] && branch='${__noobsbot_branch}' || branch=$__noobsbot_branch
         __noobsbot_seg 14 0 $'\ue725'" $branch"
     fi
     if (( ${__noobsbot_last:-0} == 0 )); then
@@ -43,7 +40,7 @@ __noobsbot_pretty() {
     else
         __noobsbot_seg 1 15 $'\uf00d'" $__noobsbot_last"
     fi
-    PS1=$p"%{$e[0;38;5;${prev}m%}"$'\ue0b4'"%{$e[0m%} "
+    PS1=$p"%{${e}[0;38;5;${prev}m%}"$'\ue0b4'"%{${e}[0m%} "
 }
 
 __noobsbot_wrap() {
