@@ -19,3 +19,6 @@ __noobsbot_preexec() {
 
 precmd_functions=(__noobsbot_precmd $precmd_functions)
 preexec_functions+=(__noobsbot_preexec)
+
+# Other machines won't know TERM=noobsbot.
+[[ $TERM == noobsbot && -z ${aliases[ssh]} && -z ${functions[ssh]} ]] && ssh() { TERM=xterm-256color command ssh "$@" }

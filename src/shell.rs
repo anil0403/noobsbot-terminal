@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::OnceLock;
 
 use alacritty_terminal::tty::Shell;
@@ -32,6 +33,34 @@ fn dir() -> Option<&'static PathBuf> {
         Some(dir)
     })
     .as_ref()
+}
+
+/// TERM=noobsbot when its terminfo is installed, or can be (compiled into
+/// ~/.terminfo with `tic`). Otherwise TERM stays as alacritty_terminal set it.
+pub fn set_term() {
+    let installed = || {
+        let quiet = || std::process::Stdio::null();
+        Command::new("infocmp").arg("noobsbot").stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success())
+    };
+    if !installed() {
+        let src = std::env::temp_dir().join(format!("noobsbot-{}.terminfo", std::process::id()));
+        if std::fs::write(&src, include_str!("../extra/noobsbot.terminfo")).is_ok() {
+            match Command::new("tic").arg("-x").arg(&src).output() {
+                Ok(out) if out.status.success() => log::info!("installed the noobsbot terminfo"),
+                Ok(out) => log::warn!("tic: {}", String::from_utf8_lossy(&out.stderr).trim()),
+                Err(e) => log::info!("no tic ({e}); TERM stays {:?}", std::env::var("TERM")),
+            }
+            let _ = std::fs::remove_file(&src);
+        }
+    }
+    // SAFETY: called at startup, before any other thread exists.
+    unsafe {
+        if installed() {
+            std::env::set_var("TERM", "noobsbot");
+        }
+        std::env::set_var("TERM_PROGRAM", "noobsbot");
+        std::env::set_var("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    }
 }
 
 /// How to start `shell` (empty: `$SHELL`) with integration, and env to add.

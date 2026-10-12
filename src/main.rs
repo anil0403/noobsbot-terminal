@@ -28,6 +28,7 @@ fn main() {
         return; // the running one shows/hides itself
     }
     alacritty_terminal::tty::setup_env();
+    shell::set_term();
     let event_loop = EventLoop::with_user_event().build().expect("create event loop");
     let mut app = app::App::new(event_loop.create_proxy(), quake);
     event_loop.run_app(&mut app).expect("run event loop");

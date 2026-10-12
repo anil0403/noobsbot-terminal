@@ -18,3 +18,6 @@ __noobsbot_wrap() {
 # Array form needs bash 5.1+.
 PROMPT_COMMAND=(__noobsbot_status "${PROMPT_COMMAND[@]}" __noobsbot_wrap)
 PS0=$PS0'\e]133;C\a'
+
+# Other machines won't know TERM=noobsbot.
+[[ $TERM == noobsbot ]] && ! type -t ssh | grep -qE 'alias|function' && ssh() { TERM=xterm-256color command ssh "$@"; }
