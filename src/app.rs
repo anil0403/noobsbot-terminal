@@ -15,7 +15,8 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::dpi::PhysicalSize;
+use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::blocks::{self, Blocks};
 use crate::clipboard::Clipboard;
@@ -48,6 +49,16 @@ const RESIZE_STEP: f32 = 0.05;
 const NOTIFY_AFTER: Duration = Duration::from_secs(10);
 /// Red border after a failed command.
 const FLASH: Duration = Duration::from_millis(400);
+/// Quake window fade in/out.
+const FADE: Duration = Duration::from_millis(150);
+
+/// The drop-down window's state.
+struct Quake {
+    visible: bool,
+    /// Fading in (true) or out since this time.
+    fade: Option<(Instant, bool)>,
+    last_toggle: Instant,
+}
 
 pub struct App {
     proxy: EventLoopProxy<UserEvent>,
@@ -95,16 +106,30 @@ pub struct App {
     clipboard: Clipboard,
     /// Font size change from Ctrl+=/Ctrl+-, in px on top of the config size.
     zoom: f32,
+    /// Running as the drop-down terminal (`--quake`).
+    quake: Option<Quake>,
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(proxy: EventLoopProxy<UserEvent>, quake: bool) -> Self {
         let path = config::path();
         let config = config::load(&path).unwrap_or_else(|e| {
             log::error!("config error, using defaults: {e}");
             Config::default()
         });
+        if quake {
+            crate::quake::serve(proxy.clone());
+            if !config.quake.hotkey.is_empty() {
+                crate::quake::grab(&config.quake.hotkey, proxy.clone());
+            }
+        }
+        let quake = quake.then(|| Quake {
+            visible: false,
+            fade: None,
+            last_toggle: Instant::now() - Duration::from_secs(1),
+        });
         Self {
+            quake,
             _config_watcher: config::watch(&path, proxy.clone()),
             config,
             proxy,
@@ -729,6 +754,49 @@ impl App {
     }
 }
 
+// Quake mode.
+impl App {
+    /// Hotkey or second launch: hide if shown and focused, else show and focus.
+    fn toggle_quake(&mut self) {
+        let (Some(q), Some(window)) = (self.quake.as_mut(), &self.window) else { return };
+        let focused = crate::quake::has_focus(window).unwrap_or_else(|| self.renderer.as_ref().is_some_and(|r| r.focused));
+        let now = Instant::now();
+        // Held keys auto-repeat; one press, one toggle.
+        if now - q.last_toggle < Duration::from_millis(250) {
+            return;
+        }
+        q.last_toggle = now;
+        if q.visible && !focused {
+            return crate::quake::activate(window);
+        }
+        q.visible = !q.visible;
+        q.fade = Some((now, q.visible));
+        if q.visible {
+            crate::quake::set_opacity(window, 0.0);
+            window.set_visible(true);
+        }
+    }
+
+    /// Step the quake window's fade. Returns when to step again.
+    // ponytail: a slide would be nicer, but the window manager clamps managed windows on screen.
+    fn fade_quake(&mut self, now: Instant) -> Option<Instant> {
+        let (Some(q), Some(window)) = (self.quake.as_mut(), &self.window) else { return None };
+        let (start, showing) = q.fade?;
+        let t = ((now - start).as_secs_f32() / FADE.as_secs_f32()).min(1.0);
+        crate::quake::set_opacity(window, if showing { t } else { 1.0 - t });
+        if t < 1.0 {
+            return Some(now + self.frame_time);
+        }
+        q.fade = None;
+        if showing {
+            crate::quake::activate(window); // now that it's mapped
+        } else {
+            window.set_visible(false);
+        }
+        None
+    }
+}
+
 impl App {
     /// Font size in physical pixels: config size + zoom, scaled for HiDPI.
     fn font_px(&self, window: &Window) -> f32 {
@@ -810,7 +878,19 @@ impl ApplicationHandler<UserEvent> for App {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes().with_title("noobsbot terminal");
+        let mut attrs = Window::default_attributes().with_title("noobsbot terminal");
+        let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
+        if let (Some(_), Some(m)) = (&self.quake, monitor) {
+            // Borderless, full width, on top; hidden until it fades in.
+            let size = m.size();
+            let height = size.height as f32 * self.config.quake.height.clamp(10, 100) as f32 / 100.0;
+            attrs = attrs
+                .with_decorations(false)
+                .with_window_level(WindowLevel::AlwaysOnTop)
+                .with_inner_size(PhysicalSize::new(size.width, height as u32))
+                .with_position(m.position())
+                .with_visible(false);
+        }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
             self.frame_time = Duration::from_secs_f64(1000.0 / mhz as f64);
@@ -822,11 +902,13 @@ impl ApplicationHandler<UserEvent> for App {
         if self.tabs.is_empty() {
             event_loop.exit(); // no shell to run
         }
+        self.toggle_quake();
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         let (id, event) = match event {
             UserEvent::ConfigChanged => return self.reload_config(),
+            UserEvent::ToggleQuake => return self.toggle_quake(),
             UserEvent::Shell(id, prompt, mark) => return self.shell_mark(id, prompt, mark),
             UserEvent::Term(id, event) => (id, event),
         };
@@ -876,8 +958,8 @@ impl ApplicationHandler<UserEvent> for App {
             self.check_context(id, false);
         }
         let blinking = self.focused_pane().term.lock().cursor_style().blinking;
+        let mut wake = self.fade_quake(now);
         let (Some(renderer), Some(window)) = (self.renderer.as_mut(), &self.window) else { return };
-        let mut wake = None;
 
         if renderer.focused && blinking {
             if now >= self.next_blink {

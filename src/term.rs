@@ -12,6 +12,8 @@ pub enum UserEvent {
     /// prompt it belongs to.
     Shell(PaneId, u64, Mark),
     ConfigChanged,
+    /// Show or hide the quake window (hotkey or a second launch).
+    ToggleQuake,
 }
 
 /// Forwards terminal events (title, bell, PTY replies, wakeups) to the winit loop.

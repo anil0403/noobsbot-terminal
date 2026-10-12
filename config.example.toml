@@ -22,6 +22,15 @@ clipboard = "copy"
 shape = "block"
 blink = false
 
+[quake]
+# `noobsbot --quake` starts a drop-down terminal at the top of the screen.
+# Running it again (e.g. from a desktop shortcut) shows/hides the open one.
+# Global key that shows/hides it, like "F12", "Ctrl+grave", "Super+t";
+# "" for none. Read at startup.
+hotkey = "F12"
+# Percent of the screen height.
+height = 40
+
 # ── Themes ────────────────────────────────────────────────────────────────
 # Built in: default, danger, root, careful, night.
 # A theme only needs the colors it changes; the rest come from `default`.

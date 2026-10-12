@@ -25,6 +25,22 @@ pub struct Config {
     pub themes: HashMap<String, ThemePatch>,
     /// Situation rules, first match wins.
     pub rules: Vec<Rule>,
+    pub quake: Quake,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Quake {
+    /// Global key that shows/hides the quake window; empty for none.
+    pub hotkey: String,
+    /// Percent of the screen height.
+    pub height: u8,
+}
+
+impl Default for Quake {
+    fn default() -> Self {
+        Self { hotkey: "F12".into(), height: 40 }
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -96,6 +112,7 @@ impl Default for Config {
                 Rule { when: When { user: Some(Patterns::One("root".into())), ..Default::default() }, theme: "root".into() },
                 Rule { when: When { ssh_host: Some(Patterns::One("*prod*".into())), ..Default::default() }, theme: "danger".into() },
             ],
+            quake: Quake::default(),
         }
     }
 }
