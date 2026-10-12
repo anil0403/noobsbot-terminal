@@ -19,10 +19,11 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, listener: Listener, shell: &str, cwd: Option<PathBuf>) -> Self {
+    pub fn spawn(term: Arc<FairMutex<Term>>, size: WindowSize, listener: Listener, command: &[String], cwd: Option<PathBuf>) -> Self {
         let Listener { proxy, pane } = listener;
         let options = tty::Options {
-            shell: (!shell.is_empty()).then(|| tty::Shell::new(shell.to_owned(), Vec::new())),
+            // Empty command: the login shell.
+            shell: command.split_first().map(|(program, args)| tty::Shell::new(program.clone(), args.to_vec())),
             working_directory: cwd,
             ..Default::default()
         };

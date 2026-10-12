@@ -196,8 +196,8 @@ impl App {
         (r.size().0 / self.tabs.len() as f32).min(r.font.cell_w * TAB_CELLS).floor()
     }
 
-    /// Start a shell in a new pane (not yet placed in any tab).
-    fn spawn_pane(&mut self, cwd: Option<PathBuf>) -> PaneId {
+    /// Start a shell (or `command`) in a new pane, not yet placed in any tab.
+    fn spawn_pane(&mut self, cwd: Option<PathBuf>, command: Option<Vec<String>>) -> PaneId {
         let id = self.next_pane;
         self.next_pane += 1;
         let renderer = self.renderer.as_ref().expect("renderer exists");
@@ -206,7 +206,11 @@ impl App {
         let listener = Listener { proxy: self.proxy.clone(), pane: id };
         let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
         let term = Arc::new(FairMutex::new(Term::new(self.config.term(), &dims, listener.clone())));
-        let pty = Pty::spawn(term.clone(), size, listener, &self.config.terminal.shell, cwd);
+        let command = command.unwrap_or_else(|| {
+            let shell = &self.config.terminal.shell;
+            if shell.is_empty() { Vec::new() } else { vec![shell.clone()] }
+        });
+        let pty = Pty::spawn(term.clone(), size, listener, &command, cwd);
         let pane = Pane {
             term,
             pty,
@@ -230,7 +234,7 @@ impl App {
 
     fn new_tab(&mut self) {
         let cwd = self.new_cwd();
-        let id = self.spawn_pane(cwd);
+        let id = self.spawn_pane(cwd, None);
         let old = self.tabs.get(self.active).map(|t| t.focused);
         self.tabs.push(Tab { root: Node::Leaf(id), focused: id });
         self.active = self.tabs.len() - 1;
@@ -240,9 +244,9 @@ impl App {
         self.check_context(id, true);
     }
 
-    fn split(&mut self, across: bool) {
+    fn split(&mut self, across: bool, command: Option<Vec<String>>) {
         let cwd = self.new_cwd();
-        let id = self.spawn_pane(cwd);
+        let id = self.spawn_pane(cwd, command);
         let target = self.focused();
         self.tabs[self.active].root.split(target, id, across);
         self.relayout();
@@ -401,8 +405,8 @@ impl App {
             // With a single tab, Alt+digit stays readline's digit argument.
             Action::GoToTab(i) if i < self.tabs.len() && self.tabs.len() > 1 => self.switch_tab(i),
             Action::GoToTab(_) => return false,
-            Action::SplitRight => self.split(true),
-            Action::SplitDown => self.split(false),
+            Action::SplitRight => self.split(true, None),
+            Action::SplitDown => self.split(false, None),
             Action::Focus(dir) => match pane::neighbor(&self.active_rects(), self.focused(), dir) {
                 Some(id) => self.focus(id),
                 None => return false,
