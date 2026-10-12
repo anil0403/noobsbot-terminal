@@ -12,15 +12,16 @@ use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
+use crate::font::Font;
 use crate::input::key_bytes;
 use crate::pty::Pty;
 use crate::render::Renderer;
 use crate::term::{Listener, Term};
 
 const BG: wgpu::Color = wgpu::Color { r: 0.07, g: 0.07, b: 0.09, a: 1.0 };
-// Placeholder until M2 measures the real font.
-const CELL_W: u32 = 9;
-const CELL_H: u32 = 18;
+// ponytail: hardcoded until the config file lands in M3.
+const FONT_FAMILY: &str = "JetBrainsMono Nerd Font Mono";
+const FONT_SIZE: f32 = 15.0;
 
 pub struct App {
     proxy: EventLoopProxy<Event>,
@@ -29,20 +30,21 @@ pub struct App {
     term: Option<Arc<FairMutex<Term>>>,
     pty: Option<Pty>,
     mods: ModifiersState,
+    font: Option<Font>,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<Event>) -> Self {
-        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty() }
+        Self { proxy, window: None, renderer: None, term: None, pty: None, mods: ModifiersState::empty(), font: None }
     }
 }
 
-fn window_size(width: u32, height: u32) -> WindowSize {
+fn window_size(font: &Font, width: u32, height: u32) -> WindowSize {
     WindowSize {
-        num_cols: (width / CELL_W).max(1) as u16,
-        num_lines: (height / CELL_H).max(1) as u16,
-        cell_width: CELL_W as u16,
-        cell_height: CELL_H as u16,
+        num_cols: (width as f32 / font.cell_w).max(1.0) as u16,
+        num_lines: (height as f32 / font.cell_h).max(1.0) as u16,
+        cell_width: font.cell_w as u16,
+        cell_height: font.cell_h as u16,
     }
 }
 
@@ -53,8 +55,10 @@ impl ApplicationHandler<Event> for App {
         }
         let attrs = Window::default_attributes().with_title("noobsbot terminal");
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
+        let font = Font::new(FONT_FAMILY, FONT_SIZE * window.scale_factor() as f32);
         let px = window.inner_size();
-        let size = window_size(px.width, px.height);
+        let size = window_size(&font, px.width, px.height);
+        self.font = Some(font);
 
         let dims = TermSize::new(size.num_cols as usize, size.num_lines as usize);
         let term = Arc::new(FairMutex::new(Term::new(Config::default(), &dims, Listener(self.proxy.clone()))));
@@ -97,8 +101,9 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(px) => {
                 renderer.resize(px.width, px.height);
-                let size = window_size(px.width, px.height);
-                if let (Some(term), Some(pty)) = (&self.term, self.pty.as_mut()) {
+                let (Some(term), Some(pty), Some(font)) = (&self.term, self.pty.as_mut(), &self.font) else { return };
+                let size = window_size(font, px.width, px.height);
+                {
                     term.lock().resize(TermSize::new(size.num_cols as usize, size.num_lines as usize));
                     pty.resize(size);
                 }

@@ -1,4 +1,5 @@
 mod app;
+mod font;
 mod input;
 mod pty;
 mod render;
