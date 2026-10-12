@@ -1,5 +1,7 @@
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+use crate::pane::Dir;
+
 /// Terminal-level actions. M9's command palette lists these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -12,13 +14,35 @@ pub enum Action {
     ZoomIn,
     ZoomOut,
     ZoomReset,
+    NewTab,
+    ClosePane,
+    NextTab,
+    PrevTab,
+    /// Zero-based.
+    GoToTab(usize),
+    SplitRight,
+    SplitDown,
+    Focus(Dir),
+    Resize(Dir),
+}
+
+fn arrow(key: &NamedKey) -> Option<Dir> {
+    Some(match key {
+        NamedKey::ArrowLeft => Dir::Left,
+        NamedKey::ArrowRight => Dir::Right,
+        NamedKey::ArrowUp => Dir::Up,
+        NamedKey::ArrowDown => Dir::Down,
+        _ => return None,
+    })
 }
 
 /// Default keybindings. Checked before a key is sent to the shell.
 pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
     let shift = ModifiersState::SHIFT;
     let ctrl = ModifiersState::CONTROL;
+    let alt = ModifiersState::ALT;
     let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    let letter = |c: &str, l: &str| c.eq_ignore_ascii_case(l);
     Some(match (key, mods) {
         (Key::Named(NamedKey::PageUp), m) if m == shift => Action::ScrollPageUp,
         (Key::Named(NamedKey::PageDown), m) if m == shift => Action::ScrollPageDown,
@@ -30,6 +54,17 @@ pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
         (Key::Character(c), m) if (m == ctrl && c == "=") || (m == ctrl_shift && c == "+") => Action::ZoomIn,
         (Key::Character(c), m) if m == ctrl && c == "-" => Action::ZoomOut,
         (Key::Character(c), m) if m == ctrl && c == "0" => Action::ZoomReset,
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "t") => Action::NewTab,
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "w") => Action::ClosePane,
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "e") => Action::SplitRight,
+        (Key::Character(c), m) if m == ctrl_shift && letter(c, "o") => Action::SplitDown,
+        (Key::Named(NamedKey::Tab), m) if m == ctrl => Action::NextTab,
+        (Key::Named(NamedKey::Tab), m) if m == ctrl_shift => Action::PrevTab,
+        (Key::Character(c), m) if m == alt && c.len() == 1 && ("1"..="9").contains(&c.as_str()) => {
+            Action::GoToTab(c.parse::<usize>().unwrap() - 1)
+        }
+        (Key::Named(k), m) if m == alt && arrow(k).is_some() => Action::Focus(arrow(k).unwrap()),
+        (Key::Named(k), m) if m == ctrl_shift && arrow(k).is_some() => Action::Resize(arrow(k).unwrap()),
         _ => return None,
     })
 }
@@ -153,6 +188,18 @@ pub fn mouse_report(button: u8, pressed: bool, col: usize, line: usize, mods: Mo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binds_tab_keys() {
+        let alt = ModifiersState::ALT;
+        let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
+        assert_eq!(binding(&ch("3"), alt), Some(Action::GoToTab(2)));
+        assert_eq!(binding(&ch("0"), alt), None);
+        assert_eq!(binding(&ch("E"), ctrl_shift), Some(Action::SplitRight));
+        assert_eq!(binding(&Key::Named(NamedKey::Tab), ctrl_shift), Some(Action::PrevTab));
+        assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), alt), Some(Action::Focus(Dir::Up)));
+        assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), ModifiersState::CONTROL), None);
+    }
 
     #[test]
     fn encodes_paste() {
