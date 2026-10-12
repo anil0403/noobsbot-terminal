@@ -155,12 +155,13 @@ commit.
 6. Font size zoom (Ctrl +/-/0).
 7. `.desktop` file so it appears in the Cinnamon menu.
 
-### M4 — Situation palettes
+### M4 — Situation palettes ✅
 1. Theme struct + built-in themes (default, danger, night, root, careful).
 2. `context.rs` detection (foreground process, cwd, git branch, time).
 3. Rules engine + unit tests.
 4. Cross-fade transition.
-5. Exit-code border flash.
+5. ~~Exit-code border flash~~ → moved to M8: the exit code only exists once
+   shell integration (OSC 133;D) does.
 
 ### M5 — Tabs and splits
 1. Tab bar (rendered by us, not native) with titles from OSC 0/2.

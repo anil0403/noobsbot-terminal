@@ -1,9 +1,8 @@
 # noobsbot terminal
 
 A GPU-rendered terminal emulator for Linux, written in Rust. Easy to use, fast,
-and (soon) it changes its color palette to match the situation: red when you
-SSH into production, a different look as root or on `main`, a night theme
-after dark.
+and it changes its color palette to match the situation: red when you SSH into
+production, amber as root, a different look on `main` or after dark.
 
 > Work in progress. See [PLAN.md](PLAN.md) for the roadmap and what's done.
 
@@ -37,6 +36,43 @@ your desktop's app menu.
 `~/.config/noobsbot/config.toml` is created with every option documented on
 first launch ([example](config.example.toml)). Changes apply as soon as you
 save.
+
+## Situation themes
+
+Built-in themes: `default`, `danger`, `root`, `careful`, `night`. Rules in the
+config pick one based on what's happening in the terminal; the first rule whose
+conditions all match wins, and the switch fades in over 150 ms.
+
+```toml
+[[rules]]
+when = { ssh_host = ["prod-*", "*.prod.example.com"] }
+theme = "danger"
+
+[[rules]]
+when = { user = "root" }
+theme = "root"
+
+[[rules]]
+when = { git_branch = ["main", "master"], cwd = "~/work/*" }
+theme = "careful"
+
+[[rules]]
+when = { hours = "22-6" }
+theme = "night"
+```
+
+Conditions: `ssh_host`, `user`, `git_branch`, `cwd`, `process` (globs with `*`
+and `?`, or a list of them) and `hours`. Detection reads `/proc` and
+`.git/HEAD` directly, so nothing is spawned. Out of the box, root and any SSH
+host containing "prod" are covered.
+
+Make your own theme by naming it and listing only the colors that differ:
+
+```toml
+[themes.ocean]
+background = "#0b1a2b"
+cursor = "#5fd7ff"
+```
 
 ## License
 
