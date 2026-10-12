@@ -11,7 +11,7 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{ClipboardType, TermMode};
 use alacritty_terminal::tty;
-use alacritty_terminal::vte::ansi::{Color, NamedColor};
+use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
@@ -1360,19 +1360,48 @@ fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, ui: PaneUi) {
         r.fill(Rect { x: rect.x + rect.w - w, y: rect.y, w, h: rect.h }, c);
     }
     let (vi, search) = (ui.vi, ui.search);
+    let (accent, ink) = (theme::to_f32(theme.cursor), theme::to_f32(theme.bg));
     if vi {
-        let w = cw * 4.0;
-        r.fill(Rect { x: rect.x + rect.w - w, y: rect.y, w, h: ch }, theme::to_f32(theme.cursor));
-        r.text(rect.x + rect.w - w + cw / 2.0, rect.y, " VI", theme::to_f32(theme.bg));
+        pill(r, rect.x + rect.w - cw * 5.0, rect.y, " VI", accent, ink);
     }
     if let Some(s) = search {
         let y = rect.y + rect.h - ch;
-        r.fill(Rect { x: rect.x, y, w: rect.w, h: ch }, theme::to_f32(theme.selection));
-        let status = if !s.query.is_empty() && s.current.is_none() { "   no match" } else { "" };
-        let fit = (rect.w / cw) as usize;
-        let line: String = format!("Find: {}_{status}", s.query).chars().take(fit).collect();
-        r.text(rect.x, y, &line, theme::to_f32(theme.fg));
+        r.fill(Rect { x: rect.x, y, w: rect.w, h: ch }, theme::to_f32(surface(theme)));
+        let x = segment(r, rect.x, y, " Find ", accent, ink);
+        let fit = ((rect.x + rect.w - x) / cw).max(0.0) as usize;
+        let query: String = format!(" {}_", s.query).chars().take(fit).collect();
+        let end = r.text(x, y, &query, theme::to_f32(theme.fg));
+        if !s.query.is_empty() && s.current.is_none() && end + cw * 12.0 < rect.x + rect.w {
+            r.text(end + cw, y, "no match", theme::to_f32(theme.ansi[1]));
+        }
     }
+}
+
+/// Panel color for overlays: between the background and the selection.
+fn surface(theme: &Theme) -> Rgb {
+    theme::blend(theme.bg, theme.selection, 0.6)
+}
+
+/// `text` on a rounded `bg` pill (powerline half-circle caps). Returns where it ends.
+fn pill(r: &mut Renderer, x: f32, y: f32, text: &str, bg: [f32; 4], fg: [f32; 4]) -> f32 {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let n = text.chars().count() as f32;
+    r.text(x, y, "\u{e0b6}", bg);
+    r.fill(Rect { x: x + cw, y, w: n * cw, h: ch }, bg);
+    r.text(x + cw, y, text, fg);
+    r.text(x + (n + 1.0) * cw, y, "\u{e0b4}", bg);
+    x + (n + 2.0) * cw
+}
+
+/// A powerline segment: rounded on the left, an arrow on the right.
+fn segment(r: &mut Renderer, x: f32, y: f32, text: &str, bg: [f32; 4], fg: [f32; 4]) -> f32 {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let n = text.chars().count() as f32;
+    r.text(x, y, "\u{e0b6}", bg);
+    r.fill(Rect { x: x + cw, y, w: n * cw, h: ch }, bg);
+    r.text(x + cw, y, text, fg);
+    r.text(x + (n + 1.0) * cw, y, "\u{e0b0}", bg);
+    x + (n + 2.0) * cw
 }
 
 /// The palette: a query line and the best matches, centered near the top.
@@ -1382,25 +1411,32 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
     let w = r.size().0;
     let cols = ((w / cw) as usize).saturating_sub(4).min(64);
     let (bw, pad) = (cols as f32 * cw, (cw / 2.0).round());
-    let (x, y) = (((w - bw) / 2.0).round(), ch);
+    let (x, y) = (((w - bw) / 2.0).round(), ch * 2.0); // below the tab bar
     let n = p.len().min(ROWS);
-    let (fg, bg) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg));
-    r.fill(Rect { x: x - pad, y: y - pad, w: bw + 2.0 * pad, h: (n + 1) as f32 * ch + 2.0 * pad }, theme::to_f32(theme.selection));
-    let query = format!("> {}_", p.query);
-    let skip = query.chars().count().saturating_sub(cols); // keep the end of a long query in view
-    r.text(x, y, &query.chars().skip(skip).collect::<String>(), fg);
+    let (fg, ink, accent) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg), theme::to_f32(theme.cursor));
+    let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
+    // A blank row between the query and the list.
+    r.fill(Rect { x: x - pad, y: y - pad, w: bw + 2.0 * pad, h: (n + 2) as f32 * ch + 2.0 * pad }, theme::to_f32(surface(theme)));
+    let qx = segment(r, x, y, " \u{276f} ", accent, ink);
+    let room = cols.saturating_sub(5);
+    let query = format!(" {}_", p.query);
+    let skip = query.chars().count().saturating_sub(room); // keep the end of a long query in view
+    r.text(qx, y, &query.chars().skip(skip).collect::<String>(), fg);
     let first = p.selected.saturating_sub(ROWS - 1);
     for (i, row) in p.shown().skip(first).take(ROWS).enumerate() {
-        let ry = y + (i + 1) as f32 * ch;
-        let (name_fg, keys_fg) = if first + i == p.selected {
-            r.fill(Rect { x: x - pad, y: ry, w: bw + 2.0 * pad, h: ch }, theme::to_f32(theme.cursor));
-            (bg, bg)
+        let ry = y + (i + 2) as f32 * ch;
+        // Room for the name between the pill's caps, before the keys.
+        let keys = row.keys.chars().count().min(cols.saturating_sub(4));
+        let name: String = row.name.chars().take(cols.saturating_sub(keys + 4)).collect();
+        let keys_x = x + (cols - keys - 1) as f32 * cw;
+        if first + i == p.selected {
+            pill(r, x, ry, &" ".repeat(cols - 2), accent, ink);
+            r.text(x + cw * 2.0, ry, &name, ink);
+            r.text(keys_x, ry, &row.keys.chars().take(keys).collect::<String>(), ink);
         } else {
-            (fg, theme::to_f32(theme::dim(theme.fg)))
-        };
-        let keys = row.keys.chars().count().min(cols);
-        r.text(x, ry, &row.name.chars().take(cols.saturating_sub(keys + 2)).collect::<String>(), name_fg);
-        r.text(x + (cols - keys) as f32 * cw, ry, &row.keys.chars().take(keys).collect::<String>(), keys_fg);
+            r.text(x + cw * 2.0, ry, &name, fg);
+            r.text(keys_x, ry, &row.keys.chars().take(keys).collect::<String>(), muted);
+        }
     }
 }
 
@@ -1408,18 +1444,27 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
 /// red production tab stays visible while you work in another one.
 fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
-    let backdrop = theme::dim(theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg));
+    let backdrop = theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg);
     r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, theme::to_f32(backdrop));
+    let y = ((bar_h - ch) / 2.0).round();
     for (i, tab) in tabs.iter().enumerate() {
         let pane = panes.get_mut(&tab.focused).unwrap();
         let theme = pane.theme.frame();
-        let x = i as f32 * tab_w;
-        let (bg, fg) = if i == active { (theme.bg, theme.fg) } else { (theme::dim(theme.bg), theme::dim(theme.fg)) };
-        r.fill(Rect { x, y: 0.0, w: tab_w - 1.0, h: bar_h }, theme::to_f32(bg));
-        r.fill(Rect { x, y: 0.0, w: tab_w - 1.0, h: 2.0 }, theme::to_f32(theme.cursor));
-        let fit = ((tab_w - cw) / cw).max(0.0) as usize;
-        let label: String = format!("{} {}", i + 1, pane.title()).chars().take(fit).collect();
-        r.text(x + (cw / 2.0).round(), ((bar_h - ch) / 2.0).round() + 1.0, &label, theme::to_f32(fg));
+        let x = i as f32 * tab_w + (cw / 2.0).round();
+        // Pill: caps take a cell each, plus a cell of gap to the next tab.
+        let fit = ((tab_w / cw) as usize).saturating_sub(4);
+        let label = format!(" {} {} ", i + 1, pane.title());
+        let mut label: String = label.chars().take(fit).collect();
+        if fit > 0 && label.chars().count() == fit && !label.ends_with(' ') {
+            label.pop();
+            label.push('…');
+        }
+        let (bg, fg) = if i == active {
+            (theme.cursor, theme.bg)
+        } else {
+            (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.3))
+        };
+        pill(r, x, y, &label, theme::to_f32(bg), theme::to_f32(fg));
     }
 }
 

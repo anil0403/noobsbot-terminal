@@ -171,10 +171,7 @@ impl Theme {
 impl Theme {
     /// Blend from `self` (t = 0) to `other` (t = 1).
     pub fn mix(&self, other: &Theme, t: f32) -> Theme {
-        let m = |a: Rgb, b: Rgb| {
-            let ch = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-            Rgb { r: ch(a.r, b.r), g: ch(a.g, b.g), b: ch(a.b, b.b) }
-        };
+        let m = |a, b| blend(a, b, t);
         Theme {
             fg: m(self.fg, other.fg),
             bg: m(self.bg, other.bg),
@@ -230,6 +227,12 @@ impl Fade {
         let t = self.start.elapsed().as_secs_f32() / FADE.as_secs_f32();
         if t >= 1.0 { self.target.clone() } else { self.from.mix(&self.target, t) }
     }
+}
+
+/// `a` moved toward `b` by `t` (0..=1).
+pub fn blend(a: Rgb, b: Rgb, t: f32) -> Rgb {
+    let ch = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Rgb { r: ch(a.r, b.r), g: ch(a.g, b.g), b: ch(a.b, b.b) }
 }
 
 pub fn dim(c: Rgb) -> Rgb {
