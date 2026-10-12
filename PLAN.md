@@ -201,10 +201,13 @@ commit.
 5. `notify-send` when a command ≥ 10 s finishes and the window isn't focused.
 6. Exit-code red border flash (moved here from M4).
 
-### M9 — Command palette
-1. Every action registered once in an `Action` enum with a name + default key.
-2. Ctrl+Shift+P overlay with fuzzy match (`nucleo-matcher`), shows keybinding.
-3. Includes "switch theme", "toggle CRT", "split right", etc.
+### M9 — Command palette ✅
+1. Every action registered once in `input::actions()` with a name + default
+   keys; `binding()` reads the same table.
+2. Ctrl+Shift+P overlay with fuzzy match, shows the keybinding. ~~`nucleo-matcher`~~
+   — a 20-line subsequence scorer is plenty for ~40 entries.
+3. Includes "Theme: …" (holds until the situation changes) and every action.
+   "Toggle CRT" joins when M11 exists.
 
 ### M10 — Quake mode
 1. `--quake` flag / config: borderless, top of screen, 40 % height, always on top.

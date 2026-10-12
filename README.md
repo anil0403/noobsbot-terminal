@@ -23,6 +23,7 @@ your desktop's app menu.
 
 | Keys | Action |
 |---|---|
+| Ctrl+Shift+P | Command palette: every action and theme, type to filter, Enter to run |
 | Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste |
 | Shift+Insert, middle click | Paste (middle click pastes the mouse selection) |
 | Mouse drag, double / triple click | Select text, word, line (copied to the mouse selection) |
