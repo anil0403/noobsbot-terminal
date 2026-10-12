@@ -209,10 +209,19 @@ commit.
 3. Includes "Theme: …" (holds until the situation changes) and every action.
    "Toggle CRT" joins when M11 exists.
 
-### M10 — Quake mode
-1. `--quake` flag / config: borderless, top of screen, 40 % height, always on top.
-2. Global hotkey (default F12) toggles visibility with slide animation.
-3. Single-instance: second launch talks to the running one over a Unix socket.
+### M10 — Quake mode ✅
+1. `--quake` flag: borderless, top of screen, `quake.height` % (default 40),
+   always on top.
+2. Global hotkey (`quake.hotkey`, default F12) via an X11 key grab with
+   x11rb (already in the tree through winit). ~~Slide animation~~ → 150 ms
+   fade via `_NET_WM_WINDOW_OPACITY`: the WM clamps managed windows on screen,
+   so they can't slide in from above. Focus is requested as a pager
+   (`_NET_ACTIVE_WINDOW` source 2), since plain requests get refused as
+   focus stealing.
+3. Single-instance for quake: a second `noobsbot --quake` sends "toggle" over
+   `$XDG_RUNTIME_DIR/noobsbot-quake-<uid>.sock` and exits, which also makes a
+   desktop shortcut work on Wayland. Plain `noobsbot` launches stay separate
+   windows.
 
 ### M11 — CRT mode
 1. Render terminal to offscreen texture.

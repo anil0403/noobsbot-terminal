@@ -62,6 +62,14 @@ which directory you're in. Fish does this by itself. You get:
   window isn't focused
 - new tabs, splits and `file:line` links use the shell's directory
 
+## Drop-down (quake) mode
+
+`noobsbot --quake` opens a borderless terminal across the top of the screen
+(40 % high), always on top. **F12** shows and hides it from anywhere. If
+another program already owns F12, or you're on Wayland, set `quake.hotkey`
+in the config (e.g. `"Ctrl+grave"`), or bind `noobsbot --quake` to a key in
+your desktop's keyboard shortcuts: running it again toggles the open one.
+
 ## Situation themes
 
 Built-in themes: `default`, `danger`, `root`, `careful`, `night`. Rules in the

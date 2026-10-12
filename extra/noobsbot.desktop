@@ -9,3 +9,8 @@ Terminal=false
 Categories=System;TerminalEmulator;
 Keywords=shell;prompt;command;commandline;cmd;terminal;
 StartupWMClass=noobsbot
+Actions=quake;
+
+[Desktop Action quake]
+Name=Drop-down terminal
+Exec=noobsbot --quake
