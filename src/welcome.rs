@@ -4,33 +4,33 @@
 
 use std::fs::read_to_string;
 
-/// A solid silhouette in half blocks (two pixels per cell), so edges stay
-/// crisp; eyes, nose, mouth, whiskers' gaps and paws are cut out.
+/// Colons are the fur (dense enough to read on black); dashes the inner ears,
+/// stripes, eyes, whiskers, mouth, collar and toes.
 const CAT: &str = r"
-        █▄                  ▄█
-        ██▀▄              ▄▀██
-        ██  ▀▄          ▄▀  ██
-        ██ ▄▄▄█▄██████▄█▄▄▄ ██
-        ██████████████████████
-        █████▀▀████████▀▀█████
-       ████▀ ▄  ▀████▀ ▄  ▀████
-▄▄▄   ▄████▄    ▄████▄    ▄████▄   ▄▄▄
-   ▀▀▀▀██████▄▄████████▄▄██████▀▀▀▀
-▄▄▄▄▄▄▄██████████▄  ▄██████████▄▄▄▄▄▄▄
-▀        ▀███████▀▄▄▀███████▀        ▀
-           ▀▀████████████▀▀
-             ▄▄████████▄▄       ▄██▄
-          ▄████████████████▄    ▀███
-        ▄████████████████████▄   ███
-       ▄██████████████████████▄  ▀███
-       ████████████████████████   ███
-       ████████████████████████   ███
-       ████████████████████████  ▄███
-       ████████████████████████  ███
-       ▀██████████▀▀██████████▀▄███▀
-        ▀█████████  █████████████▀
-          ▀███████  ███████▀▀██▀
-             ▀▀███  ███▀▀
+     ::                  ::
+    ::-::              ::-::
+    ::---::          ::---::
+    ::----:::-:--:-:::----::
+   :::::::::::-::-:::::::::::
+  ::::::::::::::::::::::::::::
+  :::::-----::::::::-----:::::
+  :::::- o -::::::::- o -:::::
+  :::::-----::::::::-----:::::
+  :::::::::::::vv:::::::::::::
+---- ::::::::::--:::::::::: ----
+ ----::::::::--::--::::::::----
+---- ::::::---::::---:::::: ----
+       ::::::::::::::::::
+        -------::-------
+     ::::::::::::::::::::::
+    ---::::::::::::::::::---
+   ::::::::::::::::::::::::::
+  ---::::::::::::::::::::::---    :::
+  ::::::::::::::::::::::::::::   :--::
+  ---::::::::::::::::::::::---  :::::
+   ::::::::::::  :::::::::::: ::--:
+    ::-::-::-:    :-::-::-:: :::::
+     ----------------------::::
 ";
 const CAT_W: usize = 38;
 /// Narrower than this, the cat is left out.
@@ -51,7 +51,7 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
             let line = row.checked_sub(cat_top).and_then(|r| cat.get(r)).copied().unwrap_or("");
             out.push_str("\x1b[1;38;5;15m"); // bright white
             out.push_str(line);
-            out.push_str(&" ".repeat(CAT_W + 3 - line.chars().count()));
+            out.push_str(&" ".repeat(CAT_W + 3 - line.len()));
         } else {
             out.push(' ');
         }
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn cat_fits() {
         let lines: Vec<&str> = CAT.lines().skip(1).collect();
-        assert_eq!(lines.iter().map(|l| l.chars().count()).max(), Some(CAT_W));
+        assert_eq!(lines.iter().map(|l| l.len()).max(), Some(CAT_W));
         // Nothing beside the cat may wrap in the narrowest window that shows it.
         assert!(TIP.len() <= MIN_COLS - CAT_W - 3);
     }
@@ -295,8 +295,8 @@ mod tests {
         assert_eq!(tidy("Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz"), "Intel Core i7-8550U");
         assert_eq!(tidy("AMD Ryzen 7 5800X 8-Core Processor"), "AMD Ryzen 7 5800X 8-Core");
         // Wide: every line starts with the cat's column. Narrow: no cat.
-        assert!(screen(120, "gpu", "zsh").contains("██████████████████████"));
-        assert!(!screen(80, "gpu", "zsh").contains("██████████████████████"));
+        assert!(screen(120, "gpu", "zsh").contains("::-::"));
+        assert!(!screen(80, "gpu", "zsh").contains("::-::"));
         // Text stretched to the cat's height through its middle gaps; never shrunk.
         let s = |v: &[&str]| v.iter().map(|l| l.to_string()).collect::<Vec<_>>();
         assert_eq!(stretch(s(&["a", "", "b", "", "c"]), 7), s(&["a", "", "", "b", "", "", "c"]));
