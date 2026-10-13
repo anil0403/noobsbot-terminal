@@ -12,7 +12,7 @@ __noobsbot_status() {
 # Runs last, so it wraps whatever prompt the user's PROMPT_COMMAND built.
 __noobsbot_wrap() {
     local s=$?
-    [[ $PS1 == *'133;A'* ]] || PS1='\[\e]133;A\a\]'$PS1'\[\e]133;B\a\]'
+    [[ ${PS1-} == *'133;A'* ]] || PS1='\[\e]133;A\a\]'${PS1-}'\[\e]133;B\a\]'
     return $s
 }
 
@@ -21,7 +21,7 @@ __noobsbot_wrap() {
 __noobsbot_pretty() {
     local s=$? p='' prev='' branch
     # A blank line between prompts (not above the first), so their pills don't touch.
-    [[ -n $__noobsbot_gap ]] && echo
+    [[ -n ${__noobsbot_gap-} ]] && echo
     __noobsbot_gap=1
     # seg BG FG TEXT: an arrow from the previous segment, or a rounded start.
     __noobsbot_seg() {
@@ -60,8 +60,8 @@ __noobsbot_pretty() {
 
 # Array form needs bash 5.1+.
 PROMPT_COMMAND=(__noobsbot_status "${PROMPT_COMMAND[@]}" __noobsbot_wrap)
-[[ $NOOBSBOT_PROMPT == pretty ]] && PROMPT_COMMAND=("${PROMPT_COMMAND[@]:0:${#PROMPT_COMMAND[@]}-1}" __noobsbot_pretty __noobsbot_wrap)
-PS0=$PS0'\e]133;C\a'
+[[ ${NOOBSBOT_PROMPT-} == pretty ]] && PROMPT_COMMAND=("${PROMPT_COMMAND[@]:0:${#PROMPT_COMMAND[@]}-1}" __noobsbot_pretty __noobsbot_wrap)
+PS0=${PS0-}'\e]133;C\a'
 
 # Other machines won't know TERM=noobsbot. An `if`, not `&&`: this is the
 # rcfile's last line, and its status would show on the first prompt.

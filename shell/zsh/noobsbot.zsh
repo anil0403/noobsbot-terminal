@@ -7,7 +7,7 @@ __noobsbot_precmd() {
     print -n "\e]133;D;$s\a\e]7;file://$HOST$PWD\a"
     # Run last, after whatever the user's hooks did to the prompt.
     local last=(__noobsbot_wrap)
-    [[ $NOOBSBOT_PROMPT == pretty ]] && last=(__noobsbot_pretty __noobsbot_wrap)
+    [[ ${NOOBSBOT_PROMPT-} == pretty ]] && last=(__noobsbot_pretty __noobsbot_wrap)
     # zsh runs a copy of the list, so the first prompt wouldn't see the change.
     # ponytail: on that first prompt, hooks from .zshrc still run after ours.
     [[ ${precmd_functions[-1]} == __noobsbot_wrap ]] || { for f in $last; do $f; done }
@@ -20,7 +20,7 @@ __noobsbot_precmd() {
 __noobsbot_pretty() {
     local e=$'\e' p='' prev='' branch
     # A blank line between prompts (not above the first), so their pills don't touch.
-    [[ -n $__noobsbot_gap ]] && print
+    [[ -n ${__noobsbot_gap-} ]] && print
     __noobsbot_gap=1
     # seg BG FG TEXT: an arrow from the previous segment, or a rounded start.
     __noobsbot_seg() {
@@ -64,8 +64,9 @@ __noobsbot_preexec() {
     print -n "\e]133;C\a"
 }
 
+typeset -ga precmd_functions
 precmd_functions=(__noobsbot_precmd $precmd_functions)
 preexec_functions+=(__noobsbot_preexec)
 
 # Other machines won't know TERM=noobsbot.
-[[ $TERM == noobsbot && -z ${aliases[ssh]} && -z ${functions[ssh]} ]] && ssh() { TERM=xterm-256color command ssh "$@" }
+[[ $TERM == noobsbot && -z ${aliases[ssh]-} && -z ${functions[ssh]-} ]] && ssh() { TERM=xterm-256color command ssh "$@" }
