@@ -1,0 +1,104 @@
+# noobsbot terminal config — ~/.config/noobsbot/config.toml
+# Saved changes apply immediately (except `shell`, which applies to new windows).
+
+# Theme used when no situation rule matches (see [themes] and [[rules]] below).
+theme = "default"
+
+[font]
+family = "JetBrainsMono Nerd Font Mono"
+size = 18.0
+# 100 (thin) to 900 (black): 400 regular, 500 medium, 600 semibold.
+weight = 600
+
+[terminal]
+# Lines of history kept above the screen.
+scrollback = 10000
+# Program to run. Empty = your login shell ($SHELL).
+shell = ""
+# Let programs use the clipboard through escape codes (OSC 52):
+# "off", "copy" (default: programs may copy, not read), "paste", "copy-paste".
+clipboard = "copy"
+# Powerline-style prompt (user, folder, git branch, last exit status) in place
+# of your shell's own, for bash, zsh and fish. Needs a Nerd Font for the icons.
+# Applies to new shells.
+pretty_prompt = false
+# Greet each new window with a cat, your system's specs and resource meters
+# (new tabs and splits stay clean).
+welcome = true
+# Grey suggestions after the cursor at the prompt (bash and zsh; fish has its
+# own): commands that worked in this folder, then anywhere, then your shell's
+# history, then file names. Right arrow or End takes it, Ctrl+Right one word.
+suggestions = true
+
+[cursor]
+# "block", "beam" or "underline". Programs like vim may override it.
+shape = "beam"
+blink = true
+
+[quake]
+# `noobsbot --quake` starts a drop-down terminal at the top of the screen.
+# Running it again (e.g. from a desktop shortcut) shows/hides the open one.
+# Global key that shows/hides it, like "F12", "Ctrl+grave", "Super+t";
+# "" for none. Read at startup.
+hotkey = "F12"
+# Percent of the screen height.
+height = 40
+
+[crt]
+# Old-monitor look. Also toggled from the command palette (Ctrl+Shift+P).
+enabled = false
+# Strengths from 0 (off) to 1.
+scanlines = 0.3
+glow = 0.35
+curvature = 0.06
+vignette = 0.35
+# Above 0 it redraws every frame, which costs battery.
+flicker = 0.0
+
+# ── Themes ────────────────────────────────────────────────────────────────
+# Built in: default, danger, root, careful, night.
+# A theme only needs the colors it changes; the rest come from `default`.
+# Tweak a built-in by naming it, or invent your own name.
+#
+# [themes.default]
+# foreground = "#dcdfe4"
+# background = "#000000"
+# cursor = "#dcdfe4"
+# selection = "#454545"
+# # black, red, green, yellow, blue, magenta, cyan, white
+# normal = ["#3d3d3d", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#dcdfe4"]
+# bright = ["#686868", "#ff7b86", "#b5e890", "#f2ad36", "#4e92e8", "#d7a1f0", "#5bc8a6", "#ffffff"]
+#
+# [themes.danger]
+# background = "#2b0d12"
+#
+# [themes.ocean]
+# background = "#0b1a2b"
+# cursor = "#5fd7ff"
+
+# ── Situation rules ───────────────────────────────────────────────────────
+# Checked top to bottom; the first rule whose conditions ALL hold picks the
+# theme. Conditions (any mix):
+#   ssh_host   = host you're ssh'd into        "prod-*" or ["prod-*", "db?"]
+#   user       = user of the running program   "root"
+#   git_branch = branch of the current repo    ["main", "master"]
+#   cwd        = current directory             "~/work/*"
+#   process    = running program               "vim"
+#   hours      = local time range              "22-6" (wraps past midnight)
+# Text conditions accept * and ? wildcards.
+
+[[rules]]
+when = { user = "root" }
+theme = "root"
+
+[[rules]]
+when = { ssh_host = "*prod*" }
+theme = "danger"
+
+# [[rules]]
+# when = { git_branch = ["main", "master"] }
+# theme = "careful"
+
+# [[rules]]
+# when = { hours = "22-6" }
+# theme = "night"
