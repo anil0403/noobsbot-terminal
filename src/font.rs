@@ -16,7 +16,6 @@ pub struct Font {
     cache: SwashCache,
     family: String,
     size: f32,
-    weight: u16,
     pub cell_w: f32,
     pub cell_h: f32,
     /// Distance from cell top to baseline.
@@ -24,19 +23,16 @@ pub struct Font {
 }
 
 impl Font {
-    pub fn new(family: &str, size: f32, weight: u16) -> Self {
-        let mut font =
-            Self { system: FontSystem::new(), cache: SwashCache::new(), family: family.to_owned(), size, weight: 0, cell_w: 0.0, cell_h: 0.0, baseline: 0.0 };
-        font.weight = weight.clamp(100, 900);
+    pub fn new(family: &str, size: f32) -> Self {
+        let mut font = Self { system: FontSystem::new(), cache: SwashCache::new(), family: family.to_owned(), size, cell_w: 0.0, cell_h: 0.0, baseline: 0.0 };
         font.measure();
         font
     }
 
-    /// Switch family/size/weight, keeping the already-scanned system font database.
-    pub fn set(&mut self, family: &str, size: f32, weight: u16) {
+    /// Switch family/size, keeping the already-scanned system font database.
+    pub fn set(&mut self, family: &str, size: f32) {
         self.family = family.to_owned();
         self.size = size;
-        self.weight = weight.clamp(100, 900);
         self.measure();
     }
 
@@ -52,8 +48,11 @@ impl Font {
 
     /// Shape one character, letting cosmic-text pick a fallback font if needed.
     fn shape(&mut self, c: char, bold: bool, italic: bool) -> Option<(CacheKey, f32)> {
-        let weight = if bold { (self.weight + 300).clamp(700, 900) } else { self.weight };
-        let attrs = Attrs::new().family(Family::Name(&self.family)).weight(Weight(weight)).style(if italic { Style::Italic } else { Style::Normal });
+        let attrs = Attrs::new().family(Family::Name(&self.family)).weight(if bold { Weight::BOLD } else { Weight::NORMAL }).style(if italic {
+            Style::Italic
+        } else {
+            Style::Normal
+        });
         let mut buffer = Buffer::new_empty(Metrics::new(self.size, self.size));
         let mut tmp = [0u8; 4];
         buffer.set_text(c.encode_utf8(&mut tmp), &attrs, Shaping::Advanced, None);
