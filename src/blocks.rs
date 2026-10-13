@@ -89,8 +89,8 @@ pub fn command_text<T>(term: &Term<T>, prompt: u64) -> Option<String> {
     let start = Point::new(line, Column(after.min(term.columns() - 1)));
     let end = term.line_search_right(start);
     let text = term.bounds_to_string(start, end);
-    let text = text.trim();
-    (!text.is_empty() && after < term.columns()).then(|| text.to_owned())
+    let text = text.trim_end(); // a leading space stays: shells keep such commands out of history
+    (!text.trim().is_empty() && after < term.columns()).then(|| text.to_owned())
 }
 
 /// What's typed at the prompt the cursor is on, when the cursor is at its end
@@ -181,6 +181,7 @@ mod tests {
         assert_eq!(command_text(&t, 1).as_deref(), Some("ls"));
         assert_eq!(command_text(&t, 2).as_deref(), Some("true"));
         assert_eq!(command_text(&t, 3), None);
+        assert_eq!(command_text(&term("{A}$ {B} secret"), 1).as_deref(), Some(" secret"));
         assert_eq!(last_output(&t).as_deref(), Some(""));
         let t = term("{A}$ {B}ls\r\none\r\ntwo\r\n{A}$ {B}");
         assert_eq!(last_output(&t).as_deref(), Some("one\ntwo"));

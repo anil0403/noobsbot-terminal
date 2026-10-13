@@ -1,9 +1,12 @@
 //! Suggestions for what's typed at the prompt, drawn as grey text after the
 //! cursor (like fish): a command that worked in this folder before, then one
 //! that worked anywhere, then the shell's history, then a file or folder name.
+//! Commands typed with a leading space, or that look like they hold a password
+//! or token, are neither remembered nor shown.
 
 use std::fs;
 use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -50,6 +53,7 @@ impl Suggest {
 
     fn load_ran(&mut self, file: PathBuf) {
         let text = fs::read_to_string(&file).unwrap_or_default();
+        let _ = fs::set_permissions(&file, fs::Permissions::from_mode(0o600)); // yours alone
         let lines: Vec<&str> = text.lines().collect();
         let skip = lines.len().saturating_sub(KEEP);
         self.ran = lines[skip..].iter().filter_map(|l| l.split_once('\t')).map(|(dir, cmd)| (cmd.to_owned(), dir.into())).collect();
@@ -62,6 +66,9 @@ impl Suggest {
 
     /// Remember a command that succeeded in `dir`.
     pub fn ran(&mut self, cmd: &str, dir: &Path) {
+        if cmd.starts_with(' ') || secret(cmd) {
+            return;
+        }
         let cmd = cmd.trim();
         if cmd.is_empty() || cmd.contains(['\n', '\t']) || dir.as_os_str().to_string_lossy().contains('\t') {
             return;
@@ -73,7 +80,7 @@ impl Suggest {
         self.last = None;
         let Some(file) = &self.ran_file else { return };
         let _ = fs::create_dir_all(file.parent().unwrap());
-        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(file) {
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).mode(0o600).open(file) {
             let _ = writeln!(f, "{}\t{cmd}", dir.display());
         }
     }
@@ -96,7 +103,7 @@ impl Suggest {
             return None;
         }
         self.reload_shell();
-        let longer = |c: &str| c.len() > typed.len() && c.starts_with(typed);
+        let longer = |c: &str| c.len() > typed.len() && c.starts_with(typed) && !secret(c);
         let ran = self.ran.iter().rev();
         ran.clone()
             .find(|(c, d)| Some(d.as_path()) == cwd && longer(c))
@@ -155,6 +162,16 @@ impl Suggest {
 
 fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+}
+
+/// Looks like it holds a password or token. ponytail: a word list and token
+/// prefixes; it also skips harmless commands that mention "token", which is fine.
+fn secret(cmd: &str) -> bool {
+    const WORDS: [&str; 9] = ["password", "passwd", "token", "secret", "api_key", "apikey", "api-key", "authorization:", "bearer "];
+    const PREFIXES: [&str; 10] = ["ghp_", "gho_", "ghu_", "ghs_", "github_pat_", "glpat-", "xoxb-", "xoxp-", "AKIA", "sk-"];
+    let lower = cmd.to_lowercase();
+    WORDS.iter().any(|w| lower.contains(w))
+        || cmd.split(|c: char| c.is_whitespace() || "=:'\"".contains(c)).any(|w| w.len() >= 16 && PREFIXES.iter().any(|p| w.starts_with(p)))
 }
 
 /// The first word of a suggestion, with the spaces before it, up to and
@@ -223,6 +240,16 @@ mod tests {
         assert_eq!(s.get("ls ", here), None);
         assert_eq!(s.get("  ", here), None);
         fs::remove_dir_all(&dir).unwrap();
+
+        // Secrets and space-prefixed commands stay out.
+        s.shell.push("mysql --password=hunter2".into());
+        s.shell.push("curl -H 'X: ghp_abcdefghijklmnop1234' x".into());
+        assert_eq!(s.get("mysql", here), None);
+        assert_eq!(s.get("curl", here), None);
+        s.ran(" echo private", &dir);
+        s.ran("export API_KEY=1", &dir);
+        assert_eq!(s.ran.len(), 2);
+        assert!(!secret("git commit -m 'fix the disk-usage bar'"));
 
         assert_eq!(word("status --short"), "status ");
         assert_eq!(word(" --short"), " --short");

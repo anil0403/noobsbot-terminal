@@ -682,7 +682,7 @@ impl App {
             pane.failed_at = Some(Instant::now());
         }
         if took >= NOTIFY_AFTER && !window_focused {
-            let cmd = blocks::command_text(&pane.term.lock(), prompt).unwrap_or_else(|| "Command".into());
+            let cmd = blocks::command_text(&pane.term.lock(), prompt).map_or("Command".into(), |c| c.trim().to_owned());
             let status = match code {
                 Some(0) => "done".to_owned(),
                 Some(c) => format!("failed ({c})"),
