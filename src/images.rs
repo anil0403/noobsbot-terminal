@@ -21,6 +21,10 @@ pub const IMAGE_TAG: &str = "noobsbot-image-";
 const MAX_SIDE: u32 = 8192;
 /// Memory for kitty images transmitted for later placement.
 const KITTY_QUOTA: usize = 256 << 20;
+/// Kitty images kept for later placement, however small.
+const KITTY_MAX: usize = 1000;
+/// Largest size in cells an image may take (`c`/`r` come from the program).
+const MAX_CELLS: f32 = 1000.0;
 
 /// A decoded picture, RGBA8.
 pub struct Pic {
@@ -72,6 +76,8 @@ pub struct Images {
     kitty: HashMap<u32, (Arc<Pic>, u64)>,
     /// A kitty command still arriving in chunks (`m=1`): its keys and data.
     chunk: Option<(Keys, Vec<u8>)>,
+    /// The first image placed on the alternate screen, while it's up.
+    alt_since: Option<u64>,
 }
 
 impl Images {
@@ -168,9 +174,10 @@ impl Images {
     fn store(&mut self, id: u32, pic: Arc<Pic>) {
         self.next += 1;
         self.kitty.insert(id, (pic, self.next));
-        while self.kitty.values().map(|(p, _)| p.rgba.len()).sum::<usize>() > KITTY_QUOTA {
+        let mut total: usize = self.kitty.values().map(|(p, _)| p.rgba.len()).sum();
+        while total > KITTY_QUOTA || self.kitty.len() > KITTY_MAX {
             let oldest = *self.kitty.iter().min_by_key(|(_, (_, at))| at).unwrap().0;
-            self.kitty.remove(&oldest);
+            total -= self.kitty.remove(&oldest).unwrap().0.rgba.len();
         }
     }
 
@@ -190,6 +197,7 @@ impl Images {
 
     fn add(&mut self, pic: Arc<Pic>, kitty_id: Option<u32>, col: usize, cols: f32, rows: f32) -> Place {
         self.next += 1;
+        let (cols, rows) = (cols.min(MAX_CELLS), rows.min(MAX_CELLS));
         self.placed.insert(self.next, Placed { pic, kitty_id, col, cols, rows });
         Place { n: self.next, cols: cols.ceil().max(1.0) as usize, rows: rows.ceil().max(1.0) as usize, move_cursor: true, newline: false }
     }
@@ -203,23 +211,26 @@ impl Images {
 
     /// Forget images whose cells are all gone (scrolled out, cleared, overwritten).
     pub fn evict<T>(&mut self, term: &Term<T>) {
-        // The other screen's cells can't be seen from here; wait until we're back.
-        if term.mode().contains(TermMode::ALT_SCREEN) {
-            return;
-        }
+        // Called right after placing an image. On the alternate screen only the
+        // images placed there are on its grid; the main screen's wait until it's back.
+        let alt = term.mode().contains(TermMode::ALT_SCREEN);
+        self.alt_since = alt.then(|| self.alt_since.unwrap_or(self.next));
+        let since = self.alt_since.unwrap_or(0);
+        let here = |n: &u64| *n >= since;
+        let wanted = self.placed.keys().filter(|n| here(n)).count();
         // Newest images sit lowest: walk up and stop once every one is found.
         let mut live = HashSet::new();
         for line in (term.topmost_line().0..=term.bottommost_line().0).rev() {
-            if live.len() == self.placed.len() {
+            if live.len() == wanted {
                 break;
             }
             for cell in &term.grid()[Line(line)][..] {
-                if let Some((n, _)) = tag(cell).filter(|(n, _)| self.placed.contains_key(n)) {
+                if let Some((n, _)) = tag(cell).filter(|(n, _)| here(n) && self.placed.contains_key(n)) {
                     live.insert(n);
                 }
             }
         }
-        self.placed.retain(|n, _| live.contains(n));
+        self.placed.retain(|n, _| !here(n) || live.contains(n));
     }
 }
 
@@ -581,6 +592,21 @@ mod tests {
         assert_eq!(term.grid().cursor.point, alacritty_terminal::index::Point::new(Line(1), Column(5)));
         im.evict(&term);
         assert_eq!(im.placed.len(), 1);
+        // On the alternate screen the main screen's image waits; the alt ones go when overwritten.
+        parser.advance(&mut term, b"\x1b[?1049h");
+        for _ in 0..3 {
+            parser.advance(&mut term, b"\x1b[2J\x1b[H");
+            let place = im.add(Pic::new(10, 10, vec![0; 400]).unwrap(), None, 0, 1.0, 1.0);
+            let cells = room(&term, &place);
+            parser.advance(&mut term, cells.as_bytes());
+            im.evict(&term);
+        }
+        assert_eq!(im.placed.keys().copied().collect::<HashSet<_>>(), HashSet::from([1, 4]));
+        parser.advance(&mut term, b"\x1b[?1049l");
+        im.evict(&term);
+        assert_eq!(im.placed.keys().copied().collect::<Vec<_>>(), [1]);
+        // A program can't ask for more rows than MAX_CELLS.
+        assert_eq!(im.add(Pic::new(10, 10, vec![0; 400]).unwrap(), None, 0, 1.0, 4e9).rows, MAX_CELLS as usize);
         parser.advance(&mut term, b"\x1b[2J\x1b[3J");
         im.evict(&term);
         assert!(im.placed.is_empty());
