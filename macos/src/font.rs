@@ -45,10 +45,13 @@ impl Font {
     }
 
     fn measure(&mut self) {
-        let (key, advance) = self.shape('M', false, false).expect("font has no 'M' glyph");
+        let (key, shaped) = self.shape('M', false, false).expect("font has no 'M' glyph");
         let face = self.system.get_font(key.font_id, Weight::NORMAL).expect("load font face");
-        let m = face.as_swash().metrics(&[]).scale(self.size);
-        self.cell_w = advance.round();
+        let face = face.as_swash();
+        let m = face.metrics(&[]).scale(self.size);
+        // The font's own advance: shaping adds Apple fonts' tracking (Menlo, SF Mono).
+        let advance = face.glyph_metrics(&[]).scale(self.size).advance_width(face.charmap().map('M'));
+        self.cell_w = if advance > 0.0 { advance } else { shaped }.round();
         self.cell_h = (m.ascent + m.descent + m.leading).ceil();
         self.baseline = (m.ascent + m.leading / 2.0).round();
         log::info!("font {:?} {}px → cell {}x{}", self.family, self.size, self.cell_w, self.cell_h);

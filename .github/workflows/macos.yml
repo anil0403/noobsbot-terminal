@@ -38,7 +38,7 @@ jobs:
           RUST_LOG=info target/Noobsbot.app/Contents/MacOS/noobsbot > "$RUNNER_TEMP/run.log" 2>&1 &
           sleep 15
           screencapture -x "$RUNNER_TEMP/screen.png" || true
-          # Type a command, then Cmd+D (split right) and Option+Left; needs System Events access.
+          # Type a command, Cmd+D (split right), another command; needs System Events access.
           osascript -e 'tell application "System Events"' -e 'keystroke "echo hello from noobsbot"' -e 'key code 36' \
             -e 'delay 1' -e 'keystroke "d" using command down' -e 'delay 2' -e 'keystroke "ls /Applications"' -e 'key code 36' \
             -e 'end tell' || true
