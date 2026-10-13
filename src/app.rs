@@ -540,6 +540,13 @@ impl App {
             Action::SplitUp => self.split(Dir::Up, None),
             Action::Focus(dir) => match pane::neighbor(&self.active_rects(), self.focused(), dir) {
                 Some(id) => self.focus(id),
+                // Past the last pane, Alt+Left/Right go on to the next tab.
+                None if self.tabs.len() > 1 && matches!(dir, Dir::Left | Dir::Right) => {
+                    let n = self.tabs.len();
+                    self.switch_tab(if dir == Dir::Right { (self.active + 1) % n } else { (self.active + n - 1) % n })
+                }
+                // Shells print unbound Alt+Arrows as ;3A junk; programs still get them.
+                None if self.focused_pane().at_prompt => {}
                 None => return false,
             },
             Action::Search => self.open_search(),
