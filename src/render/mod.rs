@@ -60,6 +60,10 @@ pub struct Renderer {
     /// CRT effect strengths when CRT mode is on.
     pub crt_params: Option<crt::Params>,
     started: std::time::Instant,
+    /// Radius of the window's rounded bottom corners (cut out to transparent), 0 for square.
+    pub corner: f32,
+    /// The compositor shows our alpha, so corners can be cut out.
+    transparent: bool,
 }
 
 impl Renderer {
@@ -81,6 +85,13 @@ impl Renderer {
             .expect("surface unsupported by adapter");
         // Terminal colors are sRGB bytes; write them as-is instead of gamma-converting.
         config.format = config.format.remove_srgb_suffix();
+        // Premultiplied alpha, for the rounded corners; the cells shader outputs it.
+        let modes = surface.get_capabilities(&adapter).alpha_modes;
+        let alpha = [wgpu::CompositeAlphaMode::PreMultiplied, wgpu::CompositeAlphaMode::Inherit].into_iter().find(|m| modes.contains(m));
+        log::info!("alpha modes {modes:?}, using {alpha:?}");
+        if let Some(m) = alpha {
+            config.alpha_mode = m;
+        }
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("cells.wgsl"));
@@ -116,7 +127,7 @@ impl Renderer {
 
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
-            size: 16,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -160,6 +171,8 @@ impl Renderer {
             crt,
             crt_params: None,
             started: std::time::Instant::now(),
+            corner: 0.0,
+            transparent: alpha.is_some(),
         }
     }
 
@@ -203,9 +216,13 @@ impl Renderer {
 
     /// Draw everything queued since the last frame on a `bg`-cleared window.
     pub fn finish(&mut self, bg: Rgb) {
-        let instances = std::mem::take(&mut self.quads);
-        let [r, g, b, _] = theme::to_f32(bg);
-        let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
+        let mut instances = std::mem::take(&mut self.quads);
+        // ponytail: square under CRT, whose pass writes opaque pixels.
+        let corner = if self.transparent && self.crt_params.is_none() { self.corner } else { 0.0 };
+        // Cleared transparent, then a window-sized bg quad the shader rounds off.
+        let (w, h) = self.size();
+        instances.insert(0, solid(0.0, 0.0, w, h, theme::to_f32(bg)));
+        let bg = wgpu::Color::TRANSPARENT;
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
@@ -217,13 +234,15 @@ impl Renderer {
         };
 
         // Image quads go after the cells', drawn in between them in order below.
-        let draws = std::mem::take(&mut self.image_draws);
-        let mut instances = instances;
+        let mut draws = std::mem::take(&mut self.image_draws);
+        for d in &mut draws {
+            d.0 += 1; // after the bg quad
+        }
         let cells = instances.len();
         instances.extend(draws.iter().map(|d| d.2));
         for (_, uid, _) in &draws {
             let t = &self.textures[uid];
-            let globals = [self.config.width as f32, self.config.height as f32, t.size.0, t.size.1];
+            let globals = [self.config.width as f32, self.config.height as f32, t.size.0, t.size.1, corner, 0.0, 0.0, 0.0];
             self.queue.write_buffer(&t.globals, 0, bytemuck::cast_slice(&globals));
         }
         let bytes: &[u8] = bytemuck::cast_slice(&instances);
@@ -231,7 +250,7 @@ impl Renderer {
             self.instances = instance_buffer(&self.device, instances.len().next_power_of_two());
         }
         self.queue.write_buffer(&self.instances, 0, bytes);
-        let globals = [self.config.width as f32, self.config.height as f32, self.atlas.size(), self.atlas.size()];
+        let globals = [self.config.width as f32, self.config.height as f32, self.atlas.size(), self.atlas.size(), corner, 0.0, 0.0, 0.0];
         self.queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
 
         let frame_view = frame.texture.create_view(&Default::default());
@@ -447,7 +466,7 @@ impl Renderer {
         let view = texture.create_view(&Default::default());
         let globals = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("image globals"),
-            size: 16,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
