@@ -152,6 +152,7 @@ impl App {
         let path = config::path();
         let config = config::load(&path).unwrap_or_else(|e| {
             log::error!("config error, using defaults: {e}");
+            notify("noobsbot: config error, using defaults".into(), e);
             Config::default()
         });
         if quake {
@@ -1005,7 +1006,10 @@ impl App {
     fn reload_config(&mut self) {
         let config = match config::load(&config::path()) {
             Ok(c) => c,
-            Err(e) => return log::error!("config error, keeping previous config: {e}"),
+            Err(e) => {
+                log::error!("config error, keeping previous config: {e}");
+                return notify("noobsbot: config error, keeping the previous config".into(), e);
+            }
         };
         log::info!("config reloaded");
         let font_changed = config.font != self.config.font;
