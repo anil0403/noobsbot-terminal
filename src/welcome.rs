@@ -63,17 +63,8 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
     out
 }
 
-/// Shortcuts worth knowing; a different one each time.
-const TIPS: [&str; 8] = [
-    "Ctrl+Shift+P: the command palette, every action and theme",
-    "Ctrl+Shift+E / O split the window, Alt+Arrows move focus",
-    "Ctrl+Shift+G copies the last command's output",
-    "Ctrl+Shift+Z / X jump between prompts",
-    "Ctrl+click opens links, and file.rs:12 in your editor",
-    "Ctrl+Shift+F searches the scrollback",
-    "Ctrl+Shift+Space: vi mode, select with the keyboard",
-    "noobsbot --quake: a drop-down terminal on F12",
-];
+/// The one shortcut worth knowing first: it leads to every other.
+const TIP: &str = "Ctrl+Shift+P: the command palette, every action and theme";
 
 fn info(gpu: &str, shell: &str) -> Vec<String> {
     let user = std::env::var("USER").unwrap_or_else(|_| "you".into());
@@ -127,7 +118,7 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
         meter("Battery", bar(level, true), status.to_lowercase());
     }
     lines.push(String::new());
-    lines.push(format!("\x1b[38;5;8m{}", TIPS[now.2 % TIPS.len()]));
+    lines.push(format!("\x1b[38;5;8m{TIP}"));
     lines.push(String::new());
     lines.push("\x1b[38;5;11m\u{e0b6}\x1b[1;48;5;11;38;5;0m Designed & Developed by Noobsbot Team \x1b[0;38;5;11m\u{e0b4}\x1b[0m".into());
     lines
@@ -152,8 +143,8 @@ fn greeting(hour: u32) -> &'static str {
     }
 }
 
-/// The local hour, "Tue 13 Oct 00:13", and seconds since 1970.
-fn now() -> (u32, String, usize) {
+/// The local hour and "Tue 13 Oct 00:13".
+fn now() -> (u32, String) {
     let mut text = [0u8; 64];
     // SAFETY: plain libc calls on our own values; strftime gets the buffer's size.
     unsafe {
@@ -161,7 +152,7 @@ fn now() -> (u32, String, usize) {
         let mut tm: libc::tm = std::mem::zeroed();
         libc::localtime_r(&now, &mut tm);
         let n = libc::strftime(text.as_mut_ptr().cast(), text.len(), c"%a %d %b %H:%M".as_ptr(), &tm);
-        (tm.tm_hour as u32, String::from_utf8_lossy(&text[..n]).into_owned(), now as usize)
+        (tm.tm_hour as u32, String::from_utf8_lossy(&text[..n]).into_owned())
     }
 }
 
@@ -264,7 +255,7 @@ mod tests {
         let lines: Vec<&str> = CAT.lines().skip(1).collect();
         assert_eq!(lines.iter().map(|l| l.len()).max(), Some(CAT_W));
         // Nothing beside the cat may wrap in the narrowest window that shows it.
-        assert!(TIPS.iter().all(|t| t.len() <= MIN_COLS - CAT_W - 3));
+        assert!(TIP.len() <= MIN_COLS - CAT_W - 3);
     }
 
     #[test]
