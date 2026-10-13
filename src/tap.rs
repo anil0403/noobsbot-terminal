@@ -52,29 +52,43 @@ impl Tap {
     /// Scan a chunk. Each mark comes with the offset just past its sequence, so
     /// the caller can feed the parser up to there before acting on it.
     pub fn scan(&mut self, bytes: &[u8], out: &mut Vec<(usize, Mark)>) {
-        for (i, &b) in bytes.iter().enumerate() {
+        let mut i = 0;
+        while i < bytes.len() {
+            // Runs that can't change the state are skipped (text) or taken (a string's body) whole.
+            match self.state {
+                State::Ground => match bytes[i..].iter().position(|&b| b == 0x1b) {
+                    Some(n) => i += n,
+                    None => return,
+                },
+                State::Str => {
+                    let osc = self.kind == Kind::Osc;
+                    let n = bytes[i..].iter().position(|&b| b == 0x1b || osc && b == 0x07).unwrap_or(bytes.len() - i);
+                    let room = (if osc { MAX } else { MAX_IMAGE } + 1).saturating_sub(self.osc.len());
+                    self.osc.extend_from_slice(&bytes[i..i + n.min(room)]);
+                    i += n;
+                    if i == bytes.len() {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+            let b = bytes[i];
+            i += 1;
             if self.state == State::StrEnd {
                 self.state = State::Esc;
                 if b == b'\\' {
-                    self.finish(i + 1, out);
+                    self.finish(i, out);
                     self.state = State::Ground;
                     continue;
                 }
-                self.finish(i, out);
+                self.finish(i - 1, out);
             }
             self.state = match (self.state, b) {
-                (State::Str, 0x07) if self.kind == Kind::Osc => {
-                    self.finish(i + 1, out);
+                (State::Str, 0x07) => {
+                    self.finish(i, out);
                     State::Ground
                 }
-                (State::Str, 0x1b) => State::StrEnd,
-                (State::Str, _) => {
-                    let max = if self.kind == Kind::Osc { MAX } else { MAX_IMAGE };
-                    if self.osc.len() <= max {
-                        self.osc.push(b);
-                    }
-                    State::Str
-                }
+                (State::Str, _) => State::StrEnd, // ESC: the body was taken above
                 (State::Esc, b']' | b'_' | b'P') => {
                     self.osc.clear();
                     self.kind = match b {
@@ -161,6 +175,19 @@ mod tests {
             tap.scan(chunk, &mut out);
         }
         out
+    }
+
+    #[test]
+    fn any_split_gives_the_same_marks() {
+        let s: &[u8] = b"text\x1b[0m\x1b]133;A\x07$ \x1b]133;B\x1b\\ls\x1b]7;file://h/tmp\x07\x1b_Ga=T;QUJD\x1b\\\x1bP0;1q#0~\x1b\\\x1b]133;D;0\x1b\\";
+        let whole: Vec<Mark> = scan(&[s]).into_iter().map(|(_, m)| m).collect();
+        assert_eq!(whole.len(), 6);
+        let bytes: Vec<&[u8]> = s.chunks(1).collect();
+        assert_eq!(scan(&bytes).into_iter().map(|(_, m)| m).collect::<Vec<_>>(), whole);
+        for at in 1..s.len() {
+            let (a, b) = s.split_at(at);
+            assert_eq!(scan(&[a, b]).into_iter().map(|(_, m)| m).collect::<Vec<_>>(), whole, "split at {at}");
+        }
     }
 
     #[test]
