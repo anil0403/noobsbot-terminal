@@ -1010,6 +1010,10 @@ impl ApplicationHandler<UserEvent> for App {
         if self.tabs.is_empty() {
             event_loop.exit(); // no shell to run
         }
+        if self.quake.is_none() {
+            // Focus it: left unfocused on top, clicks on the window behind wouldn't raise that.
+            crate::quake::activate(self.window.as_ref().unwrap());
+        }
         self.toggle_quake();
     }
 
