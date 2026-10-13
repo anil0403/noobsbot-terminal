@@ -337,7 +337,7 @@ impl Renderer {
             if cell.point == cursor.point {
                 match cursor_shape {
                     CursorShape::Block => (fg, bg) = (theme.bg, theme.cursor),
-                    CursorShape::Beam => glyphs.push(solid(x, y, line_h * 2.0, ch, cursor_color)),
+                    CursorShape::Beam => glyphs.push(solid(x, y, line_h, ch, cursor_color)),
                     CursorShape::Underline => glyphs.push(solid(x, y + ch - line_h * 2.0, w, line_h * 2.0, cursor_color)),
                     CursorShape::HollowBlock => {
                         glyphs.push(solid(x, y, w, line_h, cursor_color));
