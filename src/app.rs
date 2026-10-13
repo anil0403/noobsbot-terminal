@@ -958,7 +958,7 @@ impl ApplicationHandler<UserEvent> for App {
                 .with_visible(false);
         } else {
             // Room for the welcome screen, in its bigger font.
-            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1240.0, 760.0));
+            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1400.0, 860.0));
             if self.config.terminal.welcome {
                 self.zoom = (WELCOME_FONT - self.config.font.size).max(0.0);
                 self.welcome_zoom = true;
