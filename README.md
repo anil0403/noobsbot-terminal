@@ -83,7 +83,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 
 ## ✨ Features
 
-|   |   |
+| Feature | What you get |
 |---|---|
 | 🎨 **Situation themes** | The palette follows what you're doing: SSH host, user, git branch, folder, program, time of day. |
 | ⚡ **GPU rendering** | Drawn with wgpu (Vulkan or OpenGL), smooth at your screen's refresh rate. |
