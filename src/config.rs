@@ -81,7 +81,7 @@ impl Default for Quake {
 pub struct Font {
     pub family: String,
     pub size: f32,
-    /// 100 (thin) to 900 (black); 400 is regular. Bold text is 700, or this if heavier.
+    /// 100 (thin) to 900 (black); 400 is regular, 600 (semibold) the default. Bold text is 700, or this if heavier.
     pub weight: u16,
 }
 
@@ -123,7 +123,7 @@ pub enum Shape {
 
 impl Default for Font {
     fn default() -> Self {
-        Self { family: "JetBrainsMono Nerd Font Mono".into(), size: 18.0, weight: 400 }
+        Self { family: "JetBrainsMono Nerd Font Mono".into(), size: 18.0, weight: 600 }
     }
 }
 

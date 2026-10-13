@@ -8,7 +8,7 @@ theme = "default"
 family = "JetBrainsMono Nerd Font Mono"
 size = 18.0
 # 100 (thin) to 900 (black): 400 regular, 500 medium, 600 semibold.
-weight = 400
+weight = 600
 
 [terminal]
 # Lines of history kept above the screen.
