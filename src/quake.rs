@@ -36,6 +36,9 @@ pub fn serve(proxy: EventLoopProxy<UserEvent>) {
         Ok(l) => l,
         Err(e) => return log::warn!("quake socket {}: {e}", path.display()),
     };
+    // Only you can toggle it (it's in /tmp when there's no XDG_RUNTIME_DIR).
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let mut msg = String::new();

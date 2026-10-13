@@ -44,8 +44,12 @@ pub fn set_term() {
         Command::new("infocmp").arg("noobsbot").stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success())
     };
     if !installed() {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
         let src = std::env::temp_dir().join(format!("noobsbot-{}.terminfo", std::process::id()));
-        if std::fs::write(&src, include_str!("../extra/noobsbot.terminfo")).is_ok() {
+        // A new file only: never write through something another user left at that name.
+        let new = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&src);
+        if new.and_then(|mut f| f.write_all(include_str!("../extra/noobsbot.terminfo").as_bytes())).is_ok() {
             match Command::new("tic").arg("-x").arg(&src).output() {
                 Ok(out) if out.status.success() => log::info!("installed the noobsbot terminfo"),
                 Ok(out) => log::warn!("tic: {}", String::from_utf8_lossy(&out.stderr).trim()),
