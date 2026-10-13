@@ -41,6 +41,8 @@ pub struct Pane {
     pub running: Option<(String, PathBuf)>,
     /// The welcome screen is still up, until the first key at the prompt.
     pub welcome: bool,
+    /// When the welcome screen started typing itself out, until it's all shown.
+    pub typing: Option<Instant>,
 }
 
 impl Pane {
@@ -56,7 +58,7 @@ impl Pane {
         if !(self.welcome && self.at_prompt) {
             return false;
         }
-        self.welcome = false;
+        (self.welcome, self.typing) = (false, None);
         let mut term = self.term.lock();
         term.clear_screen(ClearMode::All);
         term.clear_screen(ClearMode::Saved);

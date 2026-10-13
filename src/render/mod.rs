@@ -300,7 +300,9 @@ impl Renderer {
     /// Queue one pane's grid: backgrounds and lines first, glyphs on top.
     /// Only the `active` pane gets a live cursor; the others are dimmed.
     /// Search `matches` are highlighted, `current` most strongly; the hovered `link` is underlined.
-    /// Images tagged on the grid are drawn over their cells.
+    /// Images tagged on the grid are drawn over their cells. With `reveal`, only
+    /// that many cells with something to show are drawn (a typewriter); true if
+    /// some were held back.
     #[allow(clippy::too_many_arguments)]
     pub fn pane(
         &mut self,
@@ -312,7 +314,8 @@ impl Renderer {
         matches: &[Match],
         current: Option<&Match>,
         link: Option<&Match>,
-    ) {
+        reveal: Option<usize>,
+    ) -> bool {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
         let (ox, oy) = (rect.x, rect.y);
         self.fill(rect, theme::to_f32(theme.bg));
@@ -322,6 +325,7 @@ impl Renderer {
         let cursor = content.cursor;
         let cursor_shape = match cursor.shape {
             CursorShape::Hidden => CursorShape::Hidden,
+            _ if reveal.is_some() => CursorShape::Hidden,
             _ if !active || !self.focused => CursorShape::HollowBlock,
             _ if !self.cursor_on => CursorShape::Hidden,
             shape => shape,
@@ -331,6 +335,7 @@ impl Renderer {
         let mut glyphs = std::mem::take(&mut self.glyphs);
         // Matches and cells both come in screen order: walk them together.
         let mut next_match = 0;
+        let mut shown = 0;
         // (screen line, placement, image row) for image cells on screen.
         let mut tags: Vec<(i32, u64, usize)> = Vec::new();
         for cell in content.display_iter {
@@ -350,6 +355,12 @@ impl Renderer {
 
             let mut fg = theme.resolve(cell.fg, content.colors);
             let mut bg = theme.resolve(cell.bg, content.colors);
+            if cell.c != ' ' || bg != theme.bg {
+                shown += 1;
+                if reveal.is_some_and(|n| shown > n) {
+                    continue;
+                }
+            }
             if flags.contains(Flags::DIM) {
                 fg = theme::dim(fg);
             }
@@ -438,6 +449,7 @@ impl Renderer {
             let [r, g, b, _] = theme::to_f32(theme.bg);
             self.fill(rect, [r, g, b, 0.4]);
         }
+        reveal.is_some_and(|n| shown > n)
     }
 }
 

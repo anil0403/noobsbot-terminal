@@ -65,6 +65,8 @@ const RESIZE_STEP: f32 = 0.05;
 const NOTIFY_AFTER: Duration = Duration::from_secs(10);
 /// Red border after a failed command.
 const FLASH: Duration = Duration::from_millis(400);
+/// Welcome screen characters typed per second.
+const TYPE_RATE: f32 = 3000.0;
 /// Quake window fade in/out.
 const FADE: Duration = Duration::from_millis(150);
 
@@ -326,6 +328,7 @@ impl App {
             at_prompt: false,
             running: None,
             welcome,
+            typing: welcome.then(Instant::now),
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -1139,7 +1142,7 @@ impl ApplicationHandler<UserEvent> for App {
             self.dirty = true;
         }
         let flicker = self.crt && self.config.crt.flicker > 0.0;
-        if flicker || self.panes.values().any(|p| p.theme.fading() || p.failed_at.is_some_and(|t| t.elapsed() < FLASH)) {
+        if flicker || self.panes.values().any(|p| p.theme.fading() || p.typing.is_some() || p.failed_at.is_some_and(|t| t.elapsed() < FLASH)) {
             self.dirty = true;
         }
 
@@ -1513,7 +1516,10 @@ impl ApplicationHandler<UserEvent> for App {
                         None => (Vec::new(), None),
                     };
                     let link = self.hover.as_ref().filter(|(p, _)| *p == id).map(|(_, l)| &l.range);
-                    renderer.pane(&term, &pane.images.lock().unwrap(), &theme, pane.rect, id == tab.focused, &matches, current.as_ref(), link);
+                    let reveal = pane.typing.map(|t| (t.elapsed().as_secs_f32() * TYPE_RATE) as usize);
+                    if !renderer.pane(&term, &pane.images.lock().unwrap(), &theme, pane.rect, id == tab.focused, &matches, current.as_ref(), link, reveal) {
+                        pane.typing = None;
+                    }
                     let vi = term.mode().contains(TermMode::VI);
                     let gutter = gutter(&term, &pane.blocks, &theme);
                     let cursor_row = usize::try_from(term.grid().cursor.point.line.0 + term.grid().display_offset() as i32).ok();
