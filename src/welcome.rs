@@ -7,21 +7,32 @@ use std::fs::read_to_string;
 /// Colons are the fur (dense enough to read on black); dashes the inner ears,
 /// stripes, eyes, whiskers, mouth, collar and toes.
 const CAT: &str = r"
-    ::              ::
-   ::-::          ::-::
-   ::---::::::::::---::
-  ::::::::::::::::::::::
-  :::::- o -::- o -:::::
-  ::::::::::vv::::::::::
---- :::::::-::-::::::: ---
- ---::::::::::::::::::---
-      ::::::::::::::
-    ::::::::::::::::::   ::
-   ::::::::::::::::::::  :-:
-   :::-::-:::  :::-::-::::
-    ------------------:::
+     ::                  ::
+    ::-::              ::-::
+    ::---::          ::---::
+    ::----:::-:--:-:::----::
+   :::::::::::-::-:::::::::::
+  ::::::::::::::::::::::::::::
+  :::::-----::::::::-----:::::
+  :::::- o -::::::::- o -:::::
+  :::::-----::::::::-----:::::
+  :::::::::::::vv:::::::::::::
+---- ::::::::::--:::::::::: ----
+ ----::::::::--::--::::::::----
+---- ::::::---::::---:::::: ----
+       ::::::::::::::::::
+        -------::-------
+     ::::::::::::::::::::::
+    ---::::::::::::::::::---
+   ::::::::::::::::::::::::::
+  ---::::::::::::::::::::::---    :::
+  ::::::::::::::::::::::::::::   :--::
+  ---::::::::::::::::::::::---  :::::
+   ::::::::::::  :::::::::::: ::--:
+    ::-::-::-:    :-::-::-:: :::::
+     ----------------------::::
 ";
-const CAT_W: usize = 28;
+const CAT_W: usize = 38;
 /// Narrower than this, the cat is left out.
 const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
@@ -52,6 +63,18 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
     out
 }
 
+/// Shortcuts worth knowing; a different one each time.
+const TIPS: [&str; 8] = [
+    "Ctrl+Shift+P: the command palette, every action and theme",
+    "Ctrl+Shift+E / O split the window, Alt+Arrows move focus",
+    "Ctrl+Shift+G copies the last command's output",
+    "Ctrl+Shift+Z / X jump between prompts",
+    "Ctrl+click opens links, and file.rs:12 in your editor",
+    "Ctrl+Shift+F searches the scrollback",
+    "Ctrl+Shift+Space: vi mode, select with the keyboard",
+    "noobsbot --quake: a drop-down terminal on F12",
+];
+
 fn info(gpu: &str, shell: &str) -> Vec<String> {
     let user = std::env::var("USER").unwrap_or_else(|_| "you".into());
     let now = now();
@@ -63,24 +86,28 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
     );
     let mut lines = vec![
         header,
+        String::new(),
         format!("\x1b[1;38;5;11m{}\x1b[0;1m, {user}!\x1b[0m Welcome to \x1b[1;38;5;14mnoobsbot\x1b[0m.", greeting(now.0)),
+        String::new(),
     ];
-    // Two or three facts a line, the empty ones left out.
-    let mut row = |label: &str, values: &[String]| {
-        let value = values.iter().filter(|v| !v.is_empty()).map(String::as_str).collect::<Vec<_>>().join(" \x1b[38;5;8m·\x1b[0m ");
+    let mut row = |label: &str, value: String| {
         if !value.is_empty() {
             lines.push(format!("\x1b[1;38;5;12m{label:<10}\x1b[0m{value}"));
         }
     };
-    row("OS", &[format!("{} {}", os_name(), std::env::consts::ARCH), first_line("/proc/sys/kernel/osrelease")]);
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().trim_start_matches("X-").to_owned();
-    row("Desktop", &[desktop, shell.to_owned(), format!("noobsbot {}", env!("CARGO_PKG_VERSION"))]);
-    row("Uptime", &[uptime(), packages()]);
-    row("CPU", &[cpu()]);
-    row("GPU", &[tidy(gpu)]);
+    row("OS", format!("{} {}", os_name(), std::env::consts::ARCH));
+    row("Kernel", first_line("/proc/sys/kernel/osrelease"));
+    row("Uptime", uptime());
+    row("Packages", packages());
+    row("Desktop", std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().trim_start_matches("X-").to_owned());
+    row("Shell", shell.to_owned());
+    row("Terminal", format!("noobsbot {}", env!("CARGO_PKG_VERSION")));
+    row("CPU", cpu());
+    row("GPU", tidy(gpu));
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get()) as f64;
     let mem = memory();
     let gib = |kib: f64| kib / 1024.0 / 1024.0;
+    lines.push(String::new());
     let mut meter = |label: &str, bar: String, text: String| {
         lines.push(format!("\x1b[1;38;5;12m{label:<10}\x1b[0m{bar} {text}"));
     };
@@ -99,6 +126,14 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
     if let Some((level, status)) = battery() {
         meter("Battery", bar(level, true), status.to_lowercase());
     }
+    lines.push(String::new());
+    // The theme's 16 colors.
+    for half in [0..8, 8..16] {
+        lines.push(half.map(|i| format!("\x1b[38;5;{i}m\u{25cf} ")).collect::<String>());
+    }
+    lines.push(String::new());
+    lines.push(format!("\x1b[38;5;8m{}", TIPS[now.2 % TIPS.len()]));
+    lines.push(String::new());
     lines.push("\x1b[38;5;11m\u{e0b6}\x1b[1;48;5;11;38;5;0m Designed & Developed by Noobsbot Team \x1b[0;38;5;11m\u{e0b4}\x1b[0m".into());
     lines
 }
@@ -122,8 +157,8 @@ fn greeting(hour: u32) -> &'static str {
     }
 }
 
-/// The local hour and "Tue 13 Oct 00:13".
-fn now() -> (u32, String) {
+/// The local hour, "Tue 13 Oct 00:13", and seconds since 1970.
+fn now() -> (u32, String, usize) {
     let mut text = [0u8; 64];
     // SAFETY: plain libc calls on our own values; strftime gets the buffer's size.
     unsafe {
@@ -131,7 +166,7 @@ fn now() -> (u32, String) {
         let mut tm: libc::tm = std::mem::zeroed();
         libc::localtime_r(&now, &mut tm);
         let n = libc::strftime(text.as_mut_ptr().cast(), text.len(), c"%a %d %b %H:%M".as_ptr(), &tm);
-        (tm.tm_hour as u32, String::from_utf8_lossy(&text[..n]).into_owned())
+        (tm.tm_hour as u32, String::from_utf8_lossy(&text[..n]).into_owned(), now as usize)
     }
 }
 
@@ -185,8 +220,8 @@ fn packages() -> String {
     let count = |dir: &str, ext: &str| std::fs::read_dir(dir).map_or(0, |d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(ext)).count());
     match (count("/var/lib/pacman/local", "").saturating_sub(1), count("/var/lib/dpkg/info", ".list")) {
         (0, 0) => String::new(),
-        (0, n) => format!("{n} packages (dpkg)"),
-        (n, _) => format!("{n} packages (pacman)"), // minus ALPM_DB_VERSION
+        (0, n) => format!("{n} (dpkg)"),
+        (n, _) => format!("{n} (pacman)"), // minus ALPM_DB_VERSION
     }
 }
 
@@ -233,6 +268,8 @@ mod tests {
     fn cat_fits() {
         let lines: Vec<&str> = CAT.lines().skip(1).collect();
         assert_eq!(lines.iter().map(|l| l.len()).max(), Some(CAT_W));
+        // Nothing beside the cat may wrap in the narrowest window that shows it.
+        assert!(TIPS.iter().all(|t| t.len() <= MIN_COLS - CAT_W - 3));
     }
 
     #[test]
