@@ -161,8 +161,8 @@ impl Renderer {
         }
     }
 
-    pub fn set_font(&mut self, family: &str, size: f32) {
-        self.font.set(family, size);
+    pub fn set_font(&mut self, family: &str, size: f32, weight: u16) {
+        self.font.set(family, size, weight);
         self.atlas.clear();
     }
 
