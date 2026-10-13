@@ -34,6 +34,8 @@ pub struct Pane {
     pub cwd: Option<PathBuf>,
     /// When the last command failed, for the red border flash.
     pub failed_at: Option<Instant>,
+    /// The shell is waiting at its prompt (shell integration), not running a command.
+    pub at_prompt: bool,
 }
 
 impl Pane {

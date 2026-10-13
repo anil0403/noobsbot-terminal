@@ -304,6 +304,7 @@ impl App {
             blocks: Blocks::default(),
             cwd: None,
             failed_at: None,
+            at_prompt: false,
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -585,6 +586,11 @@ impl App {
         if let Mark::Cwd(path) = mark {
             pane.cwd = Some(path);
             return;
+        }
+        match mark {
+            Mark::CommandEnd(_) => pane.at_prompt = true, // sent before every prompt
+            Mark::CommandStart => pane.at_prompt = false,
+            _ => {}
         }
         let Some((code, took)) = pane.blocks.mark(prompt, &mark) else { return };
         if code.is_some_and(|c| c != 0) {
@@ -1109,6 +1115,15 @@ impl ApplicationHandler<UserEvent> for App {
                     if let Some(cmd) = vi_binding(&event.logical_key, self.mods) {
                         self.vi(cmd);
                     }
+                    return;
+                }
+                // Ctrl+V pastes at the shell prompt, where the shell would only take the
+                // next key literally (and show a paste's ^[[200~). Programs still get it.
+                if self.mods == ModifiersState::CONTROL
+                    && matches!(&event.logical_key, Key::Character(c) if c.eq_ignore_ascii_case("v"))
+                    && self.focused_pane().at_prompt
+                {
+                    self.paste(false);
                     return;
                 }
                 let mods = self.mods;
