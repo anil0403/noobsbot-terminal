@@ -280,11 +280,7 @@ impl App {
         // The first shell of a window opens under the welcome screen.
         let welcome = id == 0 && command_is_shell && self.config.terminal.welcome;
         if welcome {
-            let name = match self.shell.as_str() {
-                "" => std::env::var("SHELL").unwrap_or_default(),
-                s => s.to_owned(),
-            };
-            let screen = crate::welcome::screen(dims.columns(), &renderer.gpu, name.rsplit('/').next().unwrap_or(""));
+            let screen = crate::welcome::screen(dims.columns(), &renderer.gpu, &self.shell_name());
             alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *term.lock(), screen.as_bytes());
         }
         let options = tty::Options { shell, working_directory: cwd, env, ..Default::default() };
@@ -403,9 +399,16 @@ impl App {
         self.dirty = true;
     }
 
+    /// The shell's name, for the welcome screen.
+    fn shell_name(&self) -> String {
+        let path = if self.shell.is_empty() { std::env::var("SHELL").unwrap_or_default() } else { self.shell.clone() };
+        path.rsplit('/').next().unwrap_or("").to_owned()
+    }
+
     /// Lay out every tab and fit each pane's grid and PTY to its rect.
     fn relayout(&mut self) {
         let bar = self.bar_h();
+        let shell = self.shell_name();
         let Some(renderer) = &self.renderer else { return };
         let (w, h) = renderer.size();
         let area = Rect { x: BORDER, y: bar, w: w - 2.0 * BORDER, h: h - bar - BORDER };
@@ -424,6 +427,12 @@ impl App {
                 let mut term = pane.term.lock();
                 if (term.columns(), term.screen_lines()) != (cols, lines) {
                     term.resize(TermSize::new(cols, lines));
+                    // A welcome screen still up is drawn again for the new width (reflowed,
+                    // it falls apart); the resize then has the shell redraw its prompt below.
+                    if pane.welcome {
+                        let screen = format!("\x1b[H\x1b[2J\x1b[3J{}", crate::welcome::screen(cols, &renderer.gpu, &shell));
+                        alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *term, screen.as_bytes());
+                    }
                     drop(term);
                     pane.pty.resize(size);
                 }
@@ -1524,7 +1533,7 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
     let cols = ((w / cw) as usize).saturating_sub(4).min(64);
     let (bw, pad) = (cols as f32 * cw, (cw / 2.0).round());
     let (x, y) = (((w - bw) / 2.0).round(), ch * 2.0); // below the tab bar
-    let n = p.len().min(ROWS);
+    let n = p.len().clamp(1, ROWS); // a row for "No matching commands"
     let (fg, ink, accent) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg), theme::to_f32(theme.cursor));
     let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
     // A blank row between the query and the list.
@@ -1534,6 +1543,9 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
     let query = format!(" {}_", p.query);
     let skip = query.chars().count().saturating_sub(room); // keep the end of a long query in view
     r.text(qx, y, &query.chars().skip(skip).collect::<String>(), fg);
+    if p.len() == 0 {
+        r.text(x + cw * 2.0, y + 2.0 * ch, "No matching commands", muted);
+    }
     let first = p.selected.saturating_sub(ROWS - 1);
     for (i, row) in p.shown().skip(first).take(ROWS).enumerate() {
         let ry = y + (i + 2) as f32 * ch;
@@ -1645,11 +1657,15 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
         let x = BORDER + PAD + i as f32 * tab_w;
         // Pill: caps take a cell each, plus a cell of gap to the next tab.
         let fit = ((tab_w / cw) as usize).saturating_sub(4);
-        let label = format!(" Terminal {} ", i + 1);
-        let mut label: String = label.chars().take(fit).collect();
-        if fit > 0 && label.chars().count() == fit && !label.ends_with(' ') {
-            label.pop();
-            label.push('…');
+        let mut label = format!(" Terminal {} ", i + 1);
+        // Tight: just the number, padded if there's room.
+        for short in [format!(" {} ", i + 1), (i + 1).to_string()] {
+            if label.chars().count() > fit {
+                label = short;
+            }
+        }
+        if label.chars().count() > fit {
+            label = label.chars().take(fit.saturating_sub(1)).chain((fit > 0).then_some('…')).collect();
         }
         // Fill the slot, so each tab reads as its own block.
         let label = format!("{label:<fit$}");
