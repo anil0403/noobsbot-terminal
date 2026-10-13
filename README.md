@@ -88,7 +88,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 |---|---|
 | 🎨 **Situation themes** | The palette follows what you're doing: SSH host, user, git branch, folder, program, time of day. |
 | ⚡ **GPU rendering** | Drawn with wgpu (Vulkan or OpenGL), smooth at your screen's refresh rate. |
-| 🐱 **Welcome screen** | A cat beside your machine's specs and live meters, gone as soon as you type. |
+| 🐱 **Welcome screen** | A cat beside your machine's specs and live meters that types itself out, gone as soon as you type. |
 | 💎 **Pretty prompt** | A powerline prompt for bash, zsh and fish: user, folder, git branch, exit status. |
 | 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. |
 | 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
