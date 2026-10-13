@@ -1,32 +1,61 @@
-# <img src="extra/noobsbot.svg" width="48" align="top"> noobsbot terminal
+<p align="center">
+  <img src="extra/noobsbot.svg" width="112" alt="noobsbot logo">
+</p>
 
-A GPU-rendered terminal emulator for Linux, written in Rust. Easy to use, fast,
-and it changes its color palette to match the situation: red when you SSH into
-production, amber as root, a different look on `main` or after dark.
+<h1 align="center">noobsbot terminal</h1>
+
+<p align="center">
+  <b>A fast, GPU-rendered terminal for Linux that changes color to match the situation.</b><br>
+  Red when you SSH into production, amber as root, a calmer look on <code>main</code> or after dark.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f2ad36?style=flat-square" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/platform-Linux-4e92e8?style=flat-square&logo=linux&logoColor=white" alt="Linux">
+  <img src="https://img.shields.io/badge/written%20in-Rust-ff8700?style=flat-square&logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/shells-zsh%20·%20bash%20·%20fish-5bc8a6?style=flat-square" alt="zsh, bash, fish">
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#shortcuts">Shortcuts</a> ·
+  <a href="#config">Config</a> ·
+  <a href="#themes">Themes</a>
+</p>
 
 ![Split panes with command marks and an inline image](extra/screenshots/main.png)
 
-| Command palette | CRT mode |
-|---|---|
-| ![Command palette](extra/screenshots/palette.png) | ![CRT mode](extra/screenshots/crt.png) |
+<table>
+  <tr>
+    <td align="center"><img src="extra/screenshots/palette.png" alt="Command palette"><br><sub><b>Command palette</b> (Ctrl+Shift+P)</sub></td>
+    <td align="center"><img src="extra/screenshots/crt.png" alt="CRT mode"><br><sub><b>CRT mode</b></sub></td>
+  </tr>
+</table>
 
-See [PLAN.md](PLAN.md) for how it was built, milestone by milestone.
+<a id="install"></a>
 
-## Install
+## 🚀 Install
 
-One command, on Arch, Debian/Ubuntu, Fedora or openSUSE:
+Paste this into any terminal. It works on **Arch, Debian/Ubuntu, Fedora and openSUSE**:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/anil0403/noobsbot-terminal/main/install.sh | bash
 ```
 
-It installs the dependencies (nano and the JetBrainsMono Nerd Font too), builds
-noobsbot and adds it to your app menu, and makes nano your default editor if you
-haven't picked one. Run it again to update. On Arch it builds the `noobsbot-git`
-package (`sudo pacman -R noobsbot-git` removes it); elsewhere noobsbot goes to
-`/usr/local/bin`, with Rust from rustup if your distro's is too old.
+That one line:
 
-### By hand
+- installs every dependency, including **nano** and the **JetBrainsMono Nerd Font** (anything already installed is skipped)
+- builds noobsbot and adds **noobsbot terminal** to your app menu
+- makes **nano your default editor** for git, gh and the rest, unless you've already picked one
+- updates noobsbot when you run it again
+
+On Arch it installs the `noobsbot-git` package (`sudo pacman -R noobsbot-git` removes it). Elsewhere noobsbot goes to `/usr/local/bin`, and Rust comes from rustup if your distro's is too old.
+
+<details>
+<summary><b>Install by hand</b></summary>
+
+<br>
 
 On Arch, build the package from [extra/aur](extra/aur):
 
@@ -44,119 +73,152 @@ install -Dm644 extra/noobsbot.desktop ~/.local/share/applications/noobsbot.deskt
 install -Dm644 extra/noobsbot.svg ~/.local/share/icons/hicolor/scalable/apps/noobsbot.svg
 ```
 
-`~/.local/bin` must be on your `PATH`. "noobsbot terminal" then shows up in
-your desktop's app menu. Also install `nano` (`sudo pacman -S nano`,
-`sudo apt install nano`): when you haven't set `$VISUAL` or `$EDITOR`,
-noobsbot sets `EDITOR=nano`, so git, gh and Ctrl+click on `file:line` open
-it. The Arch package pulls nano in by itself.
+`~/.local/bin` must be on your `PATH`. Also install `nano`: when you haven't set `$VISUAL` or `$EDITOR`, noobsbot sets `EDITOR=nano`, so git, gh and Ctrl+click on `file:line` open it.
 
-Programs inside see `TERM=noobsbot` (on first start noobsbot compiles its
-terminfo into `~/.terminfo` if `tic` is around; otherwise TERM stays
-`alacritty` or `xterm-256color`). Other machines don't know `noobsbot`, so in
-bash, zsh and fish `ssh` sends `TERM=xterm-256color` instead.
+Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its terminfo into `~/.terminfo` if `tic` is around; otherwise TERM stays `alacritty` or `xterm-256color`. Other machines don't know `noobsbot`, so in bash, zsh and fish `ssh` sends `TERM=xterm-256color` instead.
 
-## Keys
+</details>
+
+<a id="features"></a>
+
+## ✨ Features
+
+|   |   |
+|---|---|
+| 🎨 **Situation themes** | The palette follows what you're doing: SSH host, user, git branch, folder, program, time of day. |
+| ⚡ **GPU rendering** | Drawn with wgpu (Vulkan or OpenGL), smooth at your screen's refresh rate. |
+| 🐱 **Welcome screen** | A cat beside your machine's specs and live meters, gone as soon as you type. |
+| 💎 **Pretty prompt** | A powerline prompt for bash, zsh and fish: user, folder, git branch, exit status. |
+| 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. |
+| 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
+| 🔗 **Clickable links** | Ctrl+click URLs, terminal hyperlinks and `file.rs:12` paths. |
+| 🖼️ **Inline images** | kitty graphics protocol and sixel. |
+| 📋 **Copy on select** | Selected text goes straight to the clipboard. |
+| 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |
+| ⬇️ **Drop-down mode** | A quake-style terminal that slides in with F12. |
+| 🔔 **Command tracking** | Pass/fail marks per prompt, jump between commands, notifications when long ones finish. |
+
+<a id="shortcuts"></a>
+
+## ⌨️ Keyboard shortcuts
+
+**Ctrl+Shift+P** opens the command palette, which lists every action below, so it's the one shortcut worth learning first.
+
+<details open>
+<summary><b>Copy and paste</b></summary>
 
 | Keys | Action |
 |---|---|
-| Ctrl+Shift+P | Command palette: every action and theme, type to filter, Enter to run. **Shell: zsh / bash / fish** switches the window's shell (a new tab opens with it; later tabs and splits use it too) |
 | Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste |
 | Ctrl+V | Paste at the shell prompt (programs like vim, nano and Claude Code still get Ctrl+V) |
 | Shift+Insert, middle click | Paste (middle click pastes the mouse selection) |
 | Mouse drag, double / triple click | Select text, word, line (copied to the clipboard and the mouse selection) |
 | Shift + mouse | Select even when an app (vim, tmux) captures the mouse |
-| Shift+PgUp / Shift+PgDn, wheel | Scroll through history |
-| Ctrl+Shift+Home / End | Jump to top / bottom of history |
-| Ctrl+= / Ctrl+- / Ctrl+0 | Bigger / smaller / reset font |
-| Ctrl+Shift+T | New tab, or the + button in the tab bar (opens in the current shell's directory) |
-| Ctrl+Shift+E / Ctrl+Shift+O | Split right / split down (also the ◫ ⊟ buttons at the right of the tab bar; split up and left from the palette or right-click) |
+| Ctrl+Shift+G | Copy the last command's output |
+
+</details>
+
+<details open>
+<summary><b>Tabs and splits</b></summary>
+
+| Keys | Action |
+|---|---|
+| Ctrl+Shift+T, **+** button | New tab (opens in the current shell's directory) |
+| Ctrl+Shift+E / Ctrl+Shift+O | Split right / split down (also the buttons at the right of the tab bar; up and left from the palette or right-click) |
 | Right-click | Menu: copy, paste, split up / right / down / left, new tab, close pane (Shift+right-click when a program uses the mouse) |
 | Ctrl+Shift+W | Close pane (the last pane closes its tab) |
 | Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
 | Alt+Arrows, click | Move focus between split panes |
 | Ctrl+Shift+Arrows, drag the divider | Resize splits |
+
+</details>
+
+<details open>
+<summary><b>Scrolling, search and navigation</b></summary>
+
+| Keys | Action |
+|---|---|
+| Shift+PgUp / Shift+PgDn, wheel | Scroll through history |
+| Ctrl+Shift+Home / End | Jump to top / bottom of history |
+| Ctrl+Shift+Z / Ctrl+Shift+X | Scroll to the previous / next command's prompt |
 | Ctrl+Shift+F | Search history (regex, or plain text if it isn't one). Enter / Shift+Enter: older / newer match, Esc: close |
 | Ctrl+Shift+Space | Vi mode: `hjkl` `wbe` `0$^` `g` `G` `Ctrl+U/D`, `v` / `V` / `Ctrl+V` select, `y` copy, `/` search, `n` / `N` next, Esc / `q` leave |
-| Ctrl+Shift+Z / Ctrl+Shift+X | Scroll to the previous / next command's prompt |
-| Ctrl+Shift+G | Copy the last command's output |
 | Ctrl + hover / click | Underline / open a link: URLs and terminal hyperlinks in the browser, `file.rs:12[:5]` in `$VISUAL`/`$EDITOR` (in a split, at that line; no editor set: the desktop's default app) |
 
-## Config
+</details>
 
-`~/.config/noobsbot/config.toml` is created with every option documented on
-first launch ([example](config.example.toml)). Changes apply as soon as you
-save.
+<details open>
+<summary><b>View</b></summary>
 
-## Shell integration
+| Keys | Action |
+|---|---|
+| Ctrl+Shift+P | Command palette: every action and theme, type to filter, Enter to run. **Shell: zsh / bash / fish** switches the window's shell (a new tab opens with it; later tabs and splits use it too) |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Bigger / smaller / reset font |
 
-bash and zsh start with a small script (no dotfile edits; your own rc files
-still load) that tells the terminal where prompts, commands and output are and
-which directory you're in. Fish does this by itself. You get:
+</details>
 
-- a mark left of each prompt: green when the command worked, red when it
-  failed, yellow while it runs, plus a short red flash around the pane on failure
-- prompt jumps and copy-last-output (keys above)
-- a desktop notification when a command that ran 10 s or more ends while the
-  window isn't focused
-- new tabs, splits and `file:line` links use the shell's directory
+<a id="config"></a>
 
-### Pretty prompt
+## ⚙️ Config
 
-Set `pretty_prompt = true` under `[terminal]` for a powerline prompt in bash,
-zsh or fish, in place of your shell's own: user (and host over SSH), folder,
-git branch (with ● when there are uncommitted changes), and a ✓ or ✗ with
-the exit code. Its colors come from the theme's
-palette, so situation themes recolor it. Icons need a Nerd Font (the default
-font is one). It applies to shells started after the change.
+`~/.config/noobsbot/config.toml` is created on first launch with every option documented ([example](config.example.toml)). Changes apply **as soon as you save**.
+
+## 🐚 Shell integration
+
+bash and zsh start with a small script that tells the terminal where prompts, commands and output are, and which directory you're in. It doesn't edit your dotfiles, and your own rc files still load. Fish does this by itself. You get:
+
+- a mark left of each prompt: 🟢 the command worked, 🔴 it failed, 🟡 it's still running, plus a short red flash around the pane on failure
+- prompt jumps and copy-last-output (see the shortcuts)
+- a desktop notification when a command that ran 10 s or more ends while the window isn't focused
+- new tabs, splits and `file:line` links that open in the shell's directory
+
+### 💎 Pretty prompt
+
+Set `pretty_prompt = true` under `[terminal]` for a powerline prompt in bash, zsh or fish, in place of your shell's own. It shows:
+
+- the user (and host over SSH)
+- the folder
+- the git branch, with ● when there are uncommitted changes
+- a ✓ or ✗ with the exit code
+
+Its colors come from the theme's palette, so situation themes recolor it. Icons need a Nerd Font (the default font is one). It applies to shells started after the change.
 
 ![Pretty prompt](extra/screenshots/prompt.png)
 
-## Welcome screen
+## 🐱 Welcome screen
 
-A new window opens with a cat drawn in text beside a summary of the
-machine: a powerline header (user, host, date), distro, kernel, uptime, package
-count, desktop, shell, CPU and GPU, with meters for load, memory, swap, disk
-and battery (green, yellow, red as they get worse), and a tip pointing to the
-command palette. It is drawn by the terminal itself from `/proc`
-before the shell starts, so it costs no startup time and works with any shell.
-New tabs and splits stay clean, and windows too narrow for it leave the cat
-out. The first key you press at the prompt (or Enter) clears it. Turn it off with `welcome = false` under `[terminal]`.
+A new window opens with a cat drawn in text beside a summary of the machine:
 
-## Drop-down (quake) mode
+- a powerline header with user, host and date
+- distro, kernel, uptime, desktop and package count, shell, CPU and GPU
+- meters for load, memory, swap, disk and battery that turn green, yellow, then red as they get worse
+- a tip pointing to the command palette
 
-`noobsbot --quake` opens a borderless terminal across the top of the screen
-(40 % high), always on top. **F12** shows and hides it from anywhere. If
-another program already owns F12, or you're on Wayland, set `quake.hotkey`
-in the config (e.g. `"Ctrl+grave"`), or bind `noobsbot --quake` to a key in
-your desktop's keyboard shortcuts: running it again toggles the open one.
+The terminal draws it itself from `/proc` before the shell starts, so it costs no startup time and works with any shell. New tabs and splits stay clean, and windows too narrow for it leave the cat out. The first key you press at the prompt (or Enter) clears it. Turn it off with `welcome = false` under `[terminal]`.
 
-## Images
+## ⬇️ Drop-down (quake) mode
 
-Programs can show pictures in the terminal using the kitty graphics protocol
-(`kitten icat photo.png`) or sixel (`magick photo.png sixel:-`, `img2sixel`).
-Images scroll with the text and stay in the scrollback until their lines
-scroll out or are cleared.
+`noobsbot --quake` opens a borderless terminal across the top of the screen (40 % high), always on top. **F12** shows and hides it from anywhere.
 
-## CRT mode
+If another program already owns F12, or you're on Wayland, set `quake.hotkey` in the config (e.g. `"Ctrl+grave"`). Or bind `noobsbot --quake` to a key in your desktop's keyboard shortcuts: running it again toggles the open one.
 
-Scanlines, glow, a curved screen and dark corners, like an old monitor.
-Toggle it with **Toggle CRT effect** in the command palette (Ctrl+Shift+P),
-or turn it on for good with `[crt] enabled = true`. Each effect's strength
-is set in `[crt]`; `flicker` is off by default because it redraws
-constantly.
+## 🖼️ Images
 
-## Situation themes
+Programs can show pictures in the terminal using the kitty graphics protocol (`kitten icat photo.png`) or sixel (`magick photo.png sixel:-`, `img2sixel`). Images scroll with the text and stay in the scrollback until their lines scroll out or are cleared.
 
-Built-in themes: `default`, `danger`, `root`, `careful`, `night`. `default` is
-One Half Dark's colors on black, with the warm amber, teal and blue of powerline prompts (as in
-[Pretty PowerShell](https://christitus.com/pretty-powershell/)); tabs, the
-palette and the search bar use the same rounded pill look, tinted by each
-pane's theme. Powerline separators (U+E0B0–E0B7) are drawn by the terminal to
-fill the cell exactly, so oh-my-posh and starship prompts join without seams. Rules in the
-config pick one based on what's happening in the terminal; the first rule whose
-conditions all match wins, and the switch fades in over 150 ms. Every pane
-picks its own theme, and each tab carries its pane's accent color, so an SSH
-session to production stays red in the tab bar while you work elsewhere.
+## 📺 CRT mode
+
+Scanlines, glow, a curved screen and dark corners, like an old monitor. Toggle it with **Toggle CRT effect** in the command palette, or turn it on for good with `[crt] enabled = true`. Each effect's strength is set in `[crt]`. `flicker` is off by default because it redraws constantly.
+
+<a id="themes"></a>
+
+## 🎨 Situation themes
+
+Built-in themes: `default`, `danger`, `root`, `careful`, `night`.
+
+`default` uses One Half Dark's colors on black, with the warm amber, teal and blue of powerline prompts (as in [Pretty PowerShell](https://christitus.com/pretty-powershell/)). Tabs, the palette and the search bar share the same rounded pill look, tinted by each pane's theme. The terminal draws powerline separators (U+E0B0–E0B7) itself to fill the cell exactly, so oh-my-posh and starship prompts join without seams.
+
+Rules in the config pick a theme based on what's happening in the terminal. The first rule whose conditions all match wins, and the switch fades in over 150 ms. Every pane picks its own theme and each tab carries its pane's accent color, so an SSH session to production stays red in the tab bar while you work elsewhere.
 
 ```toml
 [[rules]]
@@ -176,10 +238,16 @@ when = { hours = "22-6" }
 theme = "night"
 ```
 
-Conditions: `ssh_host`, `user`, `git_branch`, `cwd`, `process` (globs with `*`
-and `?`, or a list of them) and `hours`. Detection reads `/proc` and
-`.git/HEAD` directly, so nothing is spawned. Out of the box, root and any SSH
-host containing "prod" are covered.
+| Condition | Matches | Example |
+|---|---|---|
+| `ssh_host` | host you're SSH'd into | `"prod-*"` |
+| `user` | user of the running program | `"root"` |
+| `git_branch` | branch of the current repo | `["main", "master"]` |
+| `cwd` | current directory | `"~/work/*"` |
+| `process` | running program | `"vim"` |
+| `hours` | local time range (wraps past midnight) | `"22-6"` |
+
+Text conditions take `*` and `?` globs, or a list of them. Detection reads `/proc` and `.git/HEAD` directly, so nothing is spawned. Out of the box, root and any SSH host containing "prod" are covered.
 
 Make your own theme by naming it and listing only the colors that differ:
 
@@ -189,6 +257,8 @@ background = "#0b1a2b"
 cursor = "#5fd7ff"
 ```
 
-## License
+---
 
-[MIT](LICENSE)
+<p align="center">
+  <sub>Designed & developed by the Noobsbot Team · <a href="LICENSE">MIT license</a> · <a href="PLAN.md">How it was built</a></sub>
+</p>
