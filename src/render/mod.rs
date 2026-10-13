@@ -221,7 +221,9 @@ impl Renderer {
 
     /// Draw everything queued since the last frame on a `bg`-cleared window.
     pub fn finish(&mut self, bg: Rgb) {
+        // Taken now, so a frame skipped below doesn't leave them for the next one.
         let mut instances = std::mem::take(&mut self.quads);
+        let draws = std::mem::take(&mut self.image_draws);
         let [r, g, b, _] = theme::to_f32(bg);
         let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
 
@@ -235,7 +237,6 @@ impl Renderer {
         };
 
         // Image quads go after the cells', drawn in between them in order below.
-        let draws = std::mem::take(&mut self.image_draws);
         let cells = instances.len();
         instances.extend(draws.iter().map(|d| d.2));
         for (_, uid, _) in &draws {
