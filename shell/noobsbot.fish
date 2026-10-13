@@ -38,10 +38,14 @@ if test "$NOOBSBOT_PROMPT" = pretty
         set -l dir (path basename -- $PWD)
         test "$PWD" = "$HOME"; and set dir '~'
         __noobsbot_seg 208 15 " $dir"
-        set -l branch (git symbolic-ref --short HEAD 2>/dev/null; or git rev-parse --short HEAD 2>/dev/null)
+        # One git run (no index lock: don't race the user's git): "# branch.oid SHA",
+        # "# branch.head NAME" (or "(detached)"), then a line per change.
+        set -l st (GIT_OPTIONAL_LOCKS=0 git status --porcelain=v2 --branch 2>/dev/null)
+        set -l branch (string replace -f '# branch.head ' '' -- $st)
+        test "$branch" = '(detached)'; and set branch (string sub -s 14 -l 7 -- $st[1])
         if test -n "$branch"
-            # ● when there's uncommitted work (no index lock: don't race the user's git).
-            test -n "$(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1)"; and set branch "$branch ●"
+            # ● when there's uncommitted work.
+            string match -qv '#*' -- $st; and set branch "$branch ●"
             __noobsbot_seg 14 0 " $branch"
         end
         if test $s -eq 0

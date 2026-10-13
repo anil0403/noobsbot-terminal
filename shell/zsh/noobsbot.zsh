@@ -34,13 +34,18 @@ __noobsbot_pretty() {
     }
     __noobsbot_seg 11 0 "%n${SSH_CONNECTION:+@%m}"
     __noobsbot_seg 208 15 $'\uf07b'" %1~"
-    if branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null); then
+    # One git run (no index lock: don't race the user's git): "# branch.oid SHA",
+    # "# branch.head NAME" (or "(detached)"), then a line per change.
+    local st=$(GIT_OPTIONAL_LOCKS=0 git status --porcelain=v2 --branch 2>/dev/null)
+    if [[ -n $st ]]; then
+        branch=${st#*$'# branch.head '} branch=${branch%%$'\n'*}
+        [[ $branch == '(detached)' ]] && branch=${st:13:7}
         # Shown, never expanded: % is a prompt escape, and with prompt_subst so
         # is $(...), unless it comes from a parameter (expanded only once).
         __noobsbot_branch=${branch//\%/%%}
         [[ -o promptsubst ]] && branch='${__noobsbot_branch}' || branch=$__noobsbot_branch
-        # ● when there's uncommitted work (no index lock: don't race the user's git).
-        [[ -n $(GIT_OPTIONAL_LOCKS=0 git status --porcelain 2>/dev/null | head -c1) ]] && branch+=" ●"
+        # ● when there's uncommitted work.
+        [[ $st == *$'\n'[^#]* ]] && branch+=" ●"
         __noobsbot_seg 14 0 $'\ue725'" $branch"
     fi
     if (( ${__noobsbot_last:-0} == 0 )); then
