@@ -40,7 +40,8 @@
 Paste this into any terminal. It works on **Arch, Debian/Ubuntu, Fedora and openSUSE**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/anil0403/noobsbot-terminal/main/install.sh | bash
+curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh \
+  | bash
 ```
 
 That one line:

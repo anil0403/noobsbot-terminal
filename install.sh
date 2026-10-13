@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # noobsbot terminal installer:
-#   curl -fsSL https://raw.githubusercontent.com/anil0403/noobsbot-terminal/main/install.sh | bash
+#   curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh | bash
 # Installs the dependencies (nano and the JetBrainsMono Nerd Font included),
 # builds noobsbot from source and makes nano the default editor.
 # Running it again updates noobsbot.
