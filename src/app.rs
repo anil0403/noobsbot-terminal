@@ -1590,7 +1590,8 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
     let backdrop = theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg);
     r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, theme::to_f32(backdrop));
     let y = ((bar_h - ch) / 2.0).round();
-    for (i, tab) in tabs.iter().enumerate() {
+    // A lone tab isn't drawn: the bar is just for the buttons then.
+    for (i, tab) in tabs.iter().enumerate().filter(|_| tabs.len() > 1) {
         let pane = panes.get_mut(&tab.focused).unwrap();
         let theme = pane.theme.frame();
         let x = i as f32 * tab_w + (cw / 2.0).round();
