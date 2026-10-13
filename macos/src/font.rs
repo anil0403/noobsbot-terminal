@@ -55,6 +55,10 @@ impl Font {
         self.cell_h = (m.ascent + m.descent + m.leading).ceil();
         self.baseline = (m.ascent + m.leading / 2.0).round();
         log::info!("font {:?} {}px → cell {}x{}", self.family, self.size, self.cell_w, self.cell_h);
+        let db = self.system.db();
+        let face = db.face(key.font_id).map(|f| (f.post_script_name.clone(), f.weight, format!("{:?}", f.source).chars().take(120).collect::<String>()));
+        let menlo: Vec<_> = db.faces().filter(|f| f.families.iter().any(|(n, _)| n.contains("Menlo"))).map(|f| (f.families.clone(), f.weight, f.index)).collect();
+        log::info!("DIAG faces={} picked={face:?} menlo={menlo:?}", db.len());
     }
 
     /// Shape one character, letting cosmic-text pick a fallback font if needed.
