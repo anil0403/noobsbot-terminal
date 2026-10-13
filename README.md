@@ -103,7 +103,8 @@ and battery (green, yellow, red as they get worse), the theme's colors and a
 different shortcut tip each time. It is drawn by the terminal itself from `/proc`
 before the shell starts, so it costs no startup time and works with any shell.
 New tabs and splits stay clean, and windows too narrow for it leave the cat
-out. Turn it off with `welcome = false` under `[terminal]`.
+out. It shows in an 18px font, which drops to your configured size when the
+first command runs. Turn it off with `welcome = false` under `[terminal]`.
 
 ## Drop-down (quake) mode
 
