@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -21,6 +22,8 @@ pub struct Pty {
     // Dropping this hangs up the shell.
     pty: tty::Pty,
     writer: Sender<Vec<u8>>,
+    /// A wakeup is on its way to the app: the reader sends no more until it's handled.
+    pub woken: Arc<AtomicBool>,
 }
 
 impl Pty {
@@ -43,6 +46,8 @@ impl Pty {
             libc::fcntl(fd, libc::F_SETFL, libc::fcntl(fd, libc::F_GETFL) & !libc::O_NONBLOCK);
         }
 
+        let woken = Arc::new(AtomicBool::new(false));
+        let woken_reader = woken.clone();
         std::thread::Builder::new()
             .name("pty-reader".into())
             .spawn(move || {
@@ -96,7 +101,9 @@ impl Pty {
                     }
                     parser.advance(&mut *term, &buf[done..n]);
                     drop(term);
-                    let _ = proxy.send_event(UserEvent::Term(pane, Event::Wakeup));
+                    if !woken_reader.swap(true, Ordering::AcqRel) {
+                        let _ = proxy.send_event(UserEvent::Term(pane, Event::Wakeup));
+                    }
                 }
                 let _ = proxy.send_event(UserEvent::Term(pane, Event::Exit));
             })
@@ -115,7 +122,7 @@ impl Pty {
             })
             .expect("spawn writer thread");
 
-        Ok(Self { pty, writer })
+        Ok(Self { pty, writer, woken })
     }
 
     pub fn write(&mut self, bytes: &[u8]) {

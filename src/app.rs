@@ -1083,6 +1083,7 @@ impl ApplicationHandler<UserEvent> for App {
             Event::PtyWrite(text) if text == "\x1b[?6c" => pane.pty.write(b"\x1b[?62;4;22c"),
             Event::PtyWrite(text) => pane.pty.write(text.as_bytes()),
             Event::Wakeup => {
+                pane.pty.woken.store(false, std::sync::atomic::Ordering::Release);
                 // Drawn from about_to_wait at most once per refresh, so a flood of output
                 // doesn't make the renderer hog the terminal lock.
                 self.dirty |= self.tabs.get(self.active).is_some_and(|t| t.root.contains(id));
