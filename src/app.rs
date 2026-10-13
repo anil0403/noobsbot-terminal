@@ -1309,7 +1309,11 @@ impl ApplicationHandler<UserEvent> for App {
                             self.selecting = false;
                             let mut term = pane.term.lock();
                             match term.selection_to_string().filter(|s| !s.is_empty()) {
-                                Some(text) => self.clipboard.set(true, text),
+                                // Copy on select: middle-click paste and Ctrl+V both get it.
+                                Some(text) => {
+                                    self.clipboard.set(true, text.clone());
+                                    self.clipboard.set(false, text);
+                                }
                                 None => term.selection = None,
                             }
                             self.dirty = true;

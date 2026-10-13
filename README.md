@@ -48,7 +48,7 @@ bash, zsh and fish `ssh` sends `TERM=xterm-256color` instead.
 | Ctrl+Shift+P | Command palette: every action and theme, type to filter, Enter to run. **Shell: zsh / bash / fish** switches the window's shell (a new tab opens with it; later tabs and splits use it too) |
 | Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste |
 | Shift+Insert, middle click | Paste (middle click pastes the mouse selection) |
-| Mouse drag, double / triple click | Select text, word, line (copied to the mouse selection) |
+| Mouse drag, double / triple click | Select text, word, line (copied to the clipboard and the mouse selection) |
 | Shift + mouse | Select even when an app (vim, tmux) captures the mouse |
 | Shift+PgUp / Shift+PgDn, wheel | Scroll through history |
 | Ctrl+Shift+Home / End | Jump to top / bottom of history |
