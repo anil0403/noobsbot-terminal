@@ -89,8 +89,8 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
     row("OS", format!("{} {}", os_name(), std::env::consts::ARCH));
     row("Kernel", first_line("/proc/sys/kernel/osrelease"));
     row("Uptime", uptime());
-    row("Packages", packages());
-    row("Desktop", std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().trim_start_matches("X-").to_owned());
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().trim_start_matches("X-").to_owned();
+    row("Desktop", [desktop, packages()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "));
     row("Shell", shell.to_owned());
     row("Terminal", format!("noobsbot {}", env!("CARGO_PKG_VERSION")));
     row("CPU", cpu());
@@ -206,8 +206,8 @@ fn packages() -> String {
     let count = |dir: &str, ext: &str| std::fs::read_dir(dir).map_or(0, |d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(ext)).count());
     match (count("/var/lib/pacman/local", "").saturating_sub(1), count("/var/lib/dpkg/info", ".list")) {
         (0, 0) => String::new(),
-        (0, n) => format!("{n} (dpkg)"),
-        (n, _) => format!("{n} (pacman)"), // minus ALPM_DB_VERSION
+        (0, n) => format!("{n} packages (dpkg)"),
+        (n, _) => format!("{n} packages (pacman)"), // minus ALPM_DB_VERSION
     }
 }
 
