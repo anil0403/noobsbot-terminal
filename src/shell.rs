@@ -65,6 +65,16 @@ pub fn set_term() {
     }
 }
 
+/// The shells we integrate with that are installed, as paths found on $PATH.
+pub fn installed() -> Vec<String> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    ["zsh", "bash", "fish"]
+        .iter()
+        .filter_map(|name| std::env::split_paths(&path).map(|dir| dir.join(name)).find(|p| p.is_file()))
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
+}
+
 /// How to start `shell` (empty: `$SHELL`) with integration, and env to add.
 /// `pretty`: the scripts draw noobsbot's prompt instead of the shell's.
 pub fn login(shell: &str, pretty: bool) -> (Option<Shell>, HashMap<String, String>) {

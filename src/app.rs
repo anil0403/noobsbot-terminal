@@ -78,6 +78,8 @@ struct Quake {
 pub struct App {
     proxy: EventLoopProxy<UserEvent>,
     config: Config,
+    /// Shell for new panes: the configured one until picked in the palette.
+    shell: String,
     _config_watcher: Option<notify::RecommendedWatcher>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
@@ -150,6 +152,7 @@ impl App {
         });
         Self {
             crt: config.crt.enabled,
+            shell: config.terminal.shell.clone(),
             quake,
             _config_watcher: config::watch(&path, proxy.clone()),
             config,
@@ -276,12 +279,12 @@ impl App {
         let command_is_shell = command.is_none();
         let (shell, env) = match command {
             Some(cmd) => (cmd.split_first().map(|(program, args)| tty::Shell::new(program.clone(), args.to_vec())), HashMap::new()),
-            None => shell::login(&self.config.terminal.shell, self.config.terminal.pretty_prompt),
+            None => shell::login(&self.shell, self.config.terminal.pretty_prompt),
         };
         let what = format!("{shell:?}");
         // The first shell of a window opens under the welcome screen.
         if id == 0 && command_is_shell && self.config.terminal.welcome {
-            let name = match self.config.terminal.shell.as_str() {
+            let name = match self.shell.as_str() {
                 "" => std::env::var("SHELL").unwrap_or_default(),
                 s => s.to_owned(),
             };
@@ -554,7 +557,7 @@ impl App {
                 self.dirty = true;
             }
             Action::CommandPalette => {
-                self.palette = Some(Palette::new(self.config.themes().into_keys().collect()));
+                self.palette = Some(Palette::new(self.config.themes().into_keys().collect(), shell::installed()));
                 self.dirty = true;
             }
             Action::PrevPrompt => return self.jump(true),
@@ -686,6 +689,10 @@ impl App {
                         self.run(event_loop, action);
                     }
                     Some(Item::Theme(name)) => self.set_theme(name),
+                    Some(Item::Shell(path)) => {
+                        self.shell = path;
+                        self.new_tab();
+                    }
                     None => {}
                 }
             }

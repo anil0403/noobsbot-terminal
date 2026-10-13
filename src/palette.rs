@@ -6,6 +6,8 @@ use crate::input::{self, Action};
 pub enum Item {
     Action(Action),
     Theme(String),
+    /// Switch new panes to this shell (a path), opening a tab with it.
+    Shell(String),
 }
 
 pub struct Row {
@@ -24,11 +26,12 @@ pub struct Palette {
 }
 
 impl Palette {
-    pub fn new(mut themes: Vec<String>) -> Self {
+    pub fn new(mut themes: Vec<String>, shells: Vec<String>) -> Self {
         themes.sort();
         let actions = input::actions().iter().filter(|e| e.action != Action::CommandPalette).map(|e| Row { item: Item::Action(e.action), name: e.name.clone(), keys: e.keys.clone() });
         let themes = themes.into_iter().map(|t| Row { name: format!("Theme: {t}"), item: Item::Theme(t), keys: String::new() });
-        let mut palette = Self { query: String::new(), selected: 0, rows: actions.chain(themes).collect(), shown: Vec::new() };
+        let shells = shells.into_iter().map(|s| Row { name: format!("Shell: {}", s.rsplit('/').next().unwrap_or(&s)), item: Item::Shell(s), keys: String::new() });
+        let mut palette = Self { query: String::new(), selected: 0, rows: actions.chain(themes).chain(shells).collect(), shown: Vec::new() };
         palette.filter();
         palette
     }
@@ -89,13 +92,16 @@ mod tests {
 
     #[test]
     fn filters_and_picks() {
-        let mut p = Palette::new(vec!["night".into(), "danger".into()]);
+        let mut p = Palette::new(vec!["night".into(), "danger".into()], vec!["/usr/bin/fish".into()]);
         p.query = "split r".into();
         p.filter();
         assert_eq!(p.chosen(), Some(&Item::Action(Action::SplitRight)));
         p.query = "theme dan".into();
         p.filter();
         assert_eq!(p.chosen(), Some(&Item::Theme("danger".into())));
+        p.query = "shell fish".into();
+        p.filter();
+        assert_eq!(p.chosen(), Some(&Item::Shell("/usr/bin/fish".into())));
         p.query = "zzzz".into();
         p.filter();
         assert_eq!((p.len(), p.chosen()), (0, None));
