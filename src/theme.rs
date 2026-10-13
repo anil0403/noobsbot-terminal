@@ -26,7 +26,7 @@ impl Default for Theme {
             // blue of powerline prompts (christitus.com/pretty-powershell) as accents.
             fg: rgb(0xdcdfe4),
             bg: rgb(0x000000),
-            cursor: rgb(0xf2ad36),
+            cursor: rgb(0xdcdfe4),  // the text color: an inverted block, like Claude Code
             selection: rgb(0x454545),
             ansi: [
                 rgb(0x3d3d3d), rgb(0xe06c75), rgb(0x98c379), rgb(0xe5c07b),
