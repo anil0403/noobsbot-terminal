@@ -121,7 +121,7 @@ pub enum Shape {
 
 impl Default for Font {
     fn default() -> Self {
-        Self { family: "JetBrainsMono Nerd Font Mono".into(), size: 15.0 }
+        Self { family: "JetBrainsMono Nerd Font Mono".into(), size: 16.0 }
     }
 }
 
