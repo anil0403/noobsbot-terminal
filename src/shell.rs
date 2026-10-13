@@ -1,6 +1,6 @@
 //! Shell integration: start bash and zsh with our scripts so they report
-//! prompts, commands and the directory. Fish does this on its own; it only
-//! loads our script for the pretty prompt.
+//! prompts, commands and the directory. Fish does this on its own; it loads
+//! our script for the pretty prompt and the ssh TERM fix.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -100,8 +100,8 @@ pub fn login(shell: &str, pretty: bool) -> (Option<Shell>, HashMap<String, Strin
             }
             env.insert("ZDOTDIR".into(), dir.join("zsh").to_string_lossy().into_owned());
         }
-        // Fish marks prompts itself; it only needs us for the pretty prompt.
-        (Some("fish"), Some(dir)) if pretty => {
+        // Fish marks prompts itself; we add the pretty prompt and the ssh TERM fix.
+        (Some("fish"), Some(dir)) => {
             args = vec!["--init-command".into(), format!("source '{}'", dir.join("noobsbot.fish").display().to_string().replace('\\', "\\\\").replace('\'', "\\'"))];
         }
         _ => {}

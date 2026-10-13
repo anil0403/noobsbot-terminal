@@ -58,5 +58,8 @@ PROMPT_COMMAND=(__noobsbot_status "${PROMPT_COMMAND[@]}" __noobsbot_wrap)
 [[ $NOOBSBOT_PROMPT == pretty ]] && PROMPT_COMMAND=("${PROMPT_COMMAND[@]:0:${#PROMPT_COMMAND[@]}-1}" __noobsbot_pretty __noobsbot_wrap)
 PS0=$PS0'\e]133;C\a'
 
-# Other machines won't know TERM=noobsbot.
-[[ $TERM == noobsbot ]] && ! type -t ssh | grep -qE 'alias|function' && ssh() { TERM=xterm-256color command ssh "$@"; }
+# Other machines won't know TERM=noobsbot. An `if`, not `&&`: this is the
+# rcfile's last line, and its status would show on the first prompt.
+if [[ $TERM == noobsbot ]] && ! type -t ssh | grep -qE 'alias|function'; then
+    ssh() { TERM=xterm-256color command ssh "$@"; }
+fi
