@@ -52,8 +52,6 @@ const PAD: f32 = 2.0;
 /// Window frame: Cinnamon's WhiteSur-Dark title bar grey (#373737) on every side.
 const BORDER: f32 = 4.0;
 const BORDER_COLOR: [f32; 4] = [55.0 / 255.0, 55.0 / 255.0, 55.0 / 255.0, 1.0];
-/// Font size while the welcome screen shows (never smaller than the configured one).
-const WELCOME_FONT: f32 = 18.0;
 /// One button: a 1-cell label with two cells of padding each side.
 const BUTTON_CELLS: f32 = 5.0;
 /// The right-click menu, top to bottom.
@@ -124,8 +122,6 @@ pub struct App {
     clipboard: Clipboard,
     /// Font size change from Ctrl+=/Ctrl+-, in px on top of the config size.
     zoom: f32,
-    /// The welcome screen's bigger font is on, until the first command runs.
-    welcome_zoom: bool,
     /// Running as the drop-down terminal (`--quake`).
     quake: Option<Quake>,
     /// CRT effect on (config, flipped from the palette).
@@ -187,7 +183,6 @@ impl App {
             clicks: 0,
             clipboard: Clipboard::new(),
             zoom: 0.0,
-            welcome_zoom: false,
         }
     }
 }
@@ -584,9 +579,6 @@ impl App {
 // Shell integration.
 impl App {
     fn shell_mark(&mut self, id: PaneId, prompt: u64, mark: Mark) {
-        if matches!(mark, Mark::CommandStart) && self.welcome_zoom {
-            self.set_zoom(0.0); // back to the configured size
-        }
         let window_focused = self.renderer.as_ref().is_some_and(|r| r.focused);
         let Some(pane) = self.panes.get_mut(&id) else { return };
         self.dirty = true;
@@ -884,7 +876,6 @@ impl App {
 
     fn set_zoom(&mut self, zoom: f32) {
         self.zoom = zoom;
-        self.welcome_zoom = false;
         self.apply_font();
     }
 
@@ -966,12 +957,8 @@ impl ApplicationHandler<UserEvent> for App {
                 .with_position(m.position())
                 .with_visible(false);
         } else {
-            // Room for the welcome screen, in its bigger font.
+            // Room for the welcome screen.
             attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1400.0, 860.0));
-            if self.config.terminal.welcome {
-                self.zoom = (WELCOME_FONT - self.config.font.size).max(0.0);
-                self.welcome_zoom = true;
-            }
         }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {

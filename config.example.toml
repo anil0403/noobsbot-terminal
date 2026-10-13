@@ -6,7 +6,7 @@ theme = "default"
 
 [font]
 family = "JetBrainsMono Nerd Font Mono"
-size = 16.0
+size = 18.0
 
 [terminal]
 # Lines of history kept above the screen.
