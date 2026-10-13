@@ -65,11 +65,7 @@ impl TryFrom<String> for Hours {
 
 impl Hours {
     fn contains(&self, hour: u32) -> bool {
-        if self.start <= self.end {
-            (self.start..self.end).contains(&hour)
-        } else {
-            hour >= self.start || hour < self.end
-        }
+        if self.start <= self.end { (self.start..self.end).contains(&hour) } else { hour >= self.start || hour < self.end }
     }
 }
 
@@ -183,9 +179,21 @@ mod tests {
         assert_eq!(theme(ctx(&|c| c.ssh_host = Some("staging".into()))), None);
         assert_eq!(theme(ctx(&|c| c.user = "root".into())), Some("root"));
         // first match wins
-        assert_eq!(theme(ctx(&|c| { c.user = "root".into(); c.ssh_host = Some("prod-1".into()) })), Some("danger"));
+        assert_eq!(
+            theme(ctx(&|c| {
+                c.user = "root".into();
+                c.ssh_host = Some("prod-1".into())
+            })),
+            Some("danger")
+        );
         // every condition in a rule must hold
         assert_eq!(theme(ctx(&|c| c.git_branch = Some("main".into()))), Some("careful"));
-        assert_eq!(theme(ctx(&|c| { c.git_branch = Some("main".into()); c.hour = 20 })), None);
+        assert_eq!(
+            theme(ctx(&|c| {
+                c.git_branch = Some("main".into());
+                c.hour = 20
+            })),
+            None
+        );
     }
 }

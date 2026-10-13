@@ -25,13 +25,9 @@ pub fn detect(pty_fd: RawFd, shell_pid: u32) -> Context {
 
     let process = proc("comm").trim().to_owned();
     let args: Vec<String> = proc("cmdline").split('\0').filter(|a| !a.is_empty()).map(String::from).collect();
-    let user = effective_uid(&proc("status"))
-        .and_then(|uid| username(&std::fs::read_to_string("/etc/passwd").unwrap_or_default(), uid))
-        .unwrap_or_default();
+    let user = effective_uid(&proc("status")).and_then(|uid| username(&std::fs::read_to_string("/etc/passwd").unwrap_or_default(), uid)).unwrap_or_default();
     let ssh_host = (process == "ssh").then(|| ssh_host(&args)).flatten();
-    let cwd = std::fs::read_link(format!("/proc/{pid}/cwd"))
-        .or_else(|_| std::fs::read_link(format!("/proc/{shell_pid}/cwd")))
-        .ok();
+    let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).or_else(|_| std::fs::read_link(format!("/proc/{shell_pid}/cwd"))).ok();
     let git_branch = cwd.as_deref().and_then(git_branch);
 
     Context { process, user, ssh_host, cwd, git_branch, hour: local_hour() }
@@ -59,9 +55,10 @@ fn ssh_host(args: &[String]) -> Option<String> {
         if let Some(flags) = arg.strip_prefix('-').filter(|f| !f.is_empty()) {
             // `-p22` carries its value; `-p 22` takes the next arg.
             if let Some(pos) = flags.find(|c| TAKES_VALUE.contains(c))
-                && pos + 1 == flags.len() {
-                    iter.next();
-                }
+                && pos + 1 == flags.len()
+            {
+                iter.next();
+            }
             continue;
         }
         let dest = arg.strip_prefix("ssh://").unwrap_or(arg);

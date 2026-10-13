@@ -166,10 +166,7 @@ mod tests {
     #[test]
     fn marks_and_offsets() {
         let s = b"x\x1b]133;A\x07$ \x1b]133;B\x1b\\ls\x1b]133;C;cmdline_url=ls\x07out\x1b]133;D;2\x07";
-        assert_eq!(
-            scan(&[s]),
-            vec![(9, Mark::PromptStart), (20, Mark::PromptEnd), (45, Mark::CommandStart), (58, Mark::CommandEnd(Some(2)))]
-        );
+        assert_eq!(scan(&[s]), vec![(9, Mark::PromptStart), (20, Mark::PromptEnd), (45, Mark::CommandStart), (58, Mark::CommandEnd(Some(2)))]);
         assert_eq!(scan(&[b"\x1b]133;D\x07"]), vec![(8, Mark::CommandEnd(None))]);
     }
 

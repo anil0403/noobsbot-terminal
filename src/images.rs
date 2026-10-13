@@ -296,7 +296,9 @@ fn load(keys: &Keys, payload: &[u8]) -> Result<Arc<Pic>, String> {
         m => return Err(format!("EINVAL:medium {m}")),
     };
     let data = match keys.char('o') {
-        Some('z') => miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&data, (MAX_SIDE * MAX_SIDE * 4) as usize).map_err(|e| format!("EINVAL:zlib: {e:?}"))?,
+        Some('z') => {
+            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&data, (MAX_SIDE * MAX_SIDE * 4) as usize).map_err(|e| format!("EINVAL:zlib: {e:?}"))?
+        }
         _ => data,
     };
     match keys.num('f').unwrap_or(32) {
@@ -390,7 +392,27 @@ fn run_sixel(body: &[u8], mut plot: impl FnMut(u32, u32, [u8; 4])) -> Result<(u3
     let mut raster = (0, 0);
     // VT340 defaults; images nearly always define their own.
     let mut palette = [[0u8; 4]; 256];
-    for (i, &(r, g, b)) in [(0, 0, 0), (20, 20, 80), (80, 13, 13), (20, 80, 20), (80, 20, 80), (20, 80, 80), (80, 80, 20), (53, 53, 53), (26, 26, 26), (33, 33, 60), (60, 26, 26), (33, 60, 33), (60, 33, 60), (33, 60, 60), (60, 60, 33), (80, 80, 80)].iter().enumerate() {
+    for (i, &(r, g, b)) in [
+        (0, 0, 0),
+        (20, 20, 80),
+        (80, 13, 13),
+        (20, 80, 20),
+        (80, 20, 80),
+        (20, 80, 80),
+        (80, 80, 20),
+        (53, 53, 53),
+        (26, 26, 26),
+        (33, 33, 60),
+        (60, 26, 26),
+        (33, 60, 33),
+        (60, 33, 60),
+        (33, 60, 60),
+        (60, 60, 33),
+        (80, 80, 80),
+    ]
+    .iter()
+    .enumerate()
+    {
         palette[i] = [pct(r), pct(g), pct(b), 255];
     }
     let (mut x, mut y, mut color, mut repeat) = (0u32, 0u32, 0usize, 1u32);

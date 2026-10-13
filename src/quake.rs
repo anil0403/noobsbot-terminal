@@ -110,12 +110,12 @@ fn parse_hotkey(spec: &str) -> Option<(ModMask, u32)> {
     let mut mods = ModMask::from(0u16);
     for m in parts {
         mods |= match m.to_ascii_lowercase().as_str() {
-                "ctrl" => ModMask::CONTROL,
-                "shift" => ModMask::SHIFT,
-                "alt" => ModMask::M1,
-                "super" => ModMask::M4,
-                _ => return None,
-            };
+            "ctrl" => ModMask::CONTROL,
+            "shift" => ModMask::SHIFT,
+            "alt" => ModMask::M1,
+            "super" => ModMask::M4,
+            _ => return None,
+        };
     }
     let keysym = match key.to_ascii_lowercase().as_str() {
         "grave" => 0x60,
@@ -152,7 +152,9 @@ fn grab_loop(mods: ModMask, keysym: u32, proxy: &EventLoopProxy<UserEvent>) -> R
     let keycode = min + index as u8;
     // Also grab with Caps Lock / Num Lock on, or the key does nothing while they are.
     for extra in [0u16, ModMask::LOCK.into(), ModMask::M2.into(), u16::from(ModMask::LOCK) | u16::from(ModMask::M2)] {
-        conn.grab_key(true, root, mods | ModMask::from(extra), keycode, GrabMode::ASYNC, GrabMode::ASYNC)?.check().map_err(|_| "already taken by another program")?;
+        conn.grab_key(true, root, mods | ModMask::from(extra), keycode, GrabMode::ASYNC, GrabMode::ASYNC)?
+            .check()
+            .map_err(|_| "already taken by another program")?;
     }
     log::info!("quake hotkey grabbed (keycode {keycode})");
     loop {

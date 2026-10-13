@@ -6,13 +6,10 @@ use alacritty_terminal::Term;
 use alacritty_terminal::index::{Boundary, Direction, Point};
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 
-
 /// URLs, or a file path with a line number. No uppercase, so the search is
 /// case-insensitive.
-const PATTERN: &str = concat!(
-    r#"(https?://|file://|ftp://|ssh://|git://|mailto:)[^\x00-\x20\x7f-\x9f<>"{}^`\\]+"#,
-    r"|[a-z0-9_.~/+-]*[a-z0-9_-]\.[a-z0-9]+:[0-9]+(:[0-9]+)?",
-);
+const PATTERN: &str =
+    concat!(r#"(https?://|file://|ftp://|ssh://|git://|mailto:)[^\x00-\x20\x7f-\x9f<>"{}^`\\]+"#, r"|[a-z0-9_.~/+-]*[a-z0-9_-]\.[a-z0-9]+:[0-9]+(:[0-9]+)?",);
 
 #[derive(Debug, PartialEq)]
 pub enum Target {

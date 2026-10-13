@@ -20,9 +20,7 @@ const FILES: [(&str, &str); 4] = [
 fn dir() -> Option<&'static PathBuf> {
     static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
     DIR.get_or_init(|| {
-        let base = std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
+        let base = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
         let dir = base.join("noobsbot/shell");
         for (name, text) in FILES {
             let path = dir.join(name);
@@ -106,7 +104,10 @@ pub fn login(shell: &str, pretty: bool) -> (Option<Shell>, HashMap<String, Strin
         }
         // Fish marks prompts itself; we add the pretty prompt and the ssh TERM fix.
         (Some("fish"), Some(dir)) => {
-            args = vec!["--init-command".into(), format!("source '{}'", dir.join("noobsbot.fish").display().to_string().replace('\\', "\\\\").replace('\'', "\\'"))];
+            args = vec![
+                "--init-command".into(),
+                format!("source '{}'", dir.join("noobsbot.fish").display().to_string().replace('\\', "\\\\").replace('\'', "\\'")),
+            ];
         }
         _ => {}
     }

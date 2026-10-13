@@ -229,18 +229,24 @@ pub fn key_bytes(key: &Key, text: Option<&str>, mods: ModifiersState, app_cursor
     let m = mod_param(mods);
     // Cursor-style keys: CSI <c>, SS3 <c> in app-cursor mode, CSI 1;m <c> with modifiers.
     let letter = |c: char, ss3_default: bool| {
-        Some(match m {
-            1 if ss3_default || app_cursor => format!("\x1bO{c}"),
-            1 => format!("\x1b[{c}"),
-            m => format!("\x1b[1;{m}{c}"),
-        }.into_bytes())
+        Some(
+            match m {
+                1 if ss3_default || app_cursor => format!("\x1bO{c}"),
+                1 => format!("\x1b[{c}"),
+                m => format!("\x1b[1;{m}{c}"),
+            }
+            .into_bytes(),
+        )
     };
     // Tilde keys: CSI n ~ or CSI n;m ~.
     let tilde = |n: u8| {
-        Some(match m {
-            1 => format!("\x1b[{n}~"),
-            m => format!("\x1b[{n};{m}~"),
-        }.into_bytes())
+        Some(
+            match m {
+                1 => format!("\x1b[{n}~"),
+                m => format!("\x1b[{n};{m}~"),
+            }
+            .into_bytes(),
+        )
     };
     let alt = |bytes: &[u8]| {
         let prefix: &[u8] = if mods.alt_key() { b"\x1b" } else { b"" };

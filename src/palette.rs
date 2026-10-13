@@ -28,9 +28,14 @@ pub struct Palette {
 impl Palette {
     pub fn new(mut themes: Vec<String>, shells: Vec<String>) -> Self {
         themes.sort();
-        let actions = input::actions().iter().filter(|e| e.action != Action::CommandPalette).map(|e| Row { item: Item::Action(e.action), name: e.name.clone(), keys: e.keys.clone() });
+        let actions = input::actions().iter().filter(|e| e.action != Action::CommandPalette).map(|e| Row {
+            item: Item::Action(e.action),
+            name: e.name.clone(),
+            keys: e.keys.clone(),
+        });
         let themes = themes.into_iter().map(|t| Row { name: format!("Theme: {t}"), item: Item::Theme(t), keys: String::new() });
-        let shells = shells.into_iter().map(|s| Row { name: format!("Shell: {}", s.rsplit('/').next().unwrap_or(&s)), item: Item::Shell(s), keys: String::new() });
+        let shells =
+            shells.into_iter().map(|s| Row { name: format!("Shell: {}", s.rsplit('/').next().unwrap_or(&s)), item: Item::Shell(s), keys: String::new() });
         let mut palette = Self { query: String::new(), selected: 0, rows: actions.chain(themes).chain(shells).collect(), shown: Vec::new() };
         palette.filter();
         palette

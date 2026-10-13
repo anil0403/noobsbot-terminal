@@ -26,13 +26,25 @@ impl Default for Theme {
             // blue of powerline prompts (christitus.com/pretty-powershell) as accents.
             fg: rgb(0xdcdfe4),
             bg: rgb(0x000000),
-            cursor: rgb(0xdcdfe4),  // the text color: an inverted block, like Claude Code
+            cursor: rgb(0xdcdfe4), // the text color: an inverted block, like Claude Code
             selection: rgb(0x454545),
             ansi: [
-                rgb(0x3d3d3d), rgb(0xe06c75), rgb(0x98c379), rgb(0xe5c07b),
-                rgb(0x61afef), rgb(0xc678dd), rgb(0x56b6c2), rgb(0xdcdfe4),
-                rgb(0x686868), rgb(0xff7b86), rgb(0xb5e890), rgb(0xf2ad36),
-                rgb(0x4e92e8), rgb(0xd7a1f0), rgb(0x5bc8a6), rgb(0xffffff),
+                rgb(0x3d3d3d),
+                rgb(0xe06c75),
+                rgb(0x98c379),
+                rgb(0xe5c07b),
+                rgb(0x61afef),
+                rgb(0xc678dd),
+                rgb(0x56b6c2),
+                rgb(0xdcdfe4),
+                rgb(0x686868),
+                rgb(0xff7b86),
+                rgb(0xb5e890),
+                rgb(0xf2ad36),
+                rgb(0x4e92e8),
+                rgb(0xd7a1f0),
+                rgb(0x5bc8a6),
+                rgb(0xffffff),
             ],
         }
     }
@@ -160,9 +172,7 @@ impl Theme {
             Background => self.bg,
             Cursor => self.cursor,
             DimForeground => dim(self.fg),
-            DimBlack | DimRed | DimGreen | DimYellow | DimBlue | DimMagenta | DimCyan | DimWhite => {
-                dim(self.ansi[name as usize - DimBlack as usize])
-            }
+            DimBlack | DimRed | DimGreen | DimYellow | DimBlue | DimMagenta | DimCyan | DimWhite => dim(self.ansi[name as usize - DimBlack as usize]),
             _ => self.ansi[name as usize],
         }
     }

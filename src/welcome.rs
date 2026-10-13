@@ -148,7 +148,13 @@ fn bar(level: f64, full_is_good: bool) -> String {
     let level = level.clamp(0.0, 1.0);
     let filled = (level * BAR as f64).round() as usize;
     let badness = if full_is_good { 1.0 - level } else { level };
-    let color = if badness >= 0.85 { 1 } else if badness >= 0.6 { 3 } else { 2 };
+    let color = if badness >= 0.85 {
+        1
+    } else if badness >= 0.6 {
+        3
+    } else {
+        2
+    };
     format!("\x1b[38;5;{color}m{}\x1b[38;5;8m{}\x1b[0m {:>3.0}%", "■".repeat(filled), "■".repeat(BAR - filled), level * 100.0)
 }
 

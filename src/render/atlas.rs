@@ -77,28 +77,14 @@ impl Atlas {
                 self.packer.alloc(glyph.width, glyph.height)?
             }
         };
-        let rgba: Vec<u8> = if glyph.color {
-            glyph.data
-        } else {
-            glyph.data.iter().flat_map(|&a| [255, 255, 255, a]).collect()
-        };
+        let rgba: Vec<u8> = if glyph.color { glyph.data } else { glyph.data.iter().flat_map(|&a| [255, 255, 255, a]).collect() };
         queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x, y, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
+            wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d { x, y, z: 0 }, aspect: wgpu::TextureAspect::All },
             &rgba,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(glyph.width * 4), rows_per_image: None },
             wgpu::Extent3d { width: glyph.width, height: glyph.height, depth_or_array_layers: 1 },
         );
-        Some(Entry {
-            rect: [x as f32, y as f32, glyph.width as f32, glyph.height as f32],
-            left: glyph.left as f32,
-            top: glyph.top as f32,
-            color: glyph.color,
-        })
+        Some(Entry { rect: [x as f32, y as f32, glyph.width as f32, glyph.height as f32], left: glyph.left as f32, top: glyph.top as f32, color: glyph.color })
     }
 }
 

@@ -184,9 +184,8 @@ impl Config {
 }
 
 pub fn path() -> PathBuf {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"));
+    let base =
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"));
     base.join("noobsbot").join("config.toml")
 }
 
@@ -213,9 +212,11 @@ pub fn watch(path: &Path, proxy: EventLoopProxy<UserEvent>) -> Option<notify::Re
     let name = path.file_name()?.to_owned();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res
-            && (event.kind.is_modify() || event.kind.is_create()) && event.paths.iter().any(|p| p.file_name() == Some(&name)) {
-                let _ = proxy.send_event(UserEvent::ConfigChanged);
-            }
+            && (event.kind.is_modify() || event.kind.is_create())
+            && event.paths.iter().any(|p| p.file_name() == Some(&name))
+        {
+            let _ = proxy.send_event(UserEvent::ConfigChanged);
+        }
     })
     .map_err(|e| log::warn!("config watch failed: {e}"))
     .ok()?;

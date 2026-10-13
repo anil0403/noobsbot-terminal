@@ -2,8 +2,8 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::event::{Event, OnResize, WindowSize};
 use alacritty_terminal::sync::FairMutex;
@@ -24,7 +24,13 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(term: Arc<FairMutex<Term>>, images: Arc<Mutex<Images>>, size: WindowSize, listener: Listener, options: &tty::Options) -> std::io::Result<Self> {
+    pub fn spawn(
+        term: Arc<FairMutex<Term>>,
+        images: Arc<Mutex<Images>>,
+        size: WindowSize,
+        listener: Listener,
+        options: &tty::Options,
+    ) -> std::io::Result<Self> {
         let Listener { proxy, pane } = listener;
         let pty = tty::new(options, size, 0)?;
         let mut file: File = pty.file().try_clone().expect("clone pty fd");

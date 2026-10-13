@@ -101,7 +101,12 @@ impl Dir {
 pub enum Node {
     Leaf(PaneId),
     /// `across`: `a | b` side by side; otherwise `a` above `b`.
-    Split { across: bool, ratio: f32, a: Box<Node>, b: Box<Node> },
+    Split {
+        across: bool,
+        ratio: f32,
+        a: Box<Node>,
+        b: Box<Node>,
+    },
 }
 
 /// The gap between the halves of a split, for drawing and dragging.
@@ -231,11 +236,7 @@ pub fn neighbor(panes: &[(PaneId, Rect)], from: PaneId, dir: Dir) -> Option<Pane
             _ => None,
         }
     };
-    panes
-        .iter()
-        .filter_map(|(id, o)| Some((*id, key(o)?)))
-        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .map(|(id, _)| id)
+    panes.iter().filter_map(|(id, o)| Some((*id, key(o)?))).min_by(|a, b| a.1.partial_cmp(&b.1).unwrap()).map(|(id, _)| id)
 }
 
 #[cfg(test)]
