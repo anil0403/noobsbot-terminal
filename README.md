@@ -187,6 +187,8 @@ Its colors come from the theme's palette, so situation themes recolor it. Icons 
 
 ## 🐱 Welcome screen
 
+![Welcome screen](extra/screenshots/welcome.png)
+
 A new window opens with a cat drawn in text beside a summary of the machine:
 
 - a powerline header with user, host and date
