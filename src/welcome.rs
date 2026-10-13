@@ -40,8 +40,8 @@ const BAR: usize = 20;
 /// The screen as terminal output, for a pane `cols` wide. Colors are palette
 /// indexes, so themes recolor it.
 pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
-    let info = info(gpu, shell);
     let cat: Vec<&str> = if cols >= MIN_COLS { CAT.lines().skip(1).collect() } else { Vec::new() };
+    let info = stretch(info(gpu, shell), cat.len());
     let mut out = String::from("\r\n");
     // The shorter column sits in the middle of the taller one.
     let rows = cat.len().max(info.len());
@@ -60,6 +60,24 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
         out.push_str("\x1b[0m\r\n");
     }
     out.push_str("\r\n");
+    out
+}
+
+/// Widens the blank gaps (middle ones first) so the text is as tall as the cat.
+fn stretch(lines: Vec<String>, height: usize) -> Vec<String> {
+    let mut gaps: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].is_empty()).collect();
+    gaps.sort_by_key(|&i| i.abs_diff(lines.len() / 2));
+    let mut extra = vec![0; lines.len()];
+    for k in 0..height.saturating_sub(lines.len()) {
+        if let Some(&i) = gaps.get(k % gaps.len().max(1)) {
+            extra[i] += 1;
+        }
+    }
+    let mut out = Vec::new();
+    for (line, n) in lines.into_iter().zip(extra) {
+        out.extend(std::iter::repeat_n(String::new(), n));
+        out.push(line);
+    }
     out
 }
 
@@ -279,6 +297,10 @@ mod tests {
         // Wide: every line starts with the cat's column. Narrow: no cat.
         assert!(screen(120, "gpu", "zsh").contains("::-::"));
         assert!(!screen(80, "gpu", "zsh").contains("::-::"));
+        // Text stretched to the cat's height through its middle gaps; never shrunk.
+        let s = |v: &[&str]| v.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        assert_eq!(stretch(s(&["a", "", "b", "", "c"]), 7), s(&["a", "", "", "b", "", "", "c"]));
+        assert_eq!(stretch(s(&["a", "b"]), 4), s(&["a", "b"]));
         assert_eq!((greeting(8), greeting(14), greeting(19), greeting(2)), ("Good morning", "Good afternoon", "Good evening", "Up late"));
     }
 }
