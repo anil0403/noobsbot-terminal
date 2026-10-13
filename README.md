@@ -92,7 +92,8 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 💎 **Pretty prompt** | A powerline prompt for bash, zsh and fish: user, folder, git branch, exit status. |
 | 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. |
 | 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
-| 🔗 **Clickable links** | Ctrl+click URLs, terminal hyperlinks and `file.rs:12` paths. |
+| 💡 **Suggestions** | Grey text after the cursor as you type (bash, zsh): commands that worked in this folder first, then anywhere, then your shell's history, then file names. → takes it. |
+| 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. |
 | 🖼️ **Inline images** | kitty graphics protocol and sixel. |
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
 | 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |
@@ -145,6 +146,8 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | Ctrl+Shift+Z / Ctrl+Shift+X | Scroll to the previous / next command's prompt |
 | Ctrl+Shift+F | Search history (regex, or plain text if it isn't one), with a match count. Enter / Shift+Enter: older / newer match, Esc: close |
 | Ctrl+Shift+Space | Vi mode: `hjkl` `wbe` `0$^` `g` `G` `Ctrl+U/D`, `v` / `V` / `Ctrl+V` select, `y` copy, `/` search, `n` / `N` next, Esc / `q` leave |
+| → or End / Ctrl+→ | Take the grey suggestion / its next word |
+| Hover a URL: click / `c` | Open it / copy it |
 | Ctrl + hover / click | Underline / open a link: URLs and terminal hyperlinks in the browser, `file.rs:12[:5]` in `$VISUAL`/`$EDITOR` (in a split, at that line; no editor set: the desktop's default app) |
 
 </details>

@@ -37,6 +37,8 @@ pub struct Pane {
     pub failed_at: Option<Instant>,
     /// The shell is waiting at its prompt (shell integration), not running a command.
     pub at_prompt: bool,
+    /// The command running and where it started, for the suggestions once it succeeds.
+    pub running: Option<(String, PathBuf)>,
     /// The welcome screen is still up, until the first key at the prompt.
     pub welcome: bool,
 }

@@ -95,6 +95,8 @@ pub struct Terminal {
     pub pretty_prompt: bool,
     /// Greet each new window with the cat and the system summary.
     pub welcome: bool,
+    /// Grey suggestions after the cursor at the prompt (bash and zsh).
+    pub suggestions: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -129,7 +131,7 @@ impl Default for Font {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true }
+        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true, suggestions: true }
     }
 }
 

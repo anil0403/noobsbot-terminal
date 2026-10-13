@@ -33,6 +33,7 @@ use crate::pty::Pty;
 use crate::render::{Renderer, crt};
 use crate::search::Search;
 use crate::shell;
+use crate::suggest::{self, Suggest};
 use crate::tap::Mark;
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
@@ -98,8 +99,15 @@ pub struct App {
     palette: Option<Palette>,
     /// The right-click menu: top-left corner, and the row under the pointer.
     menu: Option<((f32, f32), Option<usize>)>,
-    /// Link under the pointer while Ctrl is held.
+    /// Link under the pointer: a URL, or any link while Ctrl is held.
     hover: Option<(PaneId, Link)>,
+    /// `c` copied the hovered link (it says so until the pointer leaves it).
+    link_copied: bool,
+    /// A key was pressed since the pointer last moved: plain hovering is off,
+    /// so typing `c` with the pointer resting on a URL types it.
+    typed_since_move: bool,
+    /// Pressed on a link without Ctrl: opens on release unless it became a selection.
+    link_press: Option<Target>,
     /// Tab, close button or bar button under the pointer.
     bar_hover: Option<BarHit>,
     /// Split divider under the pointer (or being dragged).
@@ -132,6 +140,7 @@ pub struct App {
     quake: Option<Quake>,
     /// CRT effect on (config, flipped from the palette).
     crt: bool,
+    suggest: Suggest,
 }
 
 impl App {
@@ -150,6 +159,7 @@ impl App {
         let quake = quake.then(|| Quake { visible: false, fade: None, last_toggle: Instant::now() - Duration::from_secs(1) });
         Self {
             crt: config.crt.enabled,
+            suggest: Suggest::new(),
             shell: config.terminal.shell.clone(),
             quake,
             _config_watcher: config::watch(&path, proxy.clone()),
@@ -169,6 +179,9 @@ impl App {
             palette: None,
             menu: None,
             hover: None,
+            link_copied: false,
+            typed_since_move: false,
+            link_press: None,
             bar_hover: None,
             divider_hover: None,
             mods: ModifiersState::empty(),
@@ -308,6 +321,7 @@ impl App {
             cwd: None,
             failed_at: None,
             at_prompt: false,
+            running: None,
             welcome,
         };
         self.panes.insert(id, pane);
@@ -413,6 +427,27 @@ impl App {
         self.dirty = true;
     }
 
+    /// What to suggest after the input at the focused pane's prompt.
+    fn suggestion(&mut self) -> Option<String> {
+        let shell = self.shell_name();
+        if !self.config.terminal.suggestions || shell == "fish" {
+            return None; // fish suggests by itself
+        }
+        let pane = &self.panes[&self.focused()];
+        if !pane.at_prompt || pane.welcome {
+            return None;
+        }
+        let term = pane.term.lock();
+        if term.grid().display_offset() != 0 || term.mode().contains(TermMode::VI) {
+            return None;
+        }
+        let typed = blocks::input(&term)?;
+        drop(term);
+        let cwd = pane.cwd();
+        self.suggest.set_shell(&shell);
+        self.suggest.get(&typed, cwd.as_deref())
+    }
+
     /// The shell's name, for the welcome screen.
     fn shell_name(&self) -> String {
         let path = if self.shell.is_empty() { std::env::var("SHELL").unwrap_or_default() } else { self.shell.clone() };
@@ -463,23 +498,26 @@ impl App {
 
 // Links and the mouse pointer.
 impl App {
-    /// Find the link under the pointer. Links are only live while Ctrl is held,
-    /// so plain clicks still select.
+    /// Find the link under the pointer. With Ctrl held every link is live (files
+    /// too, and in full-screen programs); without, URLs at the shell are.
     fn update_hover(&mut self) {
         let id = self.mouse_pane.filter(|id| self.panes.contains_key(id) && self.tabs[self.active].root.contains(*id));
+        let ctrl = self.mods.control_key();
         let hover = match id {
-            Some(id) if self.mods.control_key() && !self.selecting && self.drag.is_none() => {
+            Some(id) if (ctrl || (self.mods.is_empty() && !self.typed_since_move)) && !self.selecting && self.drag.is_none() => {
                 let pane = &self.panes[&id];
                 let cwd = pane.cwd();
                 let term = pane.term.lock();
+                let full_screen = term.mode().intersects(TermMode::ALT_SCREEN | TermMode::MOUSE_MODE);
                 let point = grid_point(&term, self.mouse_cell);
-                self.hints.at(&term, point, cwd.as_deref()).map(|link| (id, link))
+                self.hints.at(&term, point, cwd.as_deref()).filter(|l| ctrl || (!full_screen && matches!(l.target, Target::Url(_)))).map(|link| (id, link))
             }
             _ => None,
         };
         let key = |h: &Option<(PaneId, Link)>| h.as_ref().map(|(id, l)| (*id, l.range.clone()));
         if key(&hover) != key(&self.hover) {
             self.dirty = true;
+            self.link_copied = false;
         }
         self.hover = hover;
         self.update_icon();
@@ -626,8 +664,17 @@ impl App {
             return;
         }
         match mark {
-            Mark::CommandEnd(_) => pane.at_prompt = true, // sent before every prompt
-            Mark::CommandStart => pane.at_prompt = false,
+            Mark::CommandEnd(code) => {
+                pane.at_prompt = true; // sent before every prompt
+                if let (Some(0), Some((cmd, dir))) = (code, pane.running.take()) {
+                    self.suggest.ran(&cmd, &dir);
+                }
+            }
+            Mark::CommandStart => {
+                pane.at_prompt = false;
+                let cmd = blocks::command_text(&pane.term.lock(), prompt);
+                pane.running = cmd.zip(pane.cwd());
+            }
             _ => {}
         }
         let Some((code, took)) = pane.blocks.mark(prompt, &mark) else { return };
@@ -1133,6 +1180,25 @@ impl ApplicationHandler<UserEvent> for App {
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                // `c` on a hovered link copies it.
+                if self.mods.is_empty()
+                    && event.logical_key == Key::Character("c".into())
+                    && let Some((_, link)) = &self.hover
+                {
+                    let text = match &link.target {
+                        Target::Url(url) => url.clone(),
+                        Target::File { path, .. } => path.to_string_lossy().into_owned(),
+                    };
+                    self.clipboard.set(true, text.clone());
+                    self.clipboard.set(false, text);
+                    self.link_copied = true;
+                    self.dirty = true;
+                    return;
+                }
+                if !self.typed_since_move && !matches!(event.logical_key, Key::Named(NamedKey::Control | NamedKey::Shift | NamedKey::Alt | NamedKey::Super)) {
+                    self.typed_since_move = true;
+                    self.update_hover();
+                }
                 if self.palette_key(event_loop, &event.logical_key, event.text.as_deref()) {
                     return;
                 }
@@ -1161,6 +1227,19 @@ impl ApplicationHandler<UserEvent> for App {
                     && self.focused_pane().at_prompt
                 {
                     self.paste(false);
+                    return;
+                }
+                // Right or End takes the suggestion, Ctrl+Right its next word.
+                let take = match &event.logical_key {
+                    Key::Named(NamedKey::ArrowRight | NamedKey::End) if self.mods.is_empty() => Some(false),
+                    Key::Named(NamedKey::ArrowRight) if self.mods == ModifiersState::CONTROL => Some(true),
+                    _ => None,
+                };
+                if let Some(word) = take
+                    && let Some(s) = self.suggestion()
+                {
+                    let s = if word { suggest::word(&s) } else { &s };
+                    self.focused_pane().pty.write(s.as_bytes());
                     return;
                 }
                 let mods = self.mods;
@@ -1286,6 +1365,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.mouse_side = side;
                 self.mouse_cell = (col, line);
+                self.typed_since_move = false;
                 self.update_hover();
                 let pane = self.panes.get_mut(&id).unwrap();
                 let mut term = pane.term.lock();
@@ -1354,11 +1434,14 @@ impl ApplicationHandler<UserEvent> for App {
                 if pressed && id != self.focused() {
                     self.focus(id);
                 }
-                if pressed
-                    && button == MouseButton::Left
-                    && let Some((_, link)) = self.hover.take()
-                {
-                    return self.open_link(link.target);
+                if pressed && button == MouseButton::Left {
+                    self.link_press = None;
+                    if let Some((_, link)) = self.hover.take() {
+                        if self.mods.control_key() {
+                            return self.open_link(link.target);
+                        }
+                        self.link_press = Some(link.target);
+                    }
                 }
                 let pane = self.panes.get_mut(&id).unwrap();
                 let mode = *pane.term.lock().mode();
@@ -1383,6 +1466,7 @@ impl ApplicationHandler<UserEvent> for App {
                         (MouseButton::Left, false) if self.selecting => {
                             self.selecting = false;
                             let mut term = pane.term.lock();
+                            let link = self.link_press.take();
                             match term.selection_to_string().filter(|s| !s.is_empty()) {
                                 // Copy on select: middle-click paste and Ctrl+V both get it.
                                 Some(text) => {
@@ -1392,6 +1476,11 @@ impl ApplicationHandler<UserEvent> for App {
                                 None => term.selection = None,
                             }
                             self.dirty = true;
+                            // A click on a URL, not a drag across it: open it.
+                            if let Some(target) = link.filter(|_| term.selection.is_none()) {
+                                drop(term);
+                                return self.open_link(target);
+                            }
                         }
                         (MouseButton::Middle, true) => self.paste(true),
                         (MouseButton::Right, true) => {
@@ -1422,6 +1511,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.last_frame = Instant::now();
                 self.update_hover(); // the text under the pointer may have changed
                 let (bar_h, tab_w) = (self.bar_h(), self.tab_w());
+                let suggestion = self.suggestion();
                 let renderer = self.renderer.as_mut().unwrap();
                 let tab = &self.tabs[self.active];
                 let mut focused_theme = None;
@@ -1447,6 +1537,9 @@ impl ApplicationHandler<UserEvent> for App {
                     let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
                     if id == tab.focused {
+                        if let Some(s) = &suggestion {
+                            draw_suggestion(renderer, &pane.term.lock(), pane.rect, s, &theme);
+                        }
                         focused_theme = Some(theme);
                     }
                 }
@@ -1460,6 +1553,12 @@ impl ApplicationHandler<UserEvent> for App {
                     let r = d.rect;
                     let r = if d.across { Rect { x: r.x - grow / 2.0, w: r.w + grow, ..r } } else { Rect { y: r.y - grow / 2.0, h: r.h + grow, ..r } };
                     renderer.fill(r, theme::to_f32(color));
+                }
+                if let Some((id, link)) = self.hover.as_ref().filter(|_| !self.mods.control_key()) {
+                    let pane = &self.panes[id];
+                    let offset = pane.term.lock().grid().display_offset() as i32;
+                    let text = if self.link_copied { " Copied " } else { " Click to open \u{b7} c to copy " };
+                    draw_link_hint(renderer, pane.rect, &link.range, offset, text, &theme);
                 }
                 draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w, self.bar_hover);
                 if let Some(p) = &self.palette {
@@ -1492,6 +1591,26 @@ fn gutter(term: &Term, blocks: &Blocks, theme: &Theme) -> Vec<(usize, [f32; 4])>
             Some((i, theme::to_f32(color)))
         })
         .collect()
+}
+
+/// The suggestion in grey after the cursor, cut at the end of the line.
+fn draw_suggestion(r: &mut Renderer, term: &Term, rect: Rect, s: &str, theme: &Theme) {
+    let at = term.grid().cursor.point;
+    let room = term.columns().saturating_sub(at.column.0);
+    let (x, y) = (rect.x + at.column.0 as f32 * r.font.cell_w, rect.y + at.line.0 as f32 * r.font.cell_h);
+    let text: String = s.chars().take(room).collect();
+    r.text(x, y, &text, theme::to_f32(theme::blend(theme.fg, theme.bg, 0.55)));
+}
+
+/// A note under the hovered link (over it on the last line) of what clicking and `c` do.
+fn draw_link_hint(r: &mut Renderer, rect: Rect, range: &alacritty_terminal::term::search::Match, offset: i32, text: &str, theme: &Theme) {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let lines = (rect.h / ch) as i32;
+    let below = range.end().line.0 + offset + 1;
+    let line = if below < lines { below } else { range.start().line.0 + offset - 1 };
+    let w = (text.chars().count() + 2) as f32 * cw;
+    let x = (rect.x + range.start().column.0 as f32 * cw).min(rect.x + rect.w - w).max(rect.x);
+    pill(r, x, rect.y + line.max(0) as f32 * ch, text, theme::to_f32(theme.selection), theme::to_f32(theme.fg));
 }
 
 struct PaneUi<'a> {

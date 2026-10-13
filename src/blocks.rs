@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use alacritty_terminal::Term;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point};
-use alacritty_terminal::term::cell::Cell;
+use alacritty_terminal::term::cell::{Cell, Flags};
 
 use crate::pty::PROMPT_TAG;
 use crate::tap::Mark;
@@ -93,6 +93,41 @@ pub fn command_text<T>(term: &Term<T>, prompt: u64) -> Option<String> {
     (!text.is_empty() && after < term.columns()).then(|| text.to_owned())
 }
 
+/// What's typed at the prompt the cursor is on, when the cursor is at its end
+/// (nothing after it on the line). Wrapped input is followed up to 8 lines up.
+pub fn input<T>(term: &Term<T>) -> Option<String> {
+    let cursor = term.grid().cursor.point;
+    let row = &term.grid()[cursor.line];
+    if (cursor.column.0..term.columns()).any(|c| !matches!(row[Column(c)].c, ' ' | '\0')) {
+        return None;
+    }
+    let mut line = cursor.line;
+    let prompt = loop {
+        if let Some(p) = prompt_at(term, line) {
+            break p;
+        }
+        let up: Line = line - 1;
+        if cursor.line.0 - up.0 > 8 || up < term.topmost_line() || !term.grid()[up][term.last_column()].flags.contains(Flags::WRAPLINE) {
+            return None;
+        }
+        line = up;
+    };
+    let start = (0..term.columns()).rev().find(|&c| tag(&term.grid()[line][Column(c)]) == Some(prompt))? + 1;
+    let mut text = String::new();
+    for l in line.0..=cursor.line.0 {
+        let row = &term.grid()[Line(l)];
+        let from = if l == line.0 { start } else { 0 };
+        let to = if l == cursor.line.0 { cursor.column.0 } else { term.columns() };
+        for c in from..to {
+            let cell = &row[Column(c)];
+            if !cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+                text.push(if cell.c == '\0' { ' ' } else { cell.c });
+            }
+        }
+    }
+    Some(text)
+}
+
 /// Output of the last finished command: from below its prompt and command line
 /// down to the line before the current prompt.
 pub fn last_output<T>(term: &Term<T>) -> Option<String> {
@@ -150,6 +185,12 @@ mod tests {
         let t = term("{A}$ {B}ls\r\none\r\ntwo\r\n{A}$ {B}");
         assert_eq!(last_output(&t).as_deref(), Some("one\ntwo"));
         assert_eq!(last_output(&term("{A}$ {B}")), None);
+        assert_eq!(input(&term("{A}$ {B}git st")).as_deref(), Some("git st"));
+        assert_eq!(input(&term("{A}$ {B}git ")).as_deref(), Some("git "));
+        assert_eq!(input(&term("{A}$ {B}")).as_deref(), Some(""));
+        assert_eq!(input(&term("{A}$ {B}echo 0123456789abcdef")).as_deref(), Some("echo 0123456789abcdef")); // wrapped
+        assert_eq!(input(&term("{A}$ {B}ab\x1b[D")), None); // cursor before the end
+        assert_eq!(input(&term("{A}$ {B}ls\r\nout\r\n")), None); // no prompt on the line
     }
 
     #[test]

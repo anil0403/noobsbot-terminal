@@ -25,6 +25,10 @@ pretty_prompt = false
 # Greet each new window with a cat, your system's specs and resource meters
 # (new tabs and splits stay clean).
 welcome = true
+# Grey suggestions after the cursor at the prompt (bash and zsh; fish has its
+# own): commands that worked in this folder, then anywhere, then your shell's
+# history, then file names. Right arrow or End takes it, Ctrl+Right one word.
+suggestions = true
 
 [cursor]
 # "block", "beam" or "underline". Programs like vim may override it.

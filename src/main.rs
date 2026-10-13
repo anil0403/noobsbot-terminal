@@ -15,6 +15,7 @@ mod render;
 mod rules;
 mod search;
 mod shell;
+mod suggest;
 mod tap;
 mod term;
 mod theme;
