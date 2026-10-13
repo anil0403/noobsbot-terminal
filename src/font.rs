@@ -15,6 +15,8 @@ pub struct Font {
     system: FontSystem,
     cache: SwashCache,
     family: String,
+    /// The family's weights: a static font is only used at one of them.
+    weights: Vec<u16>,
     size: f32,
     weight: u16,
     pub cell_w: f32,
@@ -25,15 +27,35 @@ pub struct Font {
 
 impl Font {
     pub fn new(family: &str, size: f32, weight: u16) -> Self {
-        let mut font =
-            Self { system: FontSystem::new(), cache: SwashCache::new(), family: String::new(), size, weight, cell_w: 0.0, cell_h: 0.0, baseline: 0.0 };
+        let mut font = Self {
+            system: FontSystem::new(),
+            cache: SwashCache::new(),
+            family: String::new(),
+            weights: Vec::new(),
+            size,
+            weight,
+            cell_w: 0.0,
+            cell_h: 0.0,
+            baseline: 0.0,
+        };
         font.set(family, size, weight);
         font
     }
 
     /// Switch family/size/weight, keeping the already-scanned system font database.
     pub fn set(&mut self, family: &str, size: f32, weight: u16) {
-        self.family = family.to_owned();
+        let db = self.system.db();
+        let has = |name: &str| db.faces().any(|f| f.families.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)));
+        // Not installed: the system's monospace font rather than a proportional fallback.
+        self.family = if has(family) {
+            family.to_owned()
+        } else {
+            let mono = Some(db.family_name(&Family::Monospace).to_owned()).filter(|m| has(m));
+            let mono = mono.or_else(|| db.faces().find(|f| f.monospaced).map(|f| f.families[0].0.clone())).unwrap_or_else(|| family.to_owned());
+            log::warn!("font {family:?} not installed; using {mono:?}");
+            mono
+        };
+        self.weights = db.faces().filter(|f| f.families.iter().any(|(n, _)| n.eq_ignore_ascii_case(&self.family))).map(|f| f.weight.0).collect();
         self.size = size;
         self.weight = weight.clamp(100, 900);
         self.measure();
@@ -52,6 +74,8 @@ impl Font {
     /// Shape one character, letting cosmic-text pick a fallback font if needed.
     fn shape(&mut self, c: char, bold: bool, italic: bool) -> Option<(CacheKey, f32)> {
         let weight = if bold { self.weight.max(700) } else { self.weight };
+        // cosmic-text skips a named static font without this exact weight.
+        let weight = self.weights.iter().copied().min_by_key(|w| w.abs_diff(weight)).unwrap_or(weight);
         let attrs = Attrs::new().family(Family::Name(&self.family)).weight(Weight(weight)).style(if italic { Style::Italic } else { Style::Normal });
         let mut buffer = Buffer::new_empty(Metrics::new(self.size, self.size));
         let mut tmp = [0u8; 4];
