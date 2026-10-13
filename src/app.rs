@@ -49,9 +49,8 @@ const TAB_CELLS: f32 = 30.0;
 const BAR_BUTTONS: [Action; 3] = [Action::NewTab, Action::SplitRight, Action::SplitDown];
 /// Space around the tab bar's tabs and buttons, in pixels.
 const PAD: f32 = 2.0;
-/// Window frame: Cinnamon's WhiteSur-Dark title bar grey (#373737) on every side.
+/// Margin around the window's contents, in the background color.
 const BORDER: f32 = 4.0;
-const BORDER_COLOR: [f32; 4] = [55.0 / 255.0, 55.0 / 255.0, 55.0 / 255.0, 1.0];
 /// One button: a 1-cell label with two cells of padding each side.
 const BUTTON_CELLS: f32 = 5.0;
 /// The right-click menu, top to bottom.
@@ -1459,16 +1458,6 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.fill(r, theme::to_f32(color));
                 }
                 draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w, self.bar_hover);
-                let (w, h) = renderer.size();
-                let border = renderer.px(BORDER);
-                for rect in [
-                    Rect { x: 0.0, y: 0.0, w, h: border },
-                    Rect { x: 0.0, y: h - border, w, h: border },
-                    Rect { x: 0.0, y: 0.0, w: border, h },
-                    Rect { x: w - border, y: 0.0, w: border, h },
-                ] {
-                    renderer.fill(rect, BORDER_COLOR);
-                }
                 if let Some(p) = &self.palette {
                     draw_palette(renderer, p, &theme);
                 }
