@@ -1,0 +1,77 @@
+# The macOS port (macos/): tests on Apple Silicon, builds a universal
+# Noobsbot.app, opens it once to check it starts and draws. A pushed v* tag
+# also attaches the app to that GitHub release.
+name: macos
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths: ["macos/**", ".github/workflows/macos.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: macos
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin && rustup default stable
+      - run: cargo test --release --locked
+      - name: Shell scripts and terminfo
+        run: |
+          /bin/bash -n shell/noobsbot.bash   # macOS's own bash 3.2
+          zsh -n shell/zsh/noobsbot.zsh shell/zsh/.zshenv
+          tic -x -o "$RUNNER_TEMP/ti" extra/noobsbot.terminfo
+      - run: cargo build --release --locked --target aarch64-apple-darwin
+      - run: cargo build --release --locked --target x86_64-apple-darwin
+      - run: ./package.sh
+      - name: Smoke test
+        continue-on-error: true # a VM may have no usable GPU
+        run: |
+          RUST_LOG=info target/Noobsbot.app/Contents/MacOS/noobsbot > "$RUNNER_TEMP/run.log" 2>&1 &
+          sleep 15
+          screencapture -x "$RUNNER_TEMP/screen.png" || true
+          kill -0 $! && echo "still running after 15 s"
+          kill $! || true
+          cat "$RUNNER_TEMP/run.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test
+          path: |
+            ${{ runner.temp }}/screen.png
+            ${{ runner.temp }}/run.log
+      - name: Zip
+        run: |
+          name=noobsbot-${GITHUB_REF_NAME#v}-macos-universal
+          [[ $GITHUB_REF == refs/tags/* ]] || name=noobsbot-dev-macos-universal
+          (cd target && ditto -c -k --keepParent Noobsbot.app "../$name.zip")
+          shasum -a 256 "$name.zip" > "$name.zip.sha256"
+          echo "NAME=$name" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: macos/${{ env.NAME }}.zip*
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload "$GITHUB_REF_NAME" "$NAME.zip" "$NAME.zip.sha256" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # The installer as a user runs it (builds from source while there's no release).
+  install:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash install.sh
+      - run: |
+          test -x /Applications/Noobsbot.app/Contents/MacOS/noobsbot
+          ls ~/Library/Fonts | grep -q JetBrainsMonoNerdFontMono
+          command -v noobsbot

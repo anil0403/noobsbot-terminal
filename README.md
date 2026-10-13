@@ -53,6 +53,13 @@ That command:
 
 On Arch it installs the `noobsbot-git` package (`sudo pacman -R noobsbot-git` removes it). Elsewhere noobsbot goes to `/usr/local/bin`, and Rust comes from rustup if your distro's is too old.
 
+**On a Mac?** The macOS port has its own installer; see [macos/](macos/README.md):
+
+```sh
+curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/macos/install.sh \
+  | bash
+```
+
 <details>
 <summary><b>Install by hand</b></summary>
 
