@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::vte::ansi::{ClearMode, Handler};
 
 use crate::blocks::Blocks;
 use crate::context::Context;
@@ -36,6 +37,8 @@ pub struct Pane {
     pub failed_at: Option<Instant>,
     /// The shell is waiting at its prompt (shell integration), not running a command.
     pub at_prompt: bool,
+    /// The welcome screen is still up, until the first key at the prompt.
+    pub welcome: bool,
 }
 
 impl Pane {
@@ -43,6 +46,21 @@ impl Pane {
     /// ssh), else what /proc says.
     pub fn cwd(&self) -> Option<PathBuf> {
         self.cwd.clone().filter(|p| p.is_dir()).or_else(|| self.pty.shell_cwd())
+    }
+
+    /// Clears the welcome screen (and its scrollback) on the first key at the
+    /// prompt; Ctrl+L makes the shell redraw its prompt at the top. True if it did.
+    pub fn clear_welcome(&mut self) -> bool {
+        if !(self.welcome && self.at_prompt) {
+            return false;
+        }
+        self.welcome = false;
+        let mut term = self.term.lock();
+        term.clear_screen(ClearMode::All);
+        term.clear_screen(ClearMode::Saved);
+        drop(term);
+        self.pty.write(b"\x0c");
+        true
     }
 }
 

@@ -278,7 +278,8 @@ impl App {
         };
         let what = format!("{shell:?}");
         // The first shell of a window opens under the welcome screen.
-        if id == 0 && command_is_shell && self.config.terminal.welcome {
+        let welcome = id == 0 && command_is_shell && self.config.terminal.welcome;
+        if welcome {
             let name = match self.shell.as_str() {
                 "" => std::env::var("SHELL").unwrap_or_default(),
                 s => s.to_owned(),
@@ -305,6 +306,7 @@ impl App {
             cwd: None,
             failed_at: None,
             at_prompt: false,
+            welcome,
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -493,6 +495,7 @@ impl App {
 impl App {
     fn paste(&mut self, primary: bool) {
         let Some(text) = self.clipboard.get(primary) else { return };
+        self.panes.get_mut(&self.tabs[self.active].focused).unwrap().clear_welcome();
         let pane = self.focused_pane();
         let mut term = pane.term.lock();
         let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
@@ -1128,9 +1131,16 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 let mods = self.mods;
                 let pane = self.panes.get_mut(&self.tabs[self.active].focused).unwrap();
-                let mut term = pane.term.lock();
-                let app_cursor = term.mode().contains(TermMode::APP_CURSOR);
+                let app_cursor = pane.term.lock().mode().contains(TermMode::APP_CURSOR);
                 let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor) else { return };
+                if pane.clear_welcome() {
+                    self.dirty = true;
+                    // Enter only clears the welcome screen; any other key also types.
+                    if event.logical_key == Key::Named(NamedKey::Enter) {
+                        return;
+                    }
+                }
+                let mut term = pane.term.lock();
                 if term.grid().display_offset() != 0 {
                     term.scroll_display(Scroll::Bottom);
                     self.dirty = true;
