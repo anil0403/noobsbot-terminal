@@ -129,7 +129,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | Right-click | Menu: copy, paste, split up / right / down / left, new tab, close pane (Shift+right-click when a program uses the mouse) |
 | Ctrl+Shift+W | Close pane (the last pane closes its tab) |
 | Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
-| Alt+Arrows, click | Move focus between split panes; Alt+←/→ past the edge goes to the next tab |
+| Alt+Arrows, click | Move focus between split panes |
 | Ctrl+Shift+Arrows, drag the divider | Resize splits |
 
 </details>
