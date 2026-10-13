@@ -1556,9 +1556,21 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 if let Some((id, link)) = self.hover.as_ref().filter(|_| !self.mods.control_key()) {
                     let pane = &self.panes[id];
-                    let offset = pane.term.lock().grid().display_offset() as i32;
-                    let text = if self.link_copied { " Copied " } else { " Click to open \u{b7} c to copy " };
-                    draw_link_hint(renderer, pane.rect, &link.range, offset, text, &theme);
+                    let term = pane.term.lock();
+                    let offset = term.grid().display_offset() as i32;
+                    let shown = term.bounds_to_string(*link.range.start(), *link.range.end());
+                    drop(term);
+                    // A hyperlink's text can say one address and go to another: name where it goes.
+                    let text = match &link.target {
+                        _ if self.link_copied => " Copied ".to_owned(),
+                        Target::Url(url) if shown.trim() != url => {
+                            let short: String = url.chars().take(60).collect();
+                            let more = if short.len() < url.len() { "\u{2026}" } else { "" };
+                            format!(" Opens {short}{more} \u{b7} c to copy ")
+                        }
+                        _ => " Click to open \u{b7} c to copy ".to_owned(),
+                    };
+                    draw_link_hint(renderer, pane.rect, &link.range, offset, &text, &theme);
                 }
                 draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w, self.bar_hover);
                 if let Some(p) = &self.palette {

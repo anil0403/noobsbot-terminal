@@ -130,7 +130,7 @@ fn parse(osc: &[u8]) -> Option<Mark> {
     Some(Mark::Cwd(PathBuf::from(percent_decode(path))))
 }
 
-fn percent_decode(s: &str) -> String {
+pub fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

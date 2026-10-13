@@ -9,7 +9,7 @@ use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 /// URLs, or a file path with a line number. No uppercase, so the search is
 /// case-insensitive.
 const PATTERN: &str =
-    concat!(r#"(https?://|file://|ftp://|ssh://|git://|mailto:)[^\x00-\x20\x7f-\x9f<>"{}^`\\]+"#, r"|[a-z0-9_.~/+-]*[a-z0-9_-]\.[a-z0-9]+:[0-9]+(:[0-9]+)?",);
+    concat!(r#"(https?://|file://|ftp://|mailto:)[^\x00-\x20\x7f-\x9f<>"{}^`\\]+"#, r"|[a-z0-9_.~/+-]*[a-z0-9_-]\.[a-z0-9]+:[0-9]+(:[0-9]+)?",);
 
 #[derive(Debug, PartialEq)]
 pub enum Target {
@@ -41,7 +41,7 @@ impl Hints {
         if text.contains("://") || text.to_lowercase().starts_with("mailto:") {
             let url = trim_url(&text);
             let end = m.end().sub(term, Boundary::None, text.chars().count() - url.chars().count());
-            return (point <= end).then(|| Link { range: *m.start()..=end, target: Target::Url(url.to_owned()) });
+            return (point <= end).then(|| checked(url)).flatten().map(|target| Link { range: *m.start()..=end, target });
         }
         let (path, line) = parse_file(&text)?;
         let path = resolve(path, cwd)?;
@@ -61,7 +61,32 @@ fn hyperlink<T>(term: &Term<T>, point: Point) -> Option<Link> {
     while end < last && same(end.add(term, Boundary::None, 1)) {
         end = end.add(term, Boundary::None, 1);
     }
-    Some(Link { range: start..=end, target: Target::Url(link.uri().to_owned()) })
+    Some(Link { range: start..=end, target: checked(link.uri())? })
+}
+
+/// What a URL may open. Web, ftp and mail links go to xdg-open; a local
+/// `file://` file opens like a file link, a folder in the file manager.
+/// Anything else isn't a link: a program's hyperlink could otherwise have
+/// xdg-open start any handler (`.desktop` files, custom schemes).
+fn checked(url: &str) -> Option<Target> {
+    let (scheme, rest) = url.split_once(':')?;
+    match scheme.to_ascii_lowercase().as_str() {
+        "http" | "https" | "ftp" | "mailto" => Some(Target::Url(url.to_owned())),
+        "file" => {
+            let rest = rest.strip_prefix("//")?;
+            let (host, path) = rest.split_at(rest.find('/')?);
+            let here = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
+            if !(host.is_empty() || host == "localhost" || host == here.trim()) {
+                return None;
+            }
+            let path = PathBuf::from(crate::tap::percent_decode(path));
+            match path.is_dir() {
+                true => Some(Target::Url(url.to_owned())),
+                false => path.is_file().then_some(Target::File { path, line: 1 }),
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Drop sentence punctuation after a URL, and a `)` that closes text around it.
@@ -138,6 +163,20 @@ mod tests {
         assert_eq!(at("go HTTP://x.org/?q=1, now", 5, None), Some((3, 19, url("HTTP://x.org/?q=1"))));
         assert!(at("see https://example.com/a. ok", 1, None).is_none());
         assert!(at("example.com:8080", 3, None).is_none());
+        assert!(at("ssh://evil.example/x", 3, None).is_none());
+    }
+
+    #[test]
+    fn only_safe_targets() {
+        assert_eq!(checked("HTTPS://x.org"), Some(Target::Url("HTTPS://x.org".into())));
+        assert_eq!(checked("mailto:a@b.c"), Some(Target::Url("mailto:a@b.c".into())));
+        assert_eq!(checked("file:///"), Some(Target::Url("file:///".into()))); // a folder
+        let main = concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs");
+        assert_eq!(checked(&format!("file://{main}")), Some(Target::File { path: main.into(), line: 1 }));
+        assert_eq!(checked(&format!("file://localhost{}", main.replace(' ', "%20"))), Some(Target::File { path: main.into(), line: 1 }));
+        for bad in ["file://elsewhere.example/etc", "file:///nope/nothing", "javascript:alert(1)", "smb://h/s", "x-scheme:foo", "/etc/passwd", "-help"] {
+            assert_eq!(checked(bad), None, "{bad}");
+        }
     }
 
     #[test]
