@@ -51,8 +51,8 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
             let line = row.checked_sub(cat_top).and_then(|r| cat.get(r)).copied().unwrap_or("");
             for c in line.chars() {
                 match c {
-                    '.' => out.push_str("\x1b[1;38;5;11m."),
-                    '-' => out.push_str("\x1b[1;38;5;14m-"),
+                    '.' => out.push_str("\x1b[1;38;5;15m."),
+                    '-' => out.push_str("\x1b[1;38;5;15m-"),
                     c => out.push(c),
                 }
             }
@@ -295,8 +295,8 @@ mod tests {
         assert_eq!(tidy("Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz"), "Intel Core i7-8550U");
         assert_eq!(tidy("AMD Ryzen 7 5800X 8-Core Processor"), "AMD Ryzen 7 5800X 8-Core");
         // Wide: every line starts with the cat's column. Narrow: no cat.
-        assert!(screen(120, "gpu", "zsh").contains("1;38;5;14m-"));
-        assert!(!screen(80, "gpu", "zsh").contains("1;38;5;14m-"));
+        assert!(screen(120, "gpu", "zsh").contains("1;38;5;15m-"));
+        assert!(!screen(80, "gpu", "zsh").contains("1;38;5;15m-"));
         assert_eq!((greeting(8), greeting(14), greeting(19), greeting(2)), ("Good morning", "Good afternoon", "Good evening", "Up late"));
     }
 }
