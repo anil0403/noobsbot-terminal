@@ -31,13 +31,15 @@ install -Dm644 extra/noobsbot.svg ~/.local/share/icons/hicolor/scalable/apps/noo
 ```
 
 `~/.local/bin` must be on your `PATH`. "noobsbot terminal" then shows up in
-your desktop's app menu.
+your desktop's app menu. Also install `nano` (`sudo pacman -S nano`,
+`sudo apt install nano`): when you haven't set `$VISUAL` or `$EDITOR`,
+noobsbot sets `EDITOR=nano`, so git, gh and Ctrl+click on `file:line` open
+it. The Arch package pulls nano in by itself.
 
 Programs inside see `TERM=noobsbot` (on first start noobsbot compiles its
 terminfo into `~/.terminfo` if `tic` is around; otherwise TERM stays
 `alacritty` or `xterm-256color`). Other machines don't know `noobsbot`, so in
-bash and zsh `ssh` sends `TERM=xterm-256color` instead; fish users may want
-`alias ssh 'TERM=xterm-256color command ssh'`.
+bash, zsh and fish `ssh` sends `TERM=xterm-256color` instead.
 
 ## Keys
 

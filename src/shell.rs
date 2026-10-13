@@ -37,6 +37,7 @@ fn dir() -> Option<&'static PathBuf> {
     .as_ref()
 }
 
+/// EDITOR=nano when no editor is set (programs inside and file links use it).
 /// TERM=noobsbot when its terminfo is installed, or can be (compiled into
 /// ~/.terminfo with `tic`). Otherwise TERM stays as alacritty_terminal set it.
 pub fn set_term() {
@@ -62,17 +63,20 @@ pub fn set_term() {
         }
         std::env::set_var("TERM_PROGRAM", "noobsbot");
         std::env::set_var("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        // git, gh, crontab and our file links use nano unless an editor was chosen.
+        if std::env::var_os("VISUAL").is_none() && std::env::var_os("EDITOR").is_none() && on_path("nano").is_some() {
+            std::env::set_var("EDITOR", "nano");
+        }
     }
+}
+
+fn on_path(name: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?).map(|dir| dir.join(name)).find(|p| p.is_file())
 }
 
 /// The shells we integrate with that are installed, as paths found on $PATH.
 pub fn installed() -> Vec<String> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    ["zsh", "bash", "fish"]
-        .iter()
-        .filter_map(|name| std::env::split_paths(&path).map(|dir| dir.join(name)).find(|p| p.is_file()))
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect()
+    ["zsh", "bash", "fish"].iter().filter_map(|name| on_path(name)).map(|p| p.to_string_lossy().into_owned()).collect()
 }
 
 /// How to start `shell` (empty: `$SHELL`) with integration, and env to add.
