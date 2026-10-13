@@ -81,6 +81,8 @@ pub struct App {
     config: Config,
     /// Shell for new panes: the configured one until picked in the palette.
     shell: String,
+    /// Its name ("zsh"), from `shell` or $SHELL.
+    shell_name: String,
     _config_watcher: Option<notify::RecommendedWatcher>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
@@ -161,6 +163,7 @@ impl App {
             crt: config.crt.enabled,
             suggest: Suggest::new(),
             shell: config.terminal.shell.clone(),
+            shell_name: shell_name(&config.terminal.shell),
             quake,
             _config_watcher: config::watch(&path, proxy.clone()),
             config,
@@ -299,7 +302,7 @@ impl App {
         // The first shell of a window opens under the welcome screen.
         let welcome = id == 0 && command_is_shell && self.config.terminal.welcome;
         if welcome {
-            let screen = crate::welcome::screen(dims.columns(), &renderer.gpu, &self.shell_name());
+            let screen = crate::welcome::screen(dims.columns(), &renderer.gpu, &self.shell_name);
             alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *term.lock(), screen.as_bytes());
         }
         let options = tty::Options { shell, working_directory: cwd, env, ..Default::default() };
@@ -429,8 +432,7 @@ impl App {
 
     /// What to suggest after the input at the focused pane's prompt.
     fn suggestion(&mut self) -> Option<String> {
-        let shell = self.shell_name();
-        if !self.config.terminal.suggestions || shell == "fish" {
+        if !self.config.terminal.suggestions || self.shell_name == "fish" {
             return None; // fish suggests by itself
         }
         let pane = &self.panes[&self.focused()];
@@ -441,23 +443,17 @@ impl App {
         if term.grid().display_offset() != 0 || term.mode().contains(TermMode::VI) {
             return None;
         }
-        let typed = blocks::input(&term)?;
+        let typed = blocks::input(&term).filter(|t| !t.trim().is_empty())?;
         drop(term);
         let cwd = pane.cwd();
-        self.suggest.set_shell(&shell);
+        self.suggest.set_shell(&self.shell_name);
         self.suggest.get(&typed, cwd.as_deref())
-    }
-
-    /// The shell's name, for the welcome screen.
-    fn shell_name(&self) -> String {
-        let path = if self.shell.is_empty() { std::env::var("SHELL").unwrap_or_default() } else { self.shell.clone() };
-        path.rsplit('/').next().unwrap_or("").to_owned()
     }
 
     /// Lay out every tab and fit each pane's grid and PTY to its rect.
     fn relayout(&mut self) {
         let bar = self.bar_h();
-        let shell = self.shell_name();
+        let shell = self.shell_name.clone();
         let Some(renderer) = &self.renderer else { return };
         let (w, h) = renderer.size();
         let border = renderer.px(BORDER);
@@ -506,11 +502,10 @@ impl App {
         let hover = match id {
             Some(id) if (ctrl || (self.mods.is_empty() && !self.typed_since_move)) && !self.selecting && self.drag.is_none() => {
                 let pane = &self.panes[&id];
-                let cwd = pane.cwd();
                 let term = pane.term.lock();
                 let full_screen = term.mode().intersects(TermMode::ALT_SCREEN | TermMode::MOUSE_MODE);
                 let point = grid_point(&term, self.mouse_cell);
-                self.hints.at(&term, point, cwd.as_deref()).filter(|l| ctrl || (!full_screen && matches!(l.target, Target::Url(_)))).map(|link| (id, link))
+                self.hints.at(&term, point, || pane.cwd()).filter(|l| ctrl || (!full_screen && matches!(l.target, Target::Url(_)))).map(|link| (id, link))
             }
             _ => None,
         };
@@ -709,6 +704,12 @@ impl App {
 }
 
 /// Desktop notification, without waiting for it.
+/// "zsh" for "/usr/bin/zsh"; $SHELL's when `shell` is empty.
+fn shell_name(shell: &str) -> String {
+    let path = if shell.is_empty() { std::env::var("SHELL").unwrap_or_default() } else { shell.to_owned() };
+    path.rsplit('/').next().unwrap_or("").to_owned()
+}
+
 fn notify(summary: String, body: String) {
     std::thread::spawn(move || {
         if let Err(e) = std::process::Command::new("notify-send").args(["-a", "noobsbot", &summary, &body]).status() {
@@ -772,6 +773,7 @@ impl App {
                     }
                     Some(Item::Theme(name)) => self.set_theme(name),
                     Some(Item::Shell(path)) => {
+                        self.shell_name = shell_name(&path);
                         self.shell = path;
                         self.new_tab();
                     }
@@ -1081,9 +1083,6 @@ impl ApplicationHandler<UserEvent> for App {
             Event::PtyWrite(text) if text == "\x1b[?6c" => pane.pty.write(b"\x1b[?62;4;22c"),
             Event::PtyWrite(text) => pane.pty.write(text.as_bytes()),
             Event::Wakeup => {
-                if std::env::var_os("NOOBSBOT_DUMP").is_some() {
-                    dump_grid(&pane.term.lock());
-                }
                 // Drawn from about_to_wait at most once per refresh, so a flood of output
                 // doesn't make the renderer hog the terminal lock.
                 self.dirty |= self.tabs.get(self.active).is_some_and(|t| t.root.contains(id));
@@ -1125,7 +1124,8 @@ impl ApplicationHandler<UserEvent> for App {
         for id in due {
             self.check_context(id, false);
         }
-        let blinking = self.focused_pane().term.lock().cursor_style().blinking;
+        // Only matters while focused (unfocused, the cursor is a hollow block): no lock otherwise.
+        let blinking = self.renderer.as_ref().is_some_and(|r| r.focused) && self.focused_pane().term.lock().cursor_style().blinking;
         let mut wake = self.fade_quake(now);
         let (Some(renderer), Some(window)) = (self.renderer.as_mut(), &self.window) else { return };
 
@@ -1965,16 +1965,6 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
         r.fill(Rect { x, y, w, h: ch }, theme::to_f32(bg));
         button_icon(r, action, x + w / 2.0, y + ch / 2.0, theme::to_f32(fg));
         x += w + r.px(PAD);
-    }
-}
-
-/// Debug aid: print the visible grid to stdout. Enabled with NOOBSBOT_DUMP=1.
-fn dump_grid(term: &Term) {
-    let grid = term.grid();
-    println!("----- {}x{} -----", grid.columns(), grid.screen_lines());
-    for line in 0..grid.screen_lines() {
-        let row: String = grid[Line(line as i32)][..].iter().map(|cell| cell.c).collect();
-        println!("{}", row.trim_end());
     }
 }
 

@@ -148,7 +148,9 @@ impl Suggest {
                 .flatten()
                 .map(|e| {
                     let name = e.file_name().to_string_lossy().into_owned();
-                    if e.path().is_dir() { name + "/" } else { name }
+                    // The entry's type comes with the listing; only symlinks need a stat.
+                    let dir = e.file_type().is_ok_and(|t| t.is_dir() || t.is_symlink() && e.path().is_dir());
+                    if dir { name + "/" } else { name }
                 })
                 .collect();
             names.sort();

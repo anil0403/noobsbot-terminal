@@ -29,9 +29,9 @@ impl Hints {
         Self(RegexSearch::new(PATTERN).expect("link pattern compiles"))
     }
 
-    /// The link under `point`. Relative paths resolve against `cwd` and only
-    /// count if the file exists, so `example.com:8080` isn't one.
-    pub fn at<T>(&mut self, term: &Term<T>, point: Point, cwd: Option<&Path>) -> Option<Link> {
+    /// The link under `point`. Relative paths resolve against `cwd` (asked only
+    /// for those) and only count if the file exists, so `example.com:8080` isn't one.
+    pub fn at<T>(&mut self, term: &Term<T>, point: Point, cwd: impl FnOnce() -> Option<PathBuf>) -> Option<Link> {
         if let Some(link) = hyperlink(term, point) {
             return Some(link);
         }
@@ -75,8 +75,9 @@ fn checked(url: &str) -> Option<Target> {
         "file" => {
             let rest = rest.strip_prefix("//")?;
             let (host, path) = rest.split_at(rest.find('/')?);
-            let here = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
-            if !(host.is_empty() || host == "localhost" || host == here.trim()) {
+            static HOST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            let here = HOST.get_or_init(|| std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default().trim().to_owned());
+            if !(host.is_empty() || host == "localhost" || host == here) {
                 return None;
             }
             let path = PathBuf::from(crate::tap::percent_decode(path));
@@ -111,11 +112,11 @@ fn parse_file(text: &str) -> Option<(&str, usize)> {
     Some((path, line.split(':').next()?.parse().ok()?))
 }
 
-fn resolve(path: &str, cwd: Option<&Path>) -> Option<PathBuf> {
+fn resolve(path: &str, cwd: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
     let path = match path.strip_prefix("~/") {
         Some(rest) => PathBuf::from(std::env::var_os("HOME")?).join(rest),
         None if path.starts_with('/') => PathBuf::from(path),
-        None => cwd?.join(path),
+        None => cwd()?.join(path),
     };
     path.is_file().then_some(path)
 }
@@ -151,7 +152,7 @@ mod tests {
 
     fn at(text: &str, col: usize, cwd: Option<&Path>) -> Option<(usize, usize, Target)> {
         let term = mock_term(text);
-        let link = Hints::new().at(&term, Point::new(Line(0), Column(col)), cwd)?;
+        let link = Hints::new().at(&term, Point::new(Line(0), Column(col)), || cwd.map(Path::to_owned))?;
         Some((link.range.start().column.0, link.range.end().column.0, link.target))
     }
 
