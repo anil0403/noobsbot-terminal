@@ -127,11 +127,6 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
         meter("Battery", bar(level, true), status.to_lowercase());
     }
     lines.push(String::new());
-    // The theme's 16 colors.
-    for half in [0..8, 8..16] {
-        lines.push(half.map(|i| format!("\x1b[38;5;{i}m\u{25cf} ")).collect::<String>());
-    }
-    lines.push(String::new());
     lines.push(format!("\x1b[38;5;8m{}", TIPS[now.2 % TIPS.len()]));
     lines.push(String::new());
     lines.push("\x1b[38;5;11m\u{e0b6}\x1b[1;48;5;11;38;5;0m Designed & Developed by Noobsbot Team \x1b[0;38;5;11m\u{e0b4}\x1b[0m".into());

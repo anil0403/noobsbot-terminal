@@ -99,8 +99,8 @@ font is one). It applies to shells started after the change.
 A new window opens with a cat drawn in text beside a summary of the
 machine: a powerline header (user, host, date), distro, kernel, uptime, package
 count, desktop, shell, CPU and GPU, with meters for load, memory, swap, disk
-and battery (green, yellow, red as they get worse), the theme's colors and a
-different shortcut tip each time. It is drawn by the terminal itself from `/proc`
+and battery (green, yellow, red as they get worse), and a different shortcut
+tip each time. It is drawn by the terminal itself from `/proc`
 before the shell starts, so it costs no startup time and works with any shell.
 New tabs and splits stay clean, and windows too narrow for it leave the cat
 out. It shows in an 18px font, which drops to your configured size when the
