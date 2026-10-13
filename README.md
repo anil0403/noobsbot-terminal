@@ -263,5 +263,5 @@ cursor = "#5fd7ff"
 ---
 
 <p align="center">
-  <sub>Designed & developed by the Noobsbot Team · <a href="LICENSE">MIT license</a> · <a href="docs/PLAN.md">How it was built</a></sub>
+  <sub>Designed & developed by the Noobsbot Team · <a href="LICENSE">MIT license</a></sub>
 </p>
