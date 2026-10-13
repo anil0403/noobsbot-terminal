@@ -83,7 +83,6 @@ pub struct App {
     /// Index into `dividers` of the one being dragged.
     drag: Option<usize>,
     cursor_icon: CursorIcon,
-    window_title: String,
     /// Scrollback search in the focused pane.
     search: Option<Search>,
     hints: Hints,
@@ -155,7 +154,6 @@ impl App {
             dividers: Vec::new(),
             drag: None,
             cursor_icon: CursorIcon::Default,
-            window_title: String::new(),
             search: None,
             hints: Hints::new(),
             palette: None,
@@ -291,7 +289,6 @@ impl App {
             theme: Fade::new(theme_named(&self.config, &self.config.theme)),
             theme_name: String::new(),
             context: Context::default(),
-            title: None,
             last_context_check: Instant::now(),
             context_due: None,
             rect: Rect::default(),
@@ -391,22 +388,7 @@ impl App {
             r.cursor_on = true;
         }
         self.next_blink = Instant::now() + BLINK;
-        self.update_title();
         self.dirty = true;
-    }
-
-    fn update_title(&mut self) {
-        let Some(pane) = self.tabs.get(self.active).and_then(|t| self.panes.get(&t.focused)) else { return };
-        let title = match pane.title() {
-            "" => "noobsbot terminal",
-            t => t,
-        };
-        if title != self.window_title {
-            if let Some(w) = &self.window {
-                w.set_title(title);
-            }
-            self.window_title = title.to_owned();
-        }
     }
 
     /// Lay out every tab and fit each pane's grid and PTY to its rect.
@@ -905,9 +887,8 @@ impl App {
             pane.theme.set(theme_named(&self.config, &name));
             pane.theme_name = name;
         }
-        pane.context = ctx; // the foreground program is also the tab title
+        pane.context = ctx;
         self.dirty = true;
-        self.update_title();
     }
 
     /// Output arrived: the foreground program may have changed. Check now or soon.
@@ -950,7 +931,7 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
         let icon = crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
-        let mut attrs = Window::default_attributes().with_title("noobsbot terminal").with_window_icon(icon);
+        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon);
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.
@@ -996,16 +977,6 @@ impl ApplicationHandler<UserEvent> for App {
             // so image tools find our graphics (kitten icat also ignores answers as short as `?6c`).
             Event::PtyWrite(text) if text == "\x1b[?6c" => pane.pty.write(b"\x1b[?62;4;22c"),
             Event::PtyWrite(text) => pane.pty.write(text.as_bytes()),
-            Event::Title(title) => {
-                pane.title = Some(title);
-                self.update_title();
-                self.dirty = true;
-            }
-            Event::ResetTitle => {
-                pane.title = None;
-                self.update_title();
-                self.dirty = true;
-            }
             Event::Wakeup => {
                 if std::env::var_os("NOOBSBOT_DUMP").is_some() {
                     dump_grid(&pane.term.lock());
@@ -1597,7 +1568,7 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
         let x = i as f32 * tab_w + (cw / 2.0).round();
         // Pill: caps take a cell each, plus a cell of gap to the next tab.
         let fit = ((tab_w / cw) as usize).saturating_sub(4);
-        let label = format!(" {} {} ", i + 1, pane.title());
+        let label = format!(" Terminal {} ", i + 1);
         let mut label: String = label.chars().take(fit).collect();
         if fit > 0 && label.chars().count() == fit && !label.ends_with(' ') {
             label.pop();

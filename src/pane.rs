@@ -25,8 +25,6 @@ pub struct Pane {
     pub theme_name: String,
     /// Situation the theme was last chosen for.
     pub context: Context,
-    /// Set by the program via OSC 0/2.
-    pub title: Option<String>,
     pub last_context_check: Instant,
     /// A situation check is owed at this time (throttled output, or the clock).
     pub context_due: Option<Instant>,
@@ -39,10 +37,6 @@ pub struct Pane {
 }
 
 impl Pane {
-    pub fn title(&self) -> &str {
-        self.title.as_deref().unwrap_or(&self.context.process)
-    }
-
     /// The shell's directory: what it reported if that exists here (not over
     /// ssh), else what /proc says.
     pub fn cwd(&self) -> Option<PathBuf> {
