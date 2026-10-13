@@ -87,7 +87,7 @@ impl Font {
 }
 
 impl Font {
-    /// Powerline separators (U+E0B0..=E0B7) drawn to fill the cell exactly:
+    /// Powerline separators (U+E0B0..=E0B7) and ▀▄█ drawn to fill the cell exactly:
     /// font versions rarely line up with the cells around them, leaving seams
     /// in prompts built from colored segments.
     fn powerline(&self, c: char) -> Option<Glyph> {
@@ -117,6 +117,10 @@ impl Font {
                     if outline { (r - 1.0).abs() * fw.min(fh / 2.0) <= stroke / 2.0 } else { r <= 1.0 }
                 })
             }
+            // Block elements too, so half-block art has no seams between cells.
+            '█' => Box::new(|_, _| true),
+            '▀' => Box::new(move |_, y| y < fh / 2.0),
+            '▄' => Box::new(move |_, y| y >= fh / 2.0),
             _ => return None,
         };
         // 4x4 samples per pixel for smooth edges.
