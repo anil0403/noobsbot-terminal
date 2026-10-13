@@ -49,6 +49,8 @@ pub struct Renderer {
     pub scale: f32,
     /// Quads for the frame being built.
     quads: Vec<Instance>,
+    /// A pane's glyphs while its cells are walked (kept for its capacity).
+    glyphs: Vec<Instance>,
     /// The window has keyboard focus.
     pub focused: bool,
     /// Blink phase; the app toggles it on a timer.
@@ -164,6 +166,7 @@ impl Renderer {
             atlas,
             font,
             quads: Vec::new(),
+            glyphs: Vec::new(),
             focused: true,
             cursor_on: true,
             crt,
@@ -218,7 +221,7 @@ impl Renderer {
 
     /// Draw everything queued since the last frame on a `bg`-cleared window.
     pub fn finish(&mut self, bg: Rgb) {
-        let instances = std::mem::take(&mut self.quads);
+        let mut instances = std::mem::take(&mut self.quads);
         let [r, g, b, _] = theme::to_f32(bg);
         let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
 
@@ -233,7 +236,6 @@ impl Renderer {
 
         // Image quads go after the cells', drawn in between them in order below.
         let draws = std::mem::take(&mut self.image_draws);
-        let mut instances = instances;
         let cells = instances.len();
         instances.extend(draws.iter().map(|d| d.2));
         for (_, uid, _) in &draws {
@@ -326,7 +328,9 @@ impl Renderer {
         };
         let cursor_color = theme::to_f32(theme.cursor);
         let mut quads = std::mem::take(&mut self.quads);
-        let mut glyphs = Vec::new();
+        let mut glyphs = std::mem::take(&mut self.glyphs);
+        // Matches and cells both come in screen order: walk them together.
+        let mut next_match = 0;
         // (screen line, placement, image row) for image cells on screen.
         let mut tags: Vec<(i32, u64, usize)> = Vec::new();
         for cell in content.display_iter {
@@ -355,7 +359,10 @@ impl Renderer {
             if content.selection.is_some_and(|s| s.contains(cell.point)) {
                 bg = theme.selection;
             }
-            if let Some(m) = matches.iter().find(|m| m.contains(&cell.point)) {
+            while matches.get(next_match).is_some_and(|m| *m.end() < cell.point) {
+                next_match += 1;
+            }
+            if let Some(m) = matches.get(next_match).filter(|m| m.contains(&cell.point)) {
                 let strong = current == Some(m);
                 (fg, bg) = (theme.bg, if strong { theme.cursor } else { theme.ansi[3] });
             }
@@ -403,7 +410,7 @@ impl Renderer {
         // Cursor outlines were pushed into `glyphs` so they land on top of the text.
         // ponytail: every underline style draws as a single line; undercurl etc. when someone misses them.
         quads.append(&mut glyphs);
-        self.quads = quads;
+        (self.quads, self.glyphs) = (quads, glyphs);
         for (line, n, row) in tags {
             let Some(placed) = images.placed.get(&n) else { continue };
             // This row's slice of the image, clipped to the pane's right edge.
@@ -427,12 +434,10 @@ impl Renderer {
             };
             self.image_draws.push((self.quads.len(), pic.uid, quad));
         }
-        let mut quads = std::mem::take(&mut self.quads);
         if !active {
             let [r, g, b, _] = theme::to_f32(theme.bg);
-            quads.push(solid(rect.x, rect.y, rect.w, rect.h, [r, g, b, 0.4]));
+            self.fill(rect, [r, g, b, 0.4]);
         }
-        self.quads = quads;
     }
 }
 

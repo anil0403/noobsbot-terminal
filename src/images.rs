@@ -207,10 +207,14 @@ impl Images {
         if term.mode().contains(TermMode::ALT_SCREEN) {
             return;
         }
+        // Newest images sit lowest: walk up and stop once every one is found.
         let mut live = HashSet::new();
-        for line in term.topmost_line().0..=term.bottommost_line().0 {
+        for line in (term.topmost_line().0..=term.bottommost_line().0).rev() {
+            if live.len() == self.placed.len() {
+                break;
+            }
             for cell in &term.grid()[Line(line)][..] {
-                if let Some((n, _)) = tag(cell) {
+                if let Some((n, _)) = tag(cell).filter(|(n, _)| self.placed.contains_key(n)) {
                     live.insert(n);
                 }
             }
