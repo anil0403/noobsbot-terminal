@@ -46,14 +46,16 @@ const CONTEXT_CLOCK: Duration = Duration::from_secs(60);
 /// Widest a tab gets, in cells.
 const TAB_CELLS: f32 = 30.0;
 /// Buttons at the right end of the tab bar: label, action.
-const BAR_BUTTONS: [(&str, Action); 3] = [("+", Action::NewTab), ("\u{eb56}", Action::SplitRight), ("\u{eb57}", Action::SplitDown)];
-/// One button: a 1-cell label between a space each side, and its caps.
+const BAR_BUTTONS: [Action; 3] = [Action::NewTab, Action::SplitRight, Action::SplitDown];
+/// Space around the tab bar's tabs and buttons, in pixels.
+const PAD: f32 = 2.0;
 /// Window frame: Cinnamon's WhiteSur-Dark title bar grey (#373737) on every side.
 const BORDER: f32 = 4.0;
+const BORDER_COLOR: [f32; 4] = [55.0 / 255.0, 55.0 / 255.0, 55.0 / 255.0, 1.0];
 const CORNER: f64 = 10.0;
 /// Font size while the welcome screen shows (never smaller than the configured one).
 const WELCOME_FONT: f32 = 18.0;
-const BORDER_COLOR: [f32; 4] = [55.0 / 255.0, 55.0 / 255.0, 55.0 / 255.0, 1.0];
+/// One button: a 1-cell label with two cells of padding each side.
 const BUTTON_CELLS: f32 = 5.0;
 /// The right-click menu, top to bottom.
 const MENU: [Action; 8] = [Action::Copy, Action::Paste, Action::SplitUp, Action::SplitRight, Action::SplitDown, Action::SplitLeft, Action::NewTab, Action::ClosePane];
@@ -251,7 +253,8 @@ impl App {
     /// Height of the tab bar (always shown, for its buttons).
     fn bar_h(&self) -> f32 {
         match &self.renderer {
-            Some(r) => (r.font.cell_h * 1.4).round(),
+            // Under the window border's top edge; a 1px line at the bottom.
+            Some(r) => r.font.cell_h + BORDER + 2.0 * PAD + 1.0,
             _ => 0.0,
         }
     }
@@ -663,8 +666,8 @@ impl App {
     fn bar_button_at(&self, x: f32) -> Option<Action> {
         let cw = self.renderer.as_ref()?.font.cell_w;
         let start = self.renderer.as_ref()?.size().0 - bar_buttons_w(cw);
-        let i = ((x - start) / (BUTTON_CELLS * cw)).floor();
-        (i >= 0.0).then(|| BAR_BUTTONS.get(i as usize).map(|b| b.1)).flatten()
+        let i = ((x - start) / (BUTTON_CELLS * cw + PAD)).floor();
+        (i >= 0.0).then(|| BAR_BUTTONS.get(i as usize).copied()).flatten()
     }
 }
 
@@ -1269,7 +1272,7 @@ impl ApplicationHandler<UserEvent> for App {
                     if button == MouseButton::Left {
                         match self.bar_button_at(x) {
                             Some(action) => _ = self.run(event_loop, action),
-                            None => self.switch_tab((x / self.tab_w()) as usize),
+                            None => self.switch_tab(((x - BORDER - PAD).max(0.0) / self.tab_w()) as usize),
                         }
                     }
                     return;
@@ -1529,9 +1532,33 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
     }
 }
 
-/// Width of the tab bar's buttons, with half a cell of margin on the right.
+/// Width of the tab bar's buttons: each with the gap before the next, then the window border.
 fn bar_buttons_w(cw: f32) -> f32 {
-    (BAR_BUTTONS.len() as f32 * BUTTON_CELLS + 0.5) * cw
+    BAR_BUTTONS.len() as f32 * (BUTTON_CELLS * cw + PAD) + BORDER
+}
+
+/// A bar button's icon, drawn with pixel-aligned rects so it stays sharp:
+/// a plus, or a window split side by side or stacked, centered on (cx, cy).
+fn button_icon(r: &mut Renderer, action: Action, cx: f32, cy: f32, color: [f32; 4]) {
+    let ch = r.font.cell_h;
+    let t = (ch / 11.0).round().max(1.0);
+    let mut rect = |x: f32, y: f32, w: f32, h: f32| r.fill(Rect { x: x.round(), y: y.round(), w, h }, color);
+    if action == Action::NewTab {
+        let s = (ch * 0.5).round();
+        rect(cx - s / 2.0, cy - t / 2.0, s, t);
+        rect(cx - t / 2.0, cy - s / 2.0, t, s);
+        return;
+    }
+    let (w, h) = ((ch * 0.7).round(), (ch * 0.55).round());
+    let (x, y) = ((cx - w / 2.0).round(), (cy - h / 2.0).round());
+    rect(x, y, w, t);
+    rect(x, y + h - t, w, t);
+    rect(x, y, t, h);
+    rect(x + w - t, y, t, h);
+    match action {
+        Action::SplitRight => rect(x + (w - t) / 2.0, y, t, h),
+        _ => rect(x, y + (h - t) / 2.0, w, t),
+    }
 }
 
 /// Menu rows: (name, keys) from the action table.
@@ -1590,12 +1617,12 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let backdrop = theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg);
     r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, theme::to_f32(backdrop));
-    let y = ((bar_h - ch) / 2.0).round();
+    let y = BORDER + PAD;
     // A lone tab isn't drawn: the bar is just for the buttons then.
     for (i, tab) in tabs.iter().enumerate().filter(|_| tabs.len() > 1) {
         let pane = panes.get_mut(&tab.focused).unwrap();
         let theme = pane.theme.frame();
-        let x = i as f32 * tab_w + (cw / 2.0).round();
+        let x = BORDER + PAD + i as f32 * tab_w;
         // Pill: caps take a cell each, plus a cell of gap to the next tab.
         let fit = ((tab_w / cw) as usize).saturating_sub(4);
         let label = format!(" Terminal {} ", i + 1);
@@ -1617,9 +1644,11 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
     r.fill(Rect { x: 0.0, y: bar_h - 1.0, w: r.size().0, h: 1.0 }, theme::to_f32(theme::blend(backdrop, theme.selection, 0.7)));
     let (bg, fg) = (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.15));
     let mut x = r.size().0 - bar_buttons_w(cw);
-    for (label, _) in BAR_BUTTONS {
-        pill(r, x, y, &format!(" {label} "), theme::to_f32(bg), theme::to_f32(fg));
-        x += BUTTON_CELLS * cw;
+    let w = BUTTON_CELLS * cw;
+    for action in BAR_BUTTONS {
+        r.fill(Rect { x, y, w, h: ch }, theme::to_f32(bg));
+        button_icon(r, action, x + w / 2.0, y + ch / 2.0, theme::to_f32(fg));
+        x += w + PAD;
     }
 }
 
