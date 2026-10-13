@@ -914,7 +914,7 @@ impl App {
     fn apply_font(&mut self) {
         let Some(px) = self.window.as_ref().map(|w| self.font_px(w)) else { return };
         let Some(renderer) = self.renderer.as_mut() else { return };
-        renderer.set_font(&self.config.font.family, px);
+        renderer.set_font(&self.config.font.family, px, self.config.font.weight);
         self.relayout();
     }
 
@@ -1004,7 +1004,7 @@ impl ApplicationHandler<UserEvent> for App {
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
             self.frame_time = Duration::from_secs_f64(1000.0 / mhz as f64);
         }
-        let font = Font::new(&self.config.font.family, self.font_px(&window));
+        let font = Font::new(&self.config.font.family, self.font_px(&window), self.config.font.weight);
         self.renderer = Some(Renderer::new(window.clone(), font));
         self.window = Some(window);
         self.new_tab();
