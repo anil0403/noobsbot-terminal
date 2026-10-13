@@ -56,7 +56,7 @@ flicker = 0.0
 #
 # [themes.default]
 # foreground = "#dcdfe4"
-# background = "#1e1e1e"
+# background = "#000000"
 # cursor = "#f2ad36"
 # selection = "#454545"
 # # black, red, green, yellow, blue, magenta, cyan, white

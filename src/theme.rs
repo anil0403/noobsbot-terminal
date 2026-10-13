@@ -22,10 +22,10 @@ const fn rgb(hex: u32) -> Rgb {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            // One Half Dark's colors on neutral dark grey, with the warm amber / teal /
+            // One Half Dark's colors on black, with the warm amber / teal /
             // blue of powerline prompts (christitus.com/pretty-powershell) as accents.
             fg: rgb(0xdcdfe4),
-            bg: rgb(0x1e1e1e),
+            bg: rgb(0x000000),
             cursor: rgb(0xf2ad36),
             selection: rgb(0x454545),
             ansi: [
@@ -266,7 +266,7 @@ mod tests {
         b.bg = rgb(0xffffff);
         assert_eq!(a.mix(&b, 0.0), a);
         assert_eq!(a.mix(&b, 1.0), b);
-        assert_eq!(a.mix(&b, 0.5).bg, Rgb { r: 0x8f, g: 0x8f, b: 0x8f });
+        assert_eq!(a.mix(&b, 0.5).bg, Rgb { r: 0x80, g: 0x80, b: 0x80 });
     }
 
     #[test]
