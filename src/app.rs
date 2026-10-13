@@ -466,6 +466,10 @@ impl App {
             let (mut rects, mut dividers) = (Vec::new(), Vec::new());
             tab.root.layout(area, &mut rects, &mut dividers);
             if i == self.active {
+                // A drag or hover holds an index: it goes when the splits change under it.
+                let same = |d: Option<usize>| d.is_some_and(|d| dividers.get(d).map(|n| &n.path) == self.dividers.get(d).map(|o| &o.path));
+                self.drag = self.drag.filter(|_| same(self.drag));
+                self.divider_hover = self.divider_hover.filter(|_| same(self.divider_hover));
                 self.dividers = dividers;
             }
             for (id, rect) in rects {
