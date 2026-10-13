@@ -24,15 +24,7 @@ pub struct Font {
 
 impl Font {
     pub fn new(family: &str, size: f32) -> Self {
-        let mut font = Self {
-            system: FontSystem::new(),
-            cache: SwashCache::new(),
-            family: family.to_owned(),
-            size,
-            cell_w: 0.0,
-            cell_h: 0.0,
-            baseline: 0.0,
-        };
+        let mut font = Self { system: FontSystem::new(), cache: SwashCache::new(), family: family.to_owned(), size, cell_w: 0.0, cell_h: 0.0, baseline: 0.0 };
         font.measure();
         font
     }
@@ -56,10 +48,11 @@ impl Font {
 
     /// Shape one character, letting cosmic-text pick a fallback font if needed.
     fn shape(&mut self, c: char, bold: bool, italic: bool) -> Option<(CacheKey, f32)> {
-        let attrs = Attrs::new()
-            .family(Family::Name(&self.family))
-            .weight(if bold { Weight::BOLD } else { Weight::NORMAL })
-            .style(if italic { Style::Italic } else { Style::Normal });
+        let attrs = Attrs::new().family(Family::Name(&self.family)).weight(if bold { Weight::BOLD } else { Weight::NORMAL }).style(if italic {
+            Style::Italic
+        } else {
+            Style::Normal
+        });
         let mut buffer = Buffer::new_empty(Metrics::new(self.size, self.size));
         let mut tmp = [0u8; 4];
         buffer.set_text(c.encode_utf8(&mut tmp), &attrs, Shaping::Advanced, None);
@@ -86,6 +79,9 @@ impl Font {
     }
 }
 
+/// Drawn as a cross in the bar icons' weight.
+pub const CLOSE: char = '\u{10fffd}';
+
 impl Font {
     /// Powerline separators (U+E0B0..=E0B7) drawn to fill the cell exactly:
     /// font versions rarely line up with the cells around them, leaving seams
@@ -93,6 +89,8 @@ impl Font {
     fn powerline(&self, c: char) -> Option<Glyph> {
         let (w, h) = (self.cell_w as usize, self.cell_h as usize);
         let stroke = (self.cell_w / 9.0).max(1.0);
+        // The bar icons' line weight.
+        let icon = (self.cell_h / 11.0).round().max(1.0);
         // Distance from point p to segment a-b, in pixels.
         let seg = |p: (f32, f32), a: (f32, f32), b: (f32, f32)| {
             let (dx, dy) = (b.0 - a.0, b.1 - a.1);
@@ -116,6 +114,12 @@ impl Font {
                     let r = (nx * nx + ny * ny).sqrt();
                     if outline { (r - 1.0).abs() * fw.min(fh / 2.0) <= stroke / 2.0 } else { r <= 1.0 }
                 })
+            }
+            // The tab close button (a private codepoint, so terminal text never gets it).
+            CLOSE => {
+                let (c, h) = (fw / 2.0, (fh * 0.17).round());
+                let (top, bot) = (fh / 2.0 - h, fh / 2.0 + h);
+                Box::new(move |x, y| seg((x, y), (c - h, top), (c + h, bot)).min(seg((x, y), (c + h, top), (c - h, bot))) <= icon / 2.0)
             }
             _ => return None,
         };

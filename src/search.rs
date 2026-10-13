@@ -17,13 +17,19 @@ pub struct Search {
     /// The query bar is open and takes keys. In vi mode it closes but the
     /// matches stay for n/N.
     pub editing: bool,
+    /// Matches in the whole scrollback (up to `COUNT_MAX`), and which one is current (1-based).
+    pub total: usize,
+    pub index: usize,
 }
+
+/// Counting stops here; the bar shows "1000+".
+pub const COUNT_MAX: usize = 1000;
 
 impl Search {
     pub fn new(pane: PaneId, term: &Term) -> Self {
         let offset = term.grid().display_offset() as i32;
         let origin = Point::new(Line(term.screen_lines() as i32 - 1 - offset), term.last_column());
-        Self { pane, query: String::new(), regex: None, current: None, origin, editing: true }
+        Self { pane, query: String::new(), regex: None, current: None, origin, editing: true, total: 0, index: 0 }
     }
 
     /// The query changed: look again, starting at the current match so typing
@@ -46,6 +52,7 @@ impl Search {
     }
 
     fn find(&mut self, term: &mut Term, origin: Point, direction: Direction) {
+        (self.total, self.index) = (0, 0);
         let Some(regex) = self.regex.as_mut() else { return };
         self.current = term.search_next(regex, origin, direction, Side::Left, None);
         if let Some(m) = &self.current {
@@ -53,6 +60,15 @@ impl Search {
                 term.vi_goto_point(*m.start());
             } else {
                 term.scroll_to_point(*m.start());
+            }
+        }
+        // ponytail: recounts the whole scrollback on every key; cache per query if it lags.
+        let (start, end) = (Point::new(term.topmost_line(), Column(0)), Point::new(term.bottommost_line(), term.last_column()));
+        let current = self.current.as_ref().map(|m| *m.start());
+        for (i, m) in RegexIter::new(start, end, Direction::Right, term, regex).take(COUNT_MAX).enumerate() {
+            self.total = i + 1;
+            if Some(*m.start()) == current {
+                self.index = i + 1;
             }
         }
     }

@@ -13,10 +13,10 @@ use alacritty_terminal::term::{ClipboardType, TermMode};
 use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::dpi::PhysicalSize;
 use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::blocks::{self, Blocks};
@@ -32,8 +32,8 @@ use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::{Renderer, crt};
 use crate::search::Search;
-use crate::tap::Mark;
 use crate::shell;
+use crate::tap::Mark;
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
 
@@ -55,7 +55,10 @@ const BORDER_COLOR: [f32; 4] = [55.0 / 255.0, 55.0 / 255.0, 55.0 / 255.0, 1.0];
 /// One button: a 1-cell label with two cells of padding each side.
 const BUTTON_CELLS: f32 = 5.0;
 /// The right-click menu, top to bottom.
-const MENU: [Action; 8] = [Action::Copy, Action::Paste, Action::SplitUp, Action::SplitRight, Action::SplitDown, Action::SplitLeft, Action::NewTab, Action::ClosePane];
+const MENU: [Action; 8] =
+    [Action::Copy, Action::Paste, Action::SplitRight, Action::SplitDown, Action::SplitLeft, Action::SplitUp, Action::NewTab, Action::ClosePane];
+/// The menu's groups end after these rows; a rule separates them.
+const MENU_BREAKS: [usize; 2] = [1, 5];
 /// Step for keyboard split resizing, as a fraction of the split.
 const RESIZE_STEP: f32 = 0.05;
 /// A command running at least this long notifies when it ends while the window is unfocused.
@@ -98,6 +101,10 @@ pub struct App {
     menu: Option<((f32, f32), Option<usize>)>,
     /// Link under the pointer while Ctrl is held.
     hover: Option<(PaneId, Link)>,
+    /// Tab, close button or bar button under the pointer.
+    bar_hover: Option<BarHit>,
+    /// Split divider under the pointer (or being dragged).
+    divider_hover: Option<usize>,
     mods: ModifiersState,
     next_blink: Instant,
     /// Something on screen changed since the last frame.
@@ -141,11 +148,7 @@ impl App {
                 crate::quake::grab(&config.quake.hotkey, proxy.clone());
             }
         }
-        let quake = quake.then(|| Quake {
-            visible: false,
-            fade: None,
-            last_toggle: Instant::now() - Duration::from_secs(1),
-        });
+        let quake = quake.then(|| Quake { visible: false, fade: None, last_toggle: Instant::now() - Duration::from_secs(1) });
         Self {
             crt: config.crt.enabled,
             shell: config.terminal.shell.clone(),
@@ -167,6 +170,8 @@ impl App {
             palette: None,
             menu: None,
             hover: None,
+            bar_hover: None,
+            divider_hover: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
             dirty: false,
@@ -240,10 +245,12 @@ impl App {
     }
 
     fn divider_at(&self, x: f32, y: f32) -> Option<usize> {
-        const GRAB: f32 = 3.0;
+        let r = self.renderer.as_ref()?;
+        // Grabbable half a cell either side: the line itself is a pixel or two.
+        let grab = (r.font.cell_w / 2.0).max(r.px(4.0));
         self.dividers.iter().position(|d| {
             let r = d.rect;
-            Rect { x: r.x - GRAB, y: r.y - GRAB, w: r.w + 2.0 * GRAB, h: r.h + 2.0 * GRAB }.contains(x, y)
+            Rect { x: r.x - grab, y: r.y - grab, w: r.w + 2.0 * grab, h: r.h + 2.0 * grab }.contains(x, y)
         })
     }
 
@@ -251,14 +258,14 @@ impl App {
     fn bar_h(&self) -> f32 {
         match &self.renderer {
             // Under the window border's top edge; a 1px line at the bottom.
-            Some(r) => r.font.cell_h + BORDER + 2.0 * PAD + 1.0,
+            Some(r) => r.font.cell_h + r.px(BORDER) + 2.0 * r.px(PAD) + r.px(1.0),
             _ => 0.0,
         }
     }
 
     fn tab_w(&self) -> f32 {
         let Some(r) = &self.renderer else { return 1.0 };
-        ((r.size().0 - bar_buttons_w(r.font.cell_w)) / self.tabs.len() as f32).min(r.font.cell_w * TAB_CELLS).floor()
+        ((r.size().0 - bar_buttons_w(r) - r.px(BORDER) - r.px(PAD)) / self.tabs.len() as f32).min(r.font.cell_w * TAB_CELLS).floor()
     }
 
     /// Start a shell (or `command`) in a new pane, not yet placed in any tab.
@@ -363,6 +370,14 @@ impl App {
         self.focus_changed(Some(old));
     }
 
+    /// Close every pane in tab `i`.
+    fn close_tab(&mut self, event_loop: &ActiveEventLoop, i: usize) {
+        let Some(tab) = self.tabs.get(i) else { return };
+        for id in tab.root.leaves() {
+            self.close_pane(event_loop, id);
+        }
+    }
+
     fn focus(&mut self, id: PaneId) {
         let old = self.focused();
         self.tabs[self.active].focused = id;
@@ -411,7 +426,8 @@ impl App {
         let shell = self.shell_name();
         let Some(renderer) = &self.renderer else { return };
         let (w, h) = renderer.size();
-        let area = Rect { x: BORDER, y: bar, w: w - 2.0 * BORDER, h: h - bar - BORDER };
+        let border = renderer.px(BORDER);
+        let area = Rect { x: border, y: bar, w: w - 2.0 * border, h: h - bar - border };
         for (i, tab) in self.tabs.iter().enumerate() {
             let (mut rects, mut dividers) = (Vec::new(), Vec::new());
             tab.root.layout(area, &mut rects, &mut dividers);
@@ -472,10 +488,19 @@ impl App {
 
     fn update_icon(&mut self) {
         let (x, y) = self.mouse_px;
-        let icon = match self.divider_at(x, y).map(|i| self.dividers[i].across) {
+        let divider = self.drag.or_else(|| self.divider_at(x, y));
+        let bar = match &self.renderer {
+            Some(r) if y < self.bar_h() && self.menu.is_none() => bar_hit(r, self.tabs.len(), self.tab_w(), x),
+            _ => None,
+        };
+        if (divider, bar) != (self.divider_hover, self.bar_hover) {
+            (self.divider_hover, self.bar_hover) = (divider, bar);
+            self.dirty = true;
+        }
+        let icon = match divider.map(|i| self.dividers[i].across) {
             Some(true) => CursorIcon::ColResize,
             Some(false) => CursorIcon::RowResize,
-            None if self.hover.is_some() => CursorIcon::Pointer,
+            None if self.hover.is_some() || bar.is_some() => CursorIcon::Pointer,
             None => CursorIcon::Default,
         };
         if icon != self.cursor_icon {
@@ -658,16 +683,22 @@ fn human(d: Duration) -> String {
 // Right-click menu and tab bar buttons.
 impl App {
     /// A key while the menu is open: arrows pick, Enter runs, Esc closes; the rest are swallowed.
+    /// Copy needs a selection; the rest always work.
+    fn menu_enabled(&self, i: usize) -> bool {
+        MENU[i] != Action::Copy || self.panes[&self.focused()].term.lock().selection.as_ref().is_some_and(|s| !s.is_empty())
+    }
+
     fn menu_key(&mut self, event_loop: &ActiveEventLoop, key: &Key) -> bool {
         let Some((at, hovered)) = self.menu else { return false };
-        let last = MENU.len() - 1;
         self.dirty = true;
+        let n = MENU.len();
+        let step = |from: usize, by: usize| (1..=n).map(|k| (from + k * by) % n).find(|&i| self.menu_enabled(i));
         match key {
-            Key::Named(NamedKey::ArrowDown) => self.menu = Some((at, Some(hovered.map_or(0, |i| (i + 1).min(last))))),
-            Key::Named(NamedKey::ArrowUp) => self.menu = Some((at, Some(hovered.map_or(last, |i| i.saturating_sub(1))))),
+            Key::Named(NamedKey::ArrowDown) => self.menu = Some((at, step(hovered.unwrap_or(n - 1), 1))),
+            Key::Named(NamedKey::ArrowUp) => self.menu = Some((at, step(hovered.unwrap_or(0), n - 1))),
             Key::Named(NamedKey::Enter) => {
                 self.menu = None;
-                if let Some(i) = hovered {
+                if let Some(i) = hovered.filter(|&i| self.menu_enabled(i)) {
                     self.run(event_loop, MENU[i]);
                 }
             }
@@ -675,13 +706,6 @@ impl App {
             _ => {}
         }
         true
-    }
-
-    fn bar_button_at(&self, x: f32) -> Option<Action> {
-        let cw = self.renderer.as_ref()?.font.cell_w;
-        let start = self.renderer.as_ref()?.size().0 - bar_buttons_w(cw);
-        let i = ((x - start) / (BUTTON_CELLS * cw + PAD)).floor();
-        (i >= 0.0).then(|| BAR_BUTTONS.get(i as usize).copied()).flatten()
     }
 }
 
@@ -904,12 +928,7 @@ impl App {
         let Some(pane) = self.panes.get_mut(&id) else { return };
         let ctx = context::detect(pane.pty.fd(), pane.pty.shell_pid());
         pane.last_context_check = Instant::now();
-        pane.context_due = self
-            .config
-            .rules
-            .iter()
-            .any(|r| r.when.uses_hours())
-            .then(|| pane.last_context_check + CONTEXT_CLOCK);
+        pane.context_due = self.config.rules.iter().any(|r| r.when.uses_hours()).then(|| pane.last_context_check + CONTEXT_CLOCK);
         if ctx == pane.context && !force {
             return;
         }
@@ -963,7 +982,8 @@ impl ApplicationHandler<UserEvent> for App {
         if self.window.is_some() {
             return;
         }
-        let icon = crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
+        let icon =
+            crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
         let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon);
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
@@ -1162,6 +1182,15 @@ impl ApplicationHandler<UserEvent> for App {
                 self.renderer.as_mut().unwrap().cursor_on = true;
                 self.next_blink = Instant::now() + BLINK;
             }
+            WindowEvent::CursorLeft { .. } => {
+                if self.bar_hover.take().is_some() | self.divider_hover.take().is_some() {
+                    self.dirty = true;
+                }
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                self.renderer.as_mut().unwrap().scale = scale_factor as f32;
+                self.apply_font();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let cell_h = self.renderer.as_ref().unwrap().font.cell_h as f64;
                 let lines = match delta {
@@ -1292,21 +1321,27 @@ impl ApplicationHandler<UserEvent> for App {
                     let r = self.renderer.as_ref().unwrap();
                     if button == MouseButton::Left
                         && let Some(i) = menu_row(r, at, (x, y))
+                        && self.menu_enabled(i)
                     {
                         self.run(event_loop, MENU[i]);
                     }
                     return;
                 }
                 if pressed && y < self.bar_h() {
-                    if button == MouseButton::Left {
-                        match self.bar_button_at(x) {
-                            Some(action) => _ = self.run(event_loop, action),
-                            None => self.switch_tab(((x - BORDER - PAD).max(0.0) / self.tab_w()) as usize),
+                    let hit = bar_hit(self.renderer.as_ref().unwrap(), self.tabs.len(), self.tab_w(), x);
+                    match (button, hit) {
+                        (MouseButton::Left, Some(BarHit::Button(action))) => _ = self.run(event_loop, action),
+                        (MouseButton::Left, Some(BarHit::Tab(i))) => self.switch_tab(i),
+                        (MouseButton::Left, Some(BarHit::Close(i))) | (MouseButton::Middle, Some(BarHit::Tab(i) | BarHit::Close(i))) => {
+                            self.close_tab(event_loop, i)
                         }
+                        _ => {}
                     }
+                    self.update_icon();
                     return;
                 }
-                if pressed && button == MouseButton::Left
+                if pressed
+                    && button == MouseButton::Left
                     && let Some(i) = self.divider_at(x, y)
                 {
                     self.drag = Some(i);
@@ -1316,7 +1351,8 @@ impl ApplicationHandler<UserEvent> for App {
                 if pressed && id != self.focused() {
                     self.focus(id);
                 }
-                if pressed && button == MouseButton::Left
+                if pressed
+                    && button == MouseButton::Left
                     && let Some((_, link)) = self.hover.take()
                 {
                     return self.open_link(link.target);
@@ -1399,28 +1435,37 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.pane(&term, &pane.images.lock().unwrap(), &theme, pane.rect, id == tab.focused, &matches, current.as_ref(), link);
                     let vi = term.mode().contains(TermMode::VI);
                     let gutter = gutter(&term, &pane.blocks, &theme);
+                    let cursor_row = usize::try_from(term.grid().cursor.point.line.0 + term.grid().display_offset() as i32).ok();
                     drop(term);
                     let flash = pane.failed_at.map(|t| 1.0 - t.elapsed().as_secs_f32() / FLASH.as_secs_f32()).filter(|&a| a > 0.0);
                     if flash.is_none() {
                         pane.failed_at = None;
                     }
-                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash };
+                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
                     if id == tab.focused {
                         focused_theme = Some(theme);
                     }
                 }
                 let theme = focused_theme.expect("focused pane is in its tab");
-                for d in &self.dividers {
-                    renderer.fill(d.rect, theme::to_f32(theme.selection));
+                for (i, d) in self.dividers.iter().enumerate() {
+                    // The one you can grab lights up, at twice the width.
+                    let (color, grow) = match self.divider_hover == Some(i) {
+                        true => (theme.cursor, renderer.px(1.0)),
+                        false => (theme.selection, 0.0),
+                    };
+                    let r = d.rect;
+                    let r = if d.across { Rect { x: r.x - grow / 2.0, w: r.w + grow, ..r } } else { Rect { y: r.y - grow / 2.0, h: r.h + grow, ..r } };
+                    renderer.fill(r, theme::to_f32(color));
                 }
-                draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w);
+                draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w, self.bar_hover);
                 let (w, h) = renderer.size();
+                let border = renderer.px(BORDER);
                 for rect in [
-                    Rect { x: 0.0, y: 0.0, w, h: BORDER },
-                    Rect { x: 0.0, y: h - BORDER, w, h: BORDER },
-                    Rect { x: 0.0, y: 0.0, w: BORDER, h },
-                    Rect { x: w - BORDER, y: 0.0, w: BORDER, h },
+                    Rect { x: 0.0, y: 0.0, w, h: border },
+                    Rect { x: 0.0, y: h - border, w, h: border },
+                    Rect { x: 0.0, y: 0.0, w: border, h },
+                    Rect { x: w - border, y: 0.0, w: border, h },
                 ] {
                     renderer.fill(rect, BORDER_COLOR);
                 }
@@ -1428,7 +1473,8 @@ impl ApplicationHandler<UserEvent> for App {
                     draw_palette(renderer, p, &theme);
                 }
                 if let Some((at, hovered)) = self.menu {
-                    draw_menu(renderer, at, hovered, &theme);
+                    let can_copy = self.panes[&tab.focused].term.lock().selection.as_ref().is_some_and(|s| !s.is_empty());
+                    draw_menu(renderer, at, hovered, can_copy, &theme);
                 }
                 renderer.crt_params = self.crt.then(|| self.config.crt.params());
                 renderer.finish(theme.bg);
@@ -1461,6 +1507,8 @@ struct PaneUi<'a> {
     gutter: Vec<(usize, [f32; 4])>,
     /// Failed-command border, fading from 1 to 0.
     flash: Option<f32>,
+    /// The cursor's row on screen, if shown: the search box keeps off it.
+    cursor_row: Option<usize>,
 }
 
 /// Prompt marks (left edge), failure flash (border), vi mode badge (top right)
@@ -1482,19 +1530,41 @@ fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, ui: PaneUi) {
     }
     let (vi, search) = (ui.vi, ui.search);
     let (accent, ink) = (theme::to_f32(theme.cursor), theme::to_f32(theme.bg));
-    if vi {
-        pill(r, rect.x + rect.w - cw * 5.0, rect.y, " VI", accent, ink);
-    }
+    let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
+    // The search box floats at the top right, clear of the prompt at the bottom;
+    // at the bottom right when the prompt is at the top.
+    let mut right = rect.x + rect.w;
     if let Some(s) = search {
-        let y = rect.y + rect.h - ch;
-        r.fill(Rect { x: rect.x, y, w: rect.w, h: ch }, theme::to_f32(surface(theme)));
-        let x = segment(r, rect.x, y, " Find ", accent, ink);
-        let fit = ((rect.x + rect.w - x) / cw).max(0.0) as usize;
-        let query: String = format!(" {}_", s.query).chars().take(fit).collect();
-        let end = r.text(x, y, &query, theme::to_f32(theme.fg));
-        if !s.query.is_empty() && s.current.is_none() && end + cw * 12.0 < rect.x + rect.w {
-            r.text(end + cw, y, "no match", theme::to_f32(theme.ansi[1]));
+        let status = match (s.query.is_empty(), s.total) {
+            (true, _) => String::new(),
+            (false, 0) => "No matches".to_owned(),
+            (false, n) if n >= crate::search::COUNT_MAX => format!("{} of {}+", s.index, n),
+            (false, n) => format!("{} of {}", s.index, n),
+        };
+        let status_color = if s.total == 0 { theme::to_f32(theme.ansi[1]) } else { muted };
+        let cols = ((rect.w / cw) as usize).saturating_sub(1).min(48);
+        let (w, pad) = (cols as f32 * cw, r.px(1.0) + (cw / 4.0).round());
+        let top = ui.cursor_row != Some(0);
+        let y = if top { rect.y + pad } else { rect.y + rect.h - ch - pad };
+        let x = (rect.x + rect.w - w - pad).round();
+        panel(r, Rect { x: x - pad, y: y - pad, w: w + 2.0 * pad, h: ch + 2.0 * pad }, theme);
+        let qx = segment(r, x, y, " Find ", accent, ink);
+        let status_cells = status.chars().count() + 1;
+        // Keep the end of a long query in view, left of the count.
+        let room = ((x + w - qx) / cw) as usize;
+        let room = room.saturating_sub(status_cells);
+        let query = format!(" {}_", s.query);
+        let skip = query.chars().count().saturating_sub(room);
+        r.text(qx, y, &query.chars().skip(skip).collect::<String>(), theme::to_f32(theme.fg));
+        if room > 0 {
+            r.text(x + w - status_cells as f32 * cw, y, &status, status_color);
         }
+        if top {
+            right = x - pad - cw;
+        }
+    }
+    if vi {
+        pill(r, right - cw * 5.0, rect.y, " VI", accent, ink);
     }
 }
 
@@ -1536,10 +1606,14 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
     let n = p.len().clamp(1, ROWS); // a row for "No matching commands"
     let (fg, ink, accent) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg), theme::to_f32(theme.cursor));
     let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
-    // A blank row between the query and the list.
-    r.fill(Rect { x: x - pad, y: y - pad, w: bw + 2.0 * pad, h: (n + 2) as f32 * ch + 2.0 * pad }, theme::to_f32(surface(theme)));
+    // A rule between the query and the list.
+    panel(r, Rect { x: x - pad, y: y - pad, w: bw + 2.0 * pad, h: (n + 2) as f32 * ch + 2.0 * pad }, theme);
+    r.fill(Rect { x, y: (y + ch * 1.5).round(), w: bw, h: r.px(1.0) }, theme::to_f32(theme.selection));
     let qx = segment(r, x, y, " \u{276f} ", accent, ink);
-    let room = cols.saturating_sub(5);
+    // How many match, right-aligned on the query line once you've typed something.
+    let count = if p.query.is_empty() || p.len() == 0 { String::new() } else { format!("{} ", p.len()) };
+    r.text(x + (cols - count.chars().count()) as f32 * cw, y, &count, muted);
+    let room = cols.saturating_sub(5 + count.chars().count());
     let query = format!(" {}_", p.query);
     let skip = query.chars().count().saturating_sub(room); // keep the end of a long query in view
     r.text(qx, y, &query.chars().skip(skip).collect::<String>(), fg);
@@ -1565,8 +1639,50 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
 }
 
 /// Width of the tab bar's buttons: each with the gap before the next, then the window border.
-fn bar_buttons_w(cw: f32) -> f32 {
-    BAR_BUTTONS.len() as f32 * (BUTTON_CELLS * cw + PAD) + BORDER
+fn bar_buttons_w(r: &Renderer) -> f32 {
+    BAR_BUTTONS.len() as f32 * (BUTTON_CELLS * r.font.cell_w + r.px(PAD)) + r.px(BORDER)
+}
+
+/// Something in the tab bar you can point at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BarHit {
+    Tab(usize),
+    Close(usize),
+    Button(Action),
+}
+
+/// Label cells in a pill `tab_w` wide: its caps take a cell each, plus a cell of gap after.
+fn tab_cells(cw: f32, tab_w: f32) -> usize {
+    ((tab_w / cw) as usize).saturating_sub(4)
+}
+
+/// Tabs with this many label cells get a close button (in the last two).
+const CLOSE_MIN: usize = 8;
+
+/// What's at `x` in the tab bar. The drawing uses the same geometry, so a click
+/// always lands on what's drawn under it.
+fn bar_hit(r: &Renderer, tabs: usize, tab_w: f32, x: f32) -> Option<BarHit> {
+    let buttons = r.size().0 - bar_buttons_w(r);
+    hit_at(r.font.cell_w, r.px(BORDER) + r.px(PAD), r.px(PAD), buttons, tabs, tab_w, x)
+}
+
+/// `bar_hit` in plain numbers: tabs start at `first`, buttons at `buttons`.
+fn hit_at(cw: f32, first: f32, pad: f32, buttons: f32, tabs: usize, tab_w: f32, x: f32) -> Option<BarHit> {
+    if x >= buttons {
+        let i = ((x - buttons) / (BUTTON_CELLS * cw + pad)) as usize;
+        return BAR_BUTTONS.get(i).map(|a| BarHit::Button(*a));
+    }
+    let into = x - first;
+    let i = (into / tab_w).floor();
+    if tabs < 2 || i < 0.0 || i as usize >= tabs {
+        return None;
+    }
+    let (i, into, fit) = (i as usize, into - i * tab_w, tab_cells(cw, tab_w));
+    if into >= (fit + 2) as f32 * cw {
+        return None; // the gap between pills
+    }
+    // The cross and the cap after it.
+    Some(if fit >= CLOSE_MIN && into >= fit as f32 * cw { BarHit::Close(i) } else { BarHit::Tab(i) })
 }
 
 /// A bar button's icon, drawn with pixel-aligned rects so it stays sharp:
@@ -1598,93 +1714,133 @@ fn menu_rows() -> impl Iterator<Item = (&'static str, &'static str)> {
     MENU.iter().filter_map(|a| input::actions().iter().find(|e| e.action == *a)).map(|e| (e.name.as_str(), e.keys.split(" or ").next().unwrap_or("")))
 }
 
-/// The menu's size in cells: room for the longest name, a gap, the longest keys.
-fn menu_cells() -> (f32, f32) {
+/// The menu's width in cells (room for the longest name, a gap, the longest
+/// keys) and its height in pixels: half a row above and below, rows, rules.
+fn menu_size(r: &Renderer) -> (f32, f32) {
     let name = menu_rows().map(|(n, _)| n.chars().count()).max().unwrap_or(0);
     let keys = menu_rows().map(|(_, k)| k.chars().count()).max().unwrap_or(0);
-    ((name + keys + 6) as f32, MENU.len() as f32)
+    let ch = r.font.cell_h;
+    ((name + keys + 7) as f32, (MENU.len() + 1) as f32 * ch + MENU_BREAKS.len() as f32 * ch / 2.0)
 }
 
-/// Where the menu goes for a click at `at`: down and right of it, kept inside the window.
+/// Top of row `i`, from the menu's top: rules between groups take half a row.
+fn menu_row_y(ch: f32, i: usize) -> f32 {
+    ch / 2.0 + i as f32 * ch + MENU_BREAKS.iter().filter(|&&b| b < i).count() as f32 * ch / 2.0
+}
+
+/// Where the menu goes for a click at `at`: down and right of it, flipped up or
+/// left where it would leave the window.
 fn menu_origin(r: &Renderer, at: (f32, f32)) -> (f32, f32) {
-    let (cols, rows) = menu_cells();
+    let (cols, mh) = menu_size(r);
     let (w, h) = r.size();
-    let (mw, mh) = (cols * r.font.cell_w, (rows + 1.0) * r.font.cell_h);
-    (at.0.min(w - mw).max(0.0), at.1.min(h - mh).max(0.0))
+    let mw = cols * r.font.cell_w;
+    let x = if at.0 + mw > w { at.0 - mw } else { at.0 };
+    let y = if at.1 + mh > h { at.1 - mh } else { at.1 };
+    (x.clamp(0.0, (w - mw).max(0.0)).round(), y.clamp(0.0, (h - mh).max(0.0)).round())
 }
 
 /// The menu row under `p`, if any.
 fn menu_row(r: &Renderer, origin: (f32, f32), p: (f32, f32)) -> Option<usize> {
-    let (cols, rows) = menu_cells();
+    let (cols, _) = menu_size(r);
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
-    let (x, y) = (p.0 - origin.0, p.1 - origin.1 - ch / 2.0);
-    let i = (y / ch).floor();
-    (x >= 0.0 && x < cols * cw && i >= 0.0 && i < rows).then_some(i as usize)
+    let (x, y) = (p.0 - origin.0, p.1 - origin.1);
+    if x < 0.0 || x >= cols * cw {
+        return None;
+    }
+    (0..MENU.len()).find(|&i| (menu_row_y(ch, i)..menu_row_y(ch, i) + ch).contains(&y))
 }
 
-/// The right-click menu: action names with their keys, the hovered row as a pill.
-fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, theme: &Theme) {
+/// A popup's panel: the surface color with a hairline edge, so it stands off
+/// whatever is behind it.
+fn panel(r: &mut Renderer, rect: Rect, theme: &Theme) {
+    let t = r.px(1.0);
+    r.fill(rect, theme::to_f32(theme.selection));
+    r.fill(Rect { x: rect.x + t, y: rect.y + t, w: rect.w - 2.0 * t, h: rect.h - 2.0 * t }, theme::to_f32(surface(theme)));
+}
+
+/// The right-click menu: action names with their keys in groups, the hovered
+/// row as a pill. Copy is dimmed with nothing selected.
+fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_copy: bool, theme: &Theme) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
-    let (cols, rows) = menu_cells();
+    let (cols, h) = menu_size(r);
     let (fg, ink, accent) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg), theme::to_f32(theme.cursor));
     let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
-    r.fill(Rect { x: origin.0, y: origin.1, w: cols * cw, h: (rows + 1.0) * ch }, theme::to_f32(surface(theme)));
+    let faint = theme::to_f32(theme::blend(theme.fg, surface(theme), 0.7));
+    panel(r, Rect { x: origin.0, y: origin.1, w: cols * cw, h }, theme);
+    for &b in &MENU_BREAKS {
+        let y = (origin.1 + menu_row_y(ch, b + 1) - ch / 4.0).round();
+        r.fill(Rect { x: origin.0 + cw, y, w: (cols - 2.0) * cw, h: r.px(1.0) }, theme::to_f32(theme.selection));
+    }
     for (i, (name, keys)) in menu_rows().enumerate() {
-        let y = origin.1 + ch / 2.0 + i as f32 * ch;
+        let y = origin.1 + menu_row_y(ch, i);
         let keys_x = origin.0 + (cols - 2.0 - keys.chars().count() as f32) * cw;
-        if hovered == Some(i) {
+        let enabled = MENU[i] != Action::Copy || can_copy;
+        if hovered == Some(i) && enabled {
             pill(r, origin.0 + cw / 2.0, y, &" ".repeat(cols as usize - 3), accent, ink);
             r.text(origin.0 + cw * 2.0, y, name, ink);
             r.text(keys_x, y, keys, ink);
         } else {
-            r.text(origin.0 + cw * 2.0, y, name, fg);
-            r.text(keys_x, y, keys, muted);
+            r.text(origin.0 + cw * 2.0, y, name, if enabled { fg } else { faint });
+            r.text(keys_x, y, keys, if enabled { muted } else { faint });
         }
     }
 }
 
 /// One tab per slot, each tinted with its focused pane's situation theme, so a
 /// red production tab stays visible while you work in another one.
-fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32) {
+fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32, hover: Option<BarHit>) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let backdrop = theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg);
     r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, theme::to_f32(backdrop));
-    let y = BORDER + PAD;
+    let y = r.px(BORDER) + r.px(PAD);
+    let fit = tab_cells(cw, tab_w);
+    let closable = fit >= CLOSE_MIN;
     // A lone tab isn't drawn: the bar is just for the buttons then.
     for (i, tab) in tabs.iter().enumerate().filter(|_| tabs.len() > 1) {
         let pane = panes.get_mut(&tab.focused).unwrap();
         let theme = pane.theme.frame();
-        let x = BORDER + PAD + i as f32 * tab_w;
-        // Pill: caps take a cell each, plus a cell of gap to the next tab.
-        let fit = ((tab_w / cw) as usize).saturating_sub(4);
+        let x = r.px(BORDER) + r.px(PAD) + i as f32 * tab_w;
+        let hovered = matches!(hover, Some(BarHit::Tab(h) | BarHit::Close(h)) if h == i);
+        // The close button keeps the last two cells, so labels don't shift when it shows.
+        let room = if closable { fit - 2 } else { fit };
         let mut label = format!(" Terminal {} ", i + 1);
         // Tight: just the number, padded if there's room.
         for short in [format!(" {} ", i + 1), (i + 1).to_string()] {
-            if label.chars().count() > fit {
+            if label.chars().count() > room {
                 label = short;
             }
         }
-        if label.chars().count() > fit {
-            label = label.chars().take(fit.saturating_sub(1)).chain((fit > 0).then_some('…')).collect();
+        if label.chars().count() > room {
+            label = label.chars().take(room.saturating_sub(1)).chain((room > 0).then_some('…')).collect();
         }
         // Fill the slot, so each tab reads as its own block.
         let label = format!("{label:<fit$}");
-        let (bg, fg) = if i == active {
-            (theme.cursor, theme.bg)
-        } else {
-            (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.3))
+        let (bg, fg) = match (i == active, hovered) {
+            (true, _) => (theme.cursor, theme.bg),
+            (false, true) => (theme::blend(theme.selection, theme.fg, 0.12), theme.fg),
+            (false, false) => (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.3)),
         };
         pill(r, x, y, &label, theme::to_f32(bg), theme::to_f32(fg));
+        if closable && (i == active || hovered) {
+            let cx = x + fit as f32 * cw;
+            if hover == Some(BarHit::Close(i)) {
+                r.fill(Rect { x: cx, y, w: cw, h: ch }, theme::to_f32(theme::blend(bg, fg, 0.25)));
+            }
+            r.text(cx, y, &crate::font::CLOSE.to_string(), theme::to_f32(fg));
+        }
     }
     let theme = panes.get_mut(&tabs[active].focused).unwrap().theme.frame();
-    r.fill(Rect { x: 0.0, y: bar_h - 1.0, w: r.size().0, h: 1.0 }, theme::to_f32(theme::blend(backdrop, theme.selection, 0.7)));
-    let (bg, fg) = (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.15));
-    let mut x = r.size().0 - bar_buttons_w(cw);
+    r.fill(Rect { x: 0.0, y: bar_h - r.px(1.0), w: r.size().0, h: r.px(1.0) }, theme::to_f32(theme::blend(backdrop, theme.selection, 0.7)));
+    let mut x = r.size().0 - bar_buttons_w(r);
     let w = BUTTON_CELLS * cw;
     for action in BAR_BUTTONS {
+        let (bg, fg) = match hover == Some(BarHit::Button(action)) {
+            true => (theme::blend(theme.selection, theme.fg, 0.12), theme.fg),
+            false => (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.15)),
+        };
         r.fill(Rect { x, y, w, h: ch }, theme::to_f32(bg));
         button_icon(r, action, x + w / 2.0, y + ch / 2.0, theme::to_f32(fg));
-        x += w + PAD;
+        x += w + r.px(PAD);
     }
 }
 
@@ -1695,5 +1851,33 @@ fn dump_grid(term: &Term) {
     for line in 0..grid.screen_lines() {
         let row: String = grid[Line(line as i32)][..].iter().map(|cell| cell.c).collect();
         println!("{}", row.trim_end());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bar_hits() {
+        // 10px cells, tabs from x=6 and 200px wide (16 label cells), buttons from x=1000.
+        let hit = |x| hit_at(10.0, 6.0, 2.0, 1000.0, 3, 200.0, x);
+        assert_eq!(hit(10.0), Some(BarHit::Tab(0)));
+        assert_eq!(hit(6.0 + 200.0 + 50.0), Some(BarHit::Tab(1)));
+        // The cross sits in the last label cell; the cap after it counts too.
+        assert_eq!(hit(6.0 + 160.0), Some(BarHit::Close(0)));
+        assert_eq!(hit(6.0 + 175.0), Some(BarHit::Close(0)));
+        assert_eq!(hit(6.0 + 185.0), None); // gap between pills
+        assert_eq!(hit(6.0 + 3.0 * 200.0 + 10.0), None); // past the last tab
+        assert_eq!(hit(1001.0), Some(BarHit::Button(Action::NewTab)));
+        assert_eq!(hit(1000.0 + 52.0 + 5.0), Some(BarHit::Button(Action::SplitRight)));
+        // A lone tab isn't drawn, so it isn't hit either.
+        assert_eq!(hit_at(10.0, 6.0, 2.0, 1000.0, 1, 200.0, 10.0), None);
+    }
+
+    #[test]
+    fn menu_rows_and_rules() {
+        // Half a row of padding, then rows, with half a row per rule passed.
+        assert_eq!((menu_row_y(20.0, 0), menu_row_y(20.0, 1), menu_row_y(20.0, 2), menu_row_y(20.0, 6)), (10.0, 30.0, 60.0, 150.0));
     }
 }

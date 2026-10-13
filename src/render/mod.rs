@@ -45,6 +45,8 @@ pub struct Renderer {
     pub font: Font,
     /// The graphics card's name, for the welcome screen.
     pub gpu: String,
+    /// Window scale factor (HiDPI), for UI sizes given in logical pixels.
+    pub scale: f32,
     /// Quads for the frame being built.
     quads: Vec<Instance>,
     /// The window has keyboard focus.
@@ -66,19 +68,14 @@ impl Renderer {
     pub fn new(window: Arc<Window>, font: Font) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let size = window.inner_size();
+        let scale = window.scale_factor() as f32;
         let surface = instance.create_surface(window).expect("create surface");
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .expect("no GPU adapter");
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { compatible_surface: Some(&surface), ..Default::default() }))
+            .expect("no GPU adapter");
         log::info!("adapter: {:?}", adapter.get_info());
         let gpu = adapter.get_info().name;
-        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
-            .expect("request device");
-        let mut config = surface
-            .get_default_config(&adapter, size.width.max(1), size.height.max(1))
-            .expect("surface unsupported by adapter");
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("request device");
+        let mut config = surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).expect("surface unsupported by adapter");
         // Terminal colors are sRGB bytes; write them as-is instead of gamma-converting.
         config.format = config.format.remove_srgb_suffix();
         surface.configure(&device, &config);
@@ -160,6 +157,7 @@ impl Renderer {
             crt,
             crt_params: None,
             started: std::time::Instant::now(),
+            scale,
         }
     }
 
@@ -174,6 +172,11 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
+    /// `v` logical pixels in physical ones, whole and at least 1.
+    pub fn px(&self, v: f32) -> f32 {
+        (v * self.scale).round().max(1.0)
+    }
+
     pub fn size(&self) -> (f32, f32) {
         (self.config.width as f32, self.config.height as f32)
     }
@@ -186,15 +189,16 @@ impl Renderer {
     pub fn text(&mut self, mut x: f32, y: f32, text: &str, color: [f32; 4]) -> f32 {
         for c in text.chars() {
             if c != ' '
-                && let Some(e) = self.atlas.get(&self.queue, &mut self.font, c, false, false) {
-                    self.quads.push(Instance {
-                        pos: [x + e.left, y + self.font.baseline - e.top],
-                        size: [e.rect[2], e.rect[3]],
-                        uv: e.rect,
-                        color,
-                        kind: if e.color { COLOR } else { MASK },
-                    });
-                }
+                && let Some(e) = self.atlas.get(&self.queue, &mut self.font, c, false, false)
+            {
+                self.quads.push(Instance {
+                    pos: [x + e.left, y + self.font.baseline - e.top],
+                    size: [e.rect[2], e.rect[3]],
+                    uv: e.rect,
+                    color,
+                    kind: if e.color { COLOR } else { MASK },
+                });
+            }
             x += self.font.cell_w;
         }
         x
@@ -284,7 +288,17 @@ impl Renderer {
     /// Search `matches` are highlighted, `current` most strongly; the hovered `link` is underlined.
     /// Images tagged on the grid are drawn over their cells.
     #[allow(clippy::too_many_arguments)]
-    pub fn pane(&mut self, term: &Term, images: &Images, theme: &Theme, rect: Rect, active: bool, matches: &[Match], current: Option<&Match>, link: Option<&Match>) {
+    pub fn pane(
+        &mut self,
+        term: &Term,
+        images: &Images,
+        theme: &Theme,
+        rect: Rect,
+        active: bool,
+        matches: &[Match],
+        current: Option<&Match>,
+        link: Option<&Match>,
+    ) {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
         let (ox, oy) = (rect.x, rect.y);
         self.fill(rect, theme::to_f32(theme.bg));

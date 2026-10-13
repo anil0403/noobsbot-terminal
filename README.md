@@ -126,8 +126,9 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 |---|---|
 | Ctrl+Shift+T, **+** button | New tab (opens in the current shell's directory) |
 | Ctrl+Shift+E / Ctrl+Shift+O | Split right / split down (also the buttons at the right of the tab bar; up and left from the palette or right-click) |
-| Right-click | Menu: copy, paste, split up / right / down / left, new tab, close pane (Shift+right-click when a program uses the mouse) |
+| Right-click | Menu: copy, paste, split right / down / left / up, new tab, close pane (Shift+right-click when a program uses the mouse) |
 | Ctrl+Shift+W | Close pane (the last pane closes its tab) |
+| **×** on a tab, middle-click | Close the tab with all its panes |
 | Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
 | Alt+Arrows, click | Move focus between split panes |
 | Ctrl+Shift+Arrows, drag the divider | Resize splits |
@@ -142,7 +143,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | Shift+PgUp / Shift+PgDn, wheel | Scroll through history |
 | Ctrl+Shift+Home / End | Jump to top / bottom of history |
 | Ctrl+Shift+Z / Ctrl+Shift+X | Scroll to the previous / next command's prompt |
-| Ctrl+Shift+F | Search history (regex, or plain text if it isn't one). Enter / Shift+Enter: older / newer match, Esc: close |
+| Ctrl+Shift+F | Search history (regex, or plain text if it isn't one), with a match count. Enter / Shift+Enter: older / newer match, Esc: close |
 | Ctrl+Shift+Space | Vi mode: `hjkl` `wbe` `0$^` `g` `G` `Ctrl+U/D`, `v` / `V` / `Ctrl+V` select, `y` copy, `/` search, `n` / `N` next, Esc / `q` leave |
 | Ctrl + hover / click | Underline / open a link: URLs and terminal hyperlinks in the browser, `file.rs:12[:5]` in `$VISUAL`/`$EDITOR` (in a split, at that line; no editor set: the desktop's default app) |
 
