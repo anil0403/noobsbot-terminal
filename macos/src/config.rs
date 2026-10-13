@@ -72,7 +72,7 @@ pub struct Quake {
 
 impl Default for Quake {
     fn default() -> Self {
-        Self { hotkey: "F12".into(), height: 40 }
+        Self { hotkey: "Ctrl+grave".into(), height: 40 }
     }
 }
 
@@ -125,7 +125,7 @@ pub enum Shape {
 
 impl Default for Font {
     fn default() -> Self {
-        Self { family: "JetBrainsMono Nerd Font Mono".into(), size: 18.0, weight: 600 }
+        Self { family: "JetBrainsMono Nerd Font Mono".into(), size: 15.0, weight: 600 }
     }
 }
 

@@ -16,7 +16,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
-use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::keyboard::{Key, ModifiersKeyState, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::blocks::{self, Blocks};
@@ -105,14 +105,14 @@ pub struct App {
     palette: Option<Palette>,
     /// The right-click menu: top-left corner, and the row under the pointer.
     menu: Option<((f32, f32), Option<usize>)>,
-    /// Link under the pointer: a URL, or any link while Ctrl is held.
+    /// Link under the pointer: a URL, or any link while Cmd is held.
     hover: Option<(PaneId, Link)>,
     /// `c` copied the hovered link (it says so until the pointer leaves it).
     link_copied: bool,
     /// A key was pressed since the pointer last moved: plain hovering is off,
     /// so typing `c` with the pointer resting on a URL types it.
     typed_since_move: bool,
-    /// Pressed on a link without Ctrl: opens on release unless it became a selection.
+    /// Pressed on a link without Cmd: opens on release unless it became a selection.
     link_press: Option<Target>,
     /// Tab, close button or bar button under the pointer.
     bar_hover: Option<BarHit>,
@@ -140,7 +140,7 @@ pub struct App {
     last_click: Instant,
     clicks: u8,
     clipboard: Clipboard,
-    /// Font size change from Ctrl+=/Ctrl+-, in px on top of the config size.
+    /// Font size change from Cmd+=/Cmd+-, in px on top of the config size.
     zoom: f32,
     /// Running as the drop-down terminal (`--quake`).
     quake: Option<Quake>,
@@ -366,7 +366,7 @@ impl App {
         self.check_context(id, true);
     }
 
-    /// Close a pane (its shell exited, or Ctrl+Shift+W). The last pane closes the
+    /// Close a pane (its shell exited, or Cmd+W). The last pane closes the
     /// tab, the last tab closes the window.
     fn close_pane(&mut self, event_loop: &ActiveEventLoop, id: PaneId) {
         let Some(pane) = self.panes.remove(&id) else { return };
@@ -504,18 +504,18 @@ impl App {
 
 // Links and the mouse pointer.
 impl App {
-    /// Find the link under the pointer. With Ctrl held every link is live (files
+    /// Find the link under the pointer. With Cmd held every link is live (files
     /// too, and in full-screen programs); without, URLs at the shell are.
     fn update_hover(&mut self) {
         let id = self.mouse_pane.filter(|id| self.panes.contains_key(id) && self.tabs[self.active].root.contains(*id));
-        let ctrl = self.mods.control_key();
+        let cmd = self.mods.super_key();
         let hover = match id {
-            Some(id) if (ctrl || (self.mods.is_empty() && !self.typed_since_move)) && !self.selecting && self.drag.is_none() => {
+            Some(id) if (cmd || (self.mods.is_empty() && !self.typed_since_move)) && !self.selecting && self.drag.is_none() => {
                 let pane = &self.panes[&id];
                 let term = pane.term.lock();
                 let full_screen = term.mode().intersects(TermMode::ALT_SCREEN | TermMode::MOUSE_MODE);
                 let point = grid_point(&term, self.mouse_cell);
-                self.hints.at(&term, point, || pane.cwd()).filter(|l| ctrl || (!full_screen && matches!(l.target, Target::Url(_)))).map(|link| (id, link))
+                self.hints.at(&term, point, || pane.cwd()).filter(|l| cmd || (!full_screen && matches!(l.target, Target::Url(_)))).map(|link| (id, link))
             }
             _ => None,
         };
@@ -607,7 +607,7 @@ impl App {
             Action::ClosePane => self.close_pane(event_loop, self.focused()),
             Action::NextTab => self.switch_tab((self.active + 1) % self.tabs.len()),
             Action::PrevTab => self.switch_tab((self.active + self.tabs.len() - 1) % self.tabs.len()),
-            // With a single tab, Alt+digit stays readline's digit argument.
+            // With a single tab, Cmd+digit does nothing.
             Action::GoToTab(i) if i < self.tabs.len() && self.tabs.len() > 1 => self.switch_tab(i),
             Action::GoToTab(_) => return false,
             Action::SplitRight => self.split(Dir::Right, None),
@@ -616,7 +616,7 @@ impl App {
             Action::SplitUp => self.split(Dir::Up, None),
             Action::Focus(dir) => match pane::neighbor(&self.active_rects(), self.focused(), dir) {
                 Some(id) => self.focus(id),
-                // Shells print unbound Alt+Arrows as ;3A junk; programs still get them.
+                // At a prompt, nothing; programs still get the arrows.
                 None if self.focused_pane().at_prompt => {}
                 None => return false,
             },
@@ -800,7 +800,8 @@ impl App {
                 p.filter();
             }
             _ => {
-                if let Some(t) = text.filter(|t| !self.mods.control_key() && !self.mods.alt_key() && !t.chars().any(char::is_control)) {
+                if let Some(t) = text.filter(|t| !self.mods.control_key() && !self.mods.alt_key() && !self.mods.super_key() && !t.chars().any(char::is_control))
+                {
                     p.query.push_str(t);
                     p.filter();
                 }
@@ -829,7 +830,7 @@ impl App {
         self.dirty = true;
     }
 
-    /// A key while the search bar is open. False: not ours (Ctrl combos), carry on.
+    /// A key while the search bar is open. False: not ours (Cmd/Ctrl combos), carry on.
     fn search_key(&mut self, key: &Key, text: Option<&str>) -> bool {
         let Some(search) = self.search.as_mut().filter(|s| s.editing) else { return false };
         let Some(pane) = self.panes.get_mut(&search.pane) else { return false };
@@ -851,11 +852,11 @@ impl App {
                 search.update(&mut term);
             }
             _ => match text {
-                Some(t) if !self.mods.control_key() && !self.mods.alt_key() && !t.chars().any(char::is_control) => {
+                Some(t) if !self.mods.control_key() && !self.mods.alt_key() && !self.mods.super_key() && !t.chars().any(char::is_control) => {
                     search.query.push_str(t);
                     search.update(&mut term);
                 }
-                _ if self.mods.control_key() || self.mods.alt_key() => return false,
+                _ if self.mods.control_key() || self.mods.alt_key() || self.mods.super_key() => return false,
                 _ => {}
             },
         }
@@ -1048,7 +1049,9 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let icon =
             crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
-        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon);
+        use winit::platform::macos::{OptionAsAlt, WindowAttributesExtMacOS};
+        // Left Option is Alt (Meta) for the shell; right Option still types é, @ and friends.
+        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon).with_option_as_alt(OptionAsAlt::OnlyLeft);
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.
@@ -1062,7 +1065,7 @@ impl ApplicationHandler<UserEvent> for App {
                 .with_visible(false);
         } else {
             // Room for the welcome screen.
-            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1400.0, 860.0));
+            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1100.0, 720.0));
         }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
@@ -1194,6 +1197,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::ModifiersChanged(m) => {
                 self.mods = m.state();
+                // Right Option composes characters (é, @ on some layouts); left Option is Alt.
+                if m.ralt_state() == ModifiersKeyState::Pressed && m.lalt_state() != ModifiersKeyState::Pressed {
+                    self.mods.remove(ModifiersState::ALT);
+                }
                 self.update_hover();
             }
             WindowEvent::Focused(focused) => {
@@ -1241,19 +1248,10 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     return;
                 }
-                // Ctrl+V pastes at the shell prompt, where the shell would only take the
-                // next key literally (and show a paste's ^[[200~). Programs still get it.
-                if self.mods == ModifiersState::CONTROL
-                    && matches!(&event.logical_key, Key::Character(c) if c.eq_ignore_ascii_case("v"))
-                    && self.focused_pane().at_prompt
-                {
-                    self.paste(false);
-                    return;
-                }
-                // Right or End takes the suggestion, Ctrl+Right its next word.
+                // Right or End takes the suggestion, Option+Right its next word.
                 let take = match &event.logical_key {
                     Key::Named(NamedKey::ArrowRight | NamedKey::End) if self.mods.is_empty() => Some(false),
-                    Key::Named(NamedKey::ArrowRight) if self.mods == ModifiersState::CONTROL => Some(true),
+                    Key::Named(NamedKey::ArrowRight) if self.mods == ModifiersState::ALT => Some(true),
                     _ => None,
                 };
                 if let Some(word) = take
@@ -1454,7 +1452,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if pressed && button == MouseButton::Left {
                     self.link_press = None;
                     if let Some((_, link)) = self.hover.take() {
-                        if self.mods.control_key() {
+                        if self.mods.super_key() {
                             return self.open_link(link.target);
                         }
                         self.link_press = Some(link.target);
@@ -1481,7 +1479,7 @@ impl ApplicationHandler<UserEvent> for App {
                             let mut term = pane.term.lock();
                             let link = self.link_press.take();
                             match term.selection_to_string().filter(|s| !s.is_empty()) {
-                                // Copy on select: middle-click paste and Ctrl+V both get it.
+                                // Copy on select: middle-click paste and Cmd+V both get it.
                                 Some(text) => {
                                     self.clipboard.set_both(text);
                                 }
@@ -1569,7 +1567,7 @@ impl ApplicationHandler<UserEvent> for App {
                     let r = if d.across { Rect { x: r.x - grow / 2.0, w: r.w + grow, ..r } } else { Rect { y: r.y - grow / 2.0, h: r.h + grow, ..r } };
                     renderer.fill(r, theme::to_f32(color));
                 }
-                if let Some((id, link)) = self.hover.as_ref().filter(|_| !self.mods.control_key()) {
+                if let Some((id, link)) = self.hover.as_ref().filter(|_| !self.mods.super_key()) {
                     let pane = &self.panes[id];
                     let term = pane.term.lock();
                     let offset = term.grid().display_offset() as i32;

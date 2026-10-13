@@ -1,4 +1,4 @@
-//! Scrollback search (Ctrl+Shift+F) on top of alacritty_terminal's regex search.
+//! Scrollback search (Cmd+F) on top of alacritty_terminal's regex search.
 
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point, Side};

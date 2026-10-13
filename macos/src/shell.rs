@@ -39,6 +39,17 @@ fn dir() -> Option<&'static PathBuf> {
 /// TERM=noobsbot when its terminfo is installed, or can be (compiled into
 /// ~/.terminfo with `tic`). Otherwise TERM stays as alacritty_terminal set it.
 pub fn set_term() {
+    // Opened from Finder or the Dock: in /, with no locale. Start at home with a
+    // UTF-8 locale, as Terminal.app does.
+    if std::env::current_dir().is_ok_and(|d| d == std::path::Path::new("/"))
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        let _ = std::env::set_current_dir(home);
+    }
+    if ["LC_ALL", "LC_CTYPE", "LANG"].iter().all(|v| std::env::var_os(v).is_none()) {
+        // SAFETY: called at startup, before any other thread exists.
+        unsafe { std::env::set_var("LANG", locale()) };
+    }
     let installed = || {
         let quiet = || std::process::Stdio::null();
         Command::new("infocmp").arg("noobsbot").stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success())
@@ -70,6 +81,13 @@ pub fn set_term() {
             std::env::set_var("EDITOR", "nano");
         }
     }
+}
+
+/// The user's region as a UTF-8 locale ("en_GB.UTF-8"), if the system has it.
+fn locale() -> String {
+    let out = Command::new("/usr/bin/defaults").args(["read", "-g", "AppleLocale"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    let name = format!("{}.UTF-8", out.unwrap_or_default().trim().split('@').next().unwrap_or(""));
+    if name.len() > 6 && std::path::Path::new("/usr/share/locale").join(&name).is_dir() { name } else { "en_US.UTF-8".into() }
 }
 
 /// `name` on $PATH, or where Homebrew and MacPorts put it: an app opened from

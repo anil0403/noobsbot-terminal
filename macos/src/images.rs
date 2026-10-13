@@ -340,16 +340,14 @@ fn load(keys: &Keys, payload: &[u8]) -> Result<Arc<Pic>, String> {
 fn read_file(medium: char, name: &str, keys: &Keys) -> Result<Vec<u8>, String> {
     use std::io::{Read, Seek, SeekFrom};
     const REFUSED: &str = "EBADF:can't read that file";
-    let path = match medium {
-        // POSIX shared memory names are `/name`.
-        's' if !name.trim_start_matches('/').contains('/') => std::path::PathBuf::from("/dev/shm").join(name.trim_start_matches('/')),
-        's' => return Err(REFUSED.into()),
-        _ => std::path::PathBuf::from(name),
-    };
-    let path = path.canonicalize().map_err(|_| REFUSED)?;
-    let banned = ["/proc", "/sys", "/dev"].iter().any(|d| path.starts_with(d)) && !path.starts_with("/dev/shm");
-    // A temp file (`t=t`) has to be one: in a temp folder, with kitty's marker in the name.
-    let temp = (path.starts_with(std::env::temp_dir()) || path.starts_with("/tmp") || path.starts_with("/dev/shm"))
+    if medium == 's' {
+        return read_shm(name, keys).ok_or_else(|| REFUSED.into());
+    }
+    let path = std::path::PathBuf::from(name).canonicalize().map_err(|_| REFUSED)?;
+    let banned = ["/dev", "/private/dev"].iter().any(|d| path.starts_with(d));
+    // A temp file (`t=t`) has to be one: in a temp folder, with kitty's marker in the
+    // name. /tmp and $TMPDIR are symlinks into /private on macOS.
+    let temp = [std::env::temp_dir(), "/tmp".into()].iter().filter_map(|d| d.canonicalize().ok()).any(|d| path.starts_with(d))
         && path.to_string_lossy().contains("tty-graphics-protocol");
     if banned || !path.is_file() || medium == 't' && !temp {
         return Err(REFUSED.into());
@@ -363,10 +361,40 @@ fn read_file(medium: char, name: &str, keys: &Keys) -> Result<Vec<u8>, String> {
     if medium == 'f' && !data.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err(REFUSED.into());
     }
-    if medium == 's' || medium == 't' {
+    if medium == 't' {
         let _ = std::fs::remove_file(&path);
     }
     Ok(data)
+}
+
+/// POSIX shared memory (`t=s`), which macOS keeps out of the file system.
+/// Read from offset `O`, at most `S` bytes, then removed as kitty does.
+fn read_shm(name: &str, keys: &Keys) -> Option<Vec<u8>> {
+    if name.trim_start_matches('/').contains('/') {
+        return None;
+    }
+    let cname = std::ffi::CString::new(name).ok()?;
+    // SAFETY: the fd and mapping are ours, and the mapping is read within its length.
+    unsafe {
+        let fd = libc::shm_open(cname.as_ptr(), libc::O_RDONLY);
+        if fd < 0 {
+            return None;
+        }
+        let mut st: libc::stat = std::mem::zeroed();
+        let len = if libc::fstat(fd, &mut st) == 0 { st.st_size.max(0) as usize } else { 0 };
+        let map = if len > 0 { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ, libc::MAP_SHARED, fd, 0) } else { libc::MAP_FAILED };
+        libc::close(fd);
+        libc::shm_unlink(cname.as_ptr());
+        if map == libc::MAP_FAILED {
+            return None;
+        }
+        let start = (keys.num('O').unwrap_or(0) as usize).min(len);
+        let cap = MAX_SIDE as usize * MAX_SIDE as usize * 4;
+        let size = keys.num('S').filter(|&s| s > 0).map_or(cap, |s| (s as usize).min(cap));
+        let data = std::slice::from_raw_parts(map.cast::<u8>(), len)[start..(start + size).min(len)].to_vec();
+        libc::munmap(map, len);
+        Some(data)
+    }
 }
 
 pub fn png(data: &[u8]) -> Result<Arc<Pic>, String> {
@@ -615,8 +643,8 @@ mod tests {
     #[test]
     fn refuses_device_files() {
         let keys = Keys::parse("t=f");
-        assert!(read_file('f', "/proc/self/environ", &keys).is_err());
         assert!(read_file('f', "/dev/zero", &keys).is_err());
+        assert!(read_file('f', "/dev/fd/0", &keys).is_err());
         assert!(read_file('s', "../etc/passwd", &keys).is_err());
         // Not a PNG: refused, the same way as a file that isn't there.
         let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
@@ -624,5 +652,24 @@ mod tests {
         assert!(read_file('t', manifest, &keys).is_err()); // not a temp file
         let png = concat!(env!("CARGO_MANIFEST_DIR"), "/extra/noobsbot-128.png");
         assert!(read_file('f', png, &keys).is_ok());
+        // A temp file in $TMPDIR (a /private symlink on macOS) is read, then removed.
+        let tmp = std::env::temp_dir().join(format!("tty-graphics-protocol-{}.png", std::process::id()));
+        std::fs::copy(png, &tmp).unwrap();
+        assert!(read_file('t', tmp.to_str().unwrap(), &Keys::parse("t=t")).is_ok());
+        assert!(!tmp.exists());
+        // Shared memory.
+        let name = format!("/nb-test-{}", std::process::id());
+        let cname = std::ffi::CString::new(name.clone()).unwrap();
+        unsafe {
+            let fd = libc::shm_open(cname.as_ptr(), libc::O_RDWR | libc::O_CREAT, 0o600);
+            assert!(fd >= 0);
+            assert_eq!(libc::ftruncate(fd, 5), 0);
+            let map = libc::mmap(std::ptr::null_mut(), 5, libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+            std::ptr::copy_nonoverlapping(b"hello".as_ptr(), map.cast(), 5);
+            libc::munmap(map, 5);
+            libc::close(fd);
+        }
+        assert_eq!(read_shm(&name, &Keys::parse("t=s,O=1,S=3")).as_deref(), Some(&b"ell"[..]));
+        assert_eq!(read_shm(&name, &keys), None); // removed after reading
     }
 }

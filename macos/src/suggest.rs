@@ -177,7 +177,7 @@ fn secret(cmd: &str) -> bool {
 }
 
 /// The first word of a suggestion, with the spaces before it, up to and
-/// including the next space or slash (Ctrl+Right takes this much).
+/// including the next space or slash (Option+Right takes this much).
 pub fn word(s: &str) -> &str {
     let start = s.len() - s.trim_start().len();
     let end = s[start..].find([' ', '/']).map_or(s.len(), |i| start + i + 1);

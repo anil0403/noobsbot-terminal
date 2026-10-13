@@ -129,7 +129,7 @@ pub struct Entry {
     pub action: Action,
     /// What the command palette shows.
     pub name: String,
-    /// Default keys, like "Ctrl+Shift+T"; alternatives separated by " or ".
+    /// Default keys, like "Cmd+Shift+T"; alternatives separated by " or ".
     pub keys: String,
 }
 
@@ -139,40 +139,41 @@ pub fn actions() -> &'static [Entry] {
     ACTIONS.get_or_init(|| {
         use Action as A;
         let mut list: Vec<(Action, String, String)> = [
-            (A::CommandPalette, "Command palette", "Ctrl+Shift+P"),
-            (A::Copy, "Copy", "Ctrl+Shift+C"),
-            (A::Paste, "Paste", "Ctrl+Shift+V or Shift+Insert"),
-            (A::CopyOutput, "Copy last command's output", "Ctrl+Shift+G"),
-            (A::Search, "Search", "Ctrl+Shift+F"),
-            (A::ViMode, "Vi mode", "Ctrl+Shift+Space"),
-            (A::PrevPrompt, "Previous prompt", "Ctrl+Shift+Z"),
-            (A::NextPrompt, "Next prompt", "Ctrl+Shift+X"),
-            (A::NewTab, "New tab", "Ctrl+Shift+T"),
-            (A::SplitRight, "Split right", "Ctrl+Shift+E"),
-            (A::SplitDown, "Split down", "Ctrl+Shift+O"),
+            (A::CommandPalette, "Command palette", "Cmd+Shift+P"),
+            (A::Copy, "Copy", "Cmd+C"),
+            (A::Paste, "Paste", "Cmd+V or Shift+Insert"),
+            (A::CopyOutput, "Copy last command's output", "Cmd+Shift+C"),
+            (A::Search, "Search", "Cmd+F"),
+            (A::ViMode, "Vi mode", "Cmd+Shift+Space"),
+            (A::PrevPrompt, "Previous prompt", "Cmd+Up"),
+            (A::NextPrompt, "Next prompt", "Cmd+Down"),
+            (A::NewTab, "New tab", "Cmd+T"),
+            (A::SplitRight, "Split right", "Cmd+D"),
+            (A::SplitDown, "Split down", "Cmd+Shift+D"),
             (A::SplitLeft, "Split left", ""),
             (A::SplitUp, "Split up", ""),
-            (A::ClosePane, "Close pane", "Ctrl+Shift+W"),
-            (A::NextTab, "Next tab", "Ctrl+Tab"),
-            (A::PrevTab, "Previous tab", "Ctrl+Shift+Tab"),
+            (A::ClosePane, "Close pane", "Cmd+W"),
+            // Shift+] arrives as "}" on US layouts, as "]" on some others.
+            (A::NextTab, "Next tab", "Cmd+Shift+] or Cmd+Shift+} or Ctrl+Tab"),
+            (A::PrevTab, "Previous tab", "Cmd+Shift+[ or Cmd+Shift+{ or Ctrl+Shift+Tab"),
             (A::ScrollPageUp, "Scroll page up", "Shift+PageUp"),
             (A::ScrollPageDown, "Scroll page down", "Shift+PageDown"),
-            (A::ScrollTop, "Scroll to top", "Ctrl+Shift+Home"),
-            (A::ScrollBottom, "Scroll to bottom", "Ctrl+Shift+End"),
-            (A::ZoomIn, "Bigger font", "Ctrl+= or Ctrl+Shift++"),
-            (A::ZoomOut, "Smaller font", "Ctrl+-"),
-            (A::ZoomReset, "Reset font size", "Ctrl+0"),
+            (A::ScrollTop, "Scroll to top", "Cmd+Home"),
+            (A::ScrollBottom, "Scroll to bottom", "Cmd+End"),
+            (A::ZoomIn, "Bigger font", "Cmd+= or Cmd++ or Cmd+Shift++"),
+            (A::ZoomOut, "Smaller font", "Cmd+-"),
+            (A::ZoomReset, "Reset font size", "Cmd+0"),
             (A::ToggleCrt, "Toggle CRT effect", ""),
         ]
         .into_iter()
         .map(|(a, n, k)| (a, n.to_owned(), k.to_owned()))
         .collect();
         for (dir, name) in [(Dir::Left, "Left"), (Dir::Right, "Right"), (Dir::Up, "Up"), (Dir::Down, "Down")] {
-            list.push((A::Focus(dir), format!("Focus pane {}", name.to_lowercase()), format!("Alt+{name}")));
-            list.push((A::Resize(dir), format!("Resize split {}", name.to_lowercase()), format!("Ctrl+Shift+{name}")));
+            list.push((A::Focus(dir), format!("Focus pane {}", name.to_lowercase()), format!("Cmd+Alt+{name}")));
+            list.push((A::Resize(dir), format!("Resize split {}", name.to_lowercase()), format!("Cmd+Ctrl+{name}")));
         }
         for i in 0..9 {
-            list.push((A::GoToTab(i), format!("Go to tab {}", i + 1), format!("Alt+{}", i + 1)));
+            list.push((A::GoToTab(i), format!("Go to tab {}", i + 1), format!("Cmd+{}", i + 1)));
         }
         list.into_iter().map(|(action, name, keys)| Entry { action, name, keys }).collect()
     })
@@ -183,7 +184,7 @@ pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
     actions().iter().find(|e| e.keys.split(" or ").any(|spec| matches(spec, key, mods))).map(|e| e.action)
 }
 
-/// Does a key spec like "Ctrl+Shift+T" describe this key press exactly?
+/// Does a key spec like "Cmd+Shift+T" describe this key press exactly?
 fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
     if spec.is_empty() {
         return false; // palette only
@@ -198,6 +199,7 @@ fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
             "Ctrl" => ModifiersState::CONTROL,
             "Shift" => ModifiersState::SHIFT,
             "Alt" => ModifiersState::ALT,
+            "Cmd" => ModifiersState::SUPER,
             _ => return false,
         };
     }
@@ -253,6 +255,21 @@ pub fn key_bytes(key: &Key, text: Option<&str>, mods: ModifiersState, app_cursor
         Some([prefix, bytes].concat())
     };
 
+    // Cmd never types, except the line-editing moves macOS terminals give it;
+    // Option+Left/Right jump words as in Terminal.app.
+    if mods.super_key() {
+        return match key {
+            Key::Named(NamedKey::ArrowLeft) => Some(b"\x01".to_vec()),
+            Key::Named(NamedKey::ArrowRight) => Some(b"\x05".to_vec()),
+            Key::Named(NamedKey::Backspace) => Some(b"\x15".to_vec()),
+            _ => None,
+        };
+    }
+    match key {
+        Key::Named(NamedKey::ArrowLeft) if mods == ModifiersState::ALT => return Some(b"\x1bb".to_vec()),
+        Key::Named(NamedKey::ArrowRight) if mods == ModifiersState::ALT => return Some(b"\x1bf".to_vec()),
+        _ => {}
+    }
     match key {
         Key::Named(named) => match named {
             NamedKey::ArrowUp => letter('A', false),
@@ -346,19 +363,27 @@ mod tests {
 
     #[test]
     fn binds_tab_keys() {
-        let alt = ModifiersState::ALT;
-        let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
-        assert_eq!(binding(&ch("3"), alt), Some(Action::GoToTab(2)));
-        assert_eq!(binding(&ch("0"), alt), None);
-        assert_eq!(binding(&ch("E"), ctrl_shift), Some(Action::SplitRight));
-        assert_eq!(binding(&Key::Named(NamedKey::Tab), ctrl_shift), Some(Action::PrevTab));
-        assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), alt), Some(Action::Focus(Dir::Up)));
-        assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), ModifiersState::CONTROL), None);
-        assert_eq!(binding(&ch("+"), ctrl_shift), Some(Action::ZoomIn));
-        assert_eq!(binding(&ch("="), ModifiersState::CONTROL), Some(Action::ZoomIn));
-        assert_eq!(binding(&ch("-"), ModifiersState::CONTROL), Some(Action::ZoomOut));
+        let cmd = ModifiersState::SUPER;
+        let cmd_shift = cmd | ModifiersState::SHIFT;
+        assert_eq!(binding(&ch("3"), cmd), Some(Action::GoToTab(2)));
+        assert_eq!(binding(&ch("0"), ModifiersState::ALT), None);
+        assert_eq!(binding(&ch("d"), cmd), Some(Action::SplitRight));
+        assert_eq!(binding(&ch("D"), cmd_shift), Some(Action::SplitDown));
+        assert_eq!(binding(&ch("}"), cmd_shift), Some(Action::NextTab));
+        assert_eq!(binding(&ch("["), cmd_shift), Some(Action::PrevTab));
+        assert_eq!(binding(&Key::Named(NamedKey::Tab), ModifiersState::CONTROL | ModifiersState::SHIFT), Some(Action::PrevTab));
+        assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), cmd | ModifiersState::ALT), Some(Action::Focus(Dir::Up)));
+        assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), cmd), Some(Action::PrevPrompt));
+        assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), ModifiersState::ALT), None);
+        assert_eq!(binding(&ch("+"), cmd_shift), Some(Action::ZoomIn));
+        assert_eq!(binding(&ch("="), cmd), Some(Action::ZoomIn));
+        assert_eq!(binding(&ch("-"), cmd), Some(Action::ZoomOut));
+        assert_eq!(binding(&ch("c"), cmd), Some(Action::Copy));
+        assert_eq!(binding(&ch("v"), cmd), Some(Action::Paste));
         assert_eq!(binding(&Key::Named(NamedKey::Insert), ModifiersState::SHIFT), Some(Action::Paste));
-        assert_eq!(binding(&Key::Named(NamedKey::Space), ctrl_shift), Some(Action::ViMode));
+        assert_eq!(binding(&Key::Named(NamedKey::Space), cmd_shift), Some(Action::ViMode));
+        // Ctrl stays the shell's.
+        assert_eq!(binding(&ch("c"), ModifiersState::CONTROL), None);
         assert_eq!(binding(&ch("t"), ModifiersState::CONTROL), None);
     }
 
@@ -421,5 +446,10 @@ mod tests {
         assert_eq!(named(NamedKey::Backspace, ModifiersState::ALT), b"\x1b\x7f");
         assert_eq!(named(NamedKey::Backspace, ModifiersState::CONTROL), b"\x08");
         assert_eq!(named(NamedKey::Tab, ModifiersState::SHIFT), b"\x1b[Z");
+        // macOS editing: Cmd for line ends, Option for words; other Cmd keys never type.
+        assert_eq!(named(NamedKey::ArrowLeft, ModifiersState::SUPER), b"\x01");
+        assert_eq!(named(NamedKey::Backspace, ModifiersState::SUPER), b"\x15");
+        assert_eq!(named(NamedKey::ArrowRight, ModifiersState::ALT), b"\x1bf");
+        assert_eq!(key_bytes(&ch("k"), Some("k"), ModifiersState::SUPER, false), None);
     }
 }

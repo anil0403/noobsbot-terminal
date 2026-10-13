@@ -1,4 +1,4 @@
-//! Command palette (Ctrl+Shift+P): every action and theme, fuzzy-filtered.
+//! Command palette (Cmd+Shift+P): every action and theme, fuzzy-filtered.
 
 use crate::input::{self, Action};
 

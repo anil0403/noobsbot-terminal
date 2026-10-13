@@ -6,7 +6,7 @@ theme = "default"
 
 [font]
 family = "JetBrainsMono Nerd Font Mono"
-size = 18.0
+size = 15.0
 # 100 (thin) to 900 (black): 400 regular, 500 medium, 600 semibold.
 weight = 600
 
@@ -27,7 +27,7 @@ pretty_prompt = false
 welcome = true
 # Grey suggestions after the cursor at the prompt (bash and zsh; fish has its
 # own): commands that worked in this folder, then anywhere, then your shell's
-# history, then file names. Right arrow or End takes it, Ctrl+Right one word.
+# history, then file names. Right arrow or End takes it, Option+Right one word.
 suggestions = true
 
 [cursor]
@@ -38,14 +38,14 @@ blink = true
 [quake]
 # `noobsbot --quake` starts a drop-down terminal at the top of the screen.
 # Running it again (e.g. from a desktop shortcut) shows/hides the open one.
-# Global key that shows/hides it, like "F12", "Ctrl+grave", "Super+t";
+# Global key that shows/hides it, like "Ctrl+grave", "Cmd+Shift+t", "F5";
 # "" for none. Read at startup.
-hotkey = "F12"
+hotkey = "Ctrl+grave"
 # Percent of the screen height.
 height = 40
 
 [crt]
-# Old-monitor look. Also toggled from the command palette (Ctrl+Shift+P).
+# Old-monitor look. Also toggled from the command palette (Cmd+Shift+P).
 enabled = false
 # Strengths from 0 (off) to 1.
 scanlines = 0.3
