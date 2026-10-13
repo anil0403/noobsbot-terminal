@@ -26,9 +26,8 @@ pub struct Font {
 impl Font {
     pub fn new(family: &str, size: f32, weight: u16) -> Self {
         let mut font =
-            Self { system: FontSystem::new(), cache: SwashCache::new(), family: family.to_owned(), size, weight: 0, cell_w: 0.0, cell_h: 0.0, baseline: 0.0 };
-        font.weight = weight.clamp(100, 900);
-        font.measure();
+            Self { system: FontSystem::new(), cache: SwashCache::new(), family: String::new(), size, weight, cell_w: 0.0, cell_h: 0.0, baseline: 0.0 };
+        font.set(family, size, weight);
         font
     }
 

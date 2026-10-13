@@ -248,7 +248,7 @@ impl Renderer {
             self.instances = instance_buffer(&self.device, instances.len().next_power_of_two());
         }
         self.queue.write_buffer(&self.instances, 0, bytes);
-        let globals = [self.config.width as f32, self.config.height as f32, self.atlas.size(), self.atlas.size()];
+        let globals = [self.config.width as f32, self.config.height as f32, atlas::SIZE as f32, atlas::SIZE as f32];
         self.queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
 
         let frame_view = frame.texture.create_view(&Default::default());

@@ -21,6 +21,12 @@ impl Clipboard {
         }
     }
 
+    /// Clipboard and primary selection both: Ctrl+V and middle-click get it.
+    pub fn set_both(&mut self, text: String) {
+        self.set(true, text.clone());
+        self.set(false, text);
+    }
+
     pub fn get(&mut self, primary: bool) -> Option<String> {
         self.0.as_mut()?.get().clipboard(kind(primary)).text().ok()
     }

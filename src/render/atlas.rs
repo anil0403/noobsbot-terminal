@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::font::Font;
 
-const SIZE: u32 = 2048;
+pub const SIZE: u32 = 2048;
 
 /// Where a glyph lives in the atlas and how to place it in its cell.
 #[derive(Clone, Copy)]
@@ -19,7 +19,7 @@ type Key = (char, bool, bool);
 /// RGBA glyph texture, packed in rows ("shelves").
 /// Masks are stored as white with alpha so one texture serves text and color emoji.
 pub struct Atlas {
-    pub texture: wgpu::Texture,
+    texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     packer: Shelf,
     glyphs: HashMap<Key, Option<Entry>>,
@@ -45,10 +45,6 @@ impl Atlas {
     pub fn clear(&mut self) {
         self.packer = Shelf::new(SIZE);
         self.glyphs.clear();
-    }
-
-    pub fn size(&self) -> f32 {
-        SIZE as f32
     }
 
     /// Look up a glyph, rasterizing and uploading it on first use.

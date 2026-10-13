@@ -561,8 +561,8 @@ impl App {
 impl App {
     fn paste(&mut self, primary: bool) {
         let Some(text) = self.clipboard.get(primary) else { return };
-        self.panes.get_mut(&self.tabs[self.active].focused).unwrap().clear_welcome();
         let pane = self.focused_pane();
+        pane.clear_welcome();
         let mut term = pane.term.lock();
         let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
         term.scroll_display(Scroll::Bottom);
@@ -654,11 +654,8 @@ impl App {
         let window_focused = self.renderer.as_ref().is_some_and(|r| r.focused);
         let Some(pane) = self.panes.get_mut(&id) else { return };
         self.dirty = true;
-        if let Mark::Cwd(path) = mark {
-            pane.cwd = Some(path);
-            return;
-        }
         match mark {
+            Mark::Cwd(path) => return pane.cwd = Some(path),
             Mark::CommandEnd(code) => {
                 pane.at_prompt = true; // sent before every prompt
                 if let (Some(0), Some((cmd, dir))) = (code, pane.running.take()) {
@@ -1190,8 +1187,7 @@ impl ApplicationHandler<UserEvent> for App {
                         Target::Url(url) => url.clone(),
                         Target::File { path, .. } => path.to_string_lossy().into_owned(),
                     };
-                    self.clipboard.set(true, text.clone());
-                    self.clipboard.set(false, text);
+                    self.clipboard.set_both(text);
                     self.link_copied = true;
                     self.dirty = true;
                     return;
@@ -1302,14 +1298,10 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 } else if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) {
                     // Full-screen apps without mouse support (less, man) get arrow keys instead.
-                    let arrow: &[u8] = match (lines > 0, mode.contains(TermMode::APP_CURSOR)) {
-                        (true, true) => b"\x1bOA",
-                        (true, false) => b"\x1b[A",
-                        (false, true) => b"\x1bOB",
-                        (false, false) => b"\x1b[B",
-                    };
+                    let app = if mode.contains(TermMode::APP_CURSOR) { "O" } else { "[" };
+                    let arrow = format!("\x1b{app}{}", if lines > 0 { 'A' } else { 'B' });
                     drop(term);
-                    pane.pty.write(&arrow.repeat(lines.unsigned_abs() as usize));
+                    pane.pty.write(arrow.repeat(lines.unsigned_abs() as usize).as_bytes());
                 } else {
                     term.scroll_display(Scroll::Delta(lines));
                     self.dirty = true;
@@ -1453,11 +1445,7 @@ impl ApplicationHandler<UserEvent> for App {
                             let now = Instant::now();
                             self.clicks = if now - self.last_click < MULTI_CLICK { self.clicks % 3 + 1 } else { 1 };
                             self.last_click = now;
-                            let ty = match self.clicks {
-                                1 => SelectionType::Simple,
-                                2 => SelectionType::Semantic,
-                                _ => SelectionType::Lines,
-                            };
+                            let ty = [SelectionType::Simple, SelectionType::Semantic, SelectionType::Lines][self.clicks as usize - 1];
                             let mut term = pane.term.lock();
                             let point = grid_point(&term, self.mouse_cell);
                             term.selection = Some(Selection::new(ty, point, self.mouse_side));
@@ -1471,8 +1459,7 @@ impl ApplicationHandler<UserEvent> for App {
                             match term.selection_to_string().filter(|s| !s.is_empty()) {
                                 // Copy on select: middle-click paste and Ctrl+V both get it.
                                 Some(text) => {
-                                    self.clipboard.set(true, text.clone());
-                                    self.clipboard.set(false, text);
+                                    self.clipboard.set_both(text);
                                 }
                                 None => term.selection = None,
                             }
@@ -1700,23 +1687,22 @@ fn surface(theme: &Theme) -> Rgb {
 
 /// `text` on a rounded `bg` pill (powerline half-circle caps). Returns where it ends.
 fn pill(r: &mut Renderer, x: f32, y: f32, text: &str, bg: [f32; 4], fg: [f32; 4]) -> f32 {
-    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
-    let n = text.chars().count() as f32;
-    r.text(x, y, "\u{e0b6}", bg);
-    r.fill(Rect { x: x + cw, y, w: n * cw, h: ch }, bg);
-    r.text(x + cw, y, text, fg);
-    r.text(x + (n + 1.0) * cw, y, "\u{e0b4}", bg);
-    x + (n + 2.0) * cw
+    capped(r, x, y, text, bg, fg, "\u{e0b4}")
 }
 
 /// A powerline segment: rounded on the left, an arrow on the right.
 fn segment(r: &mut Renderer, x: f32, y: f32, text: &str, bg: [f32; 4], fg: [f32; 4]) -> f32 {
+    capped(r, x, y, text, bg, fg, "\u{e0b0}")
+}
+
+/// Text on `bg`, rounded on the left and closed with `end`; returns where it ends.
+fn capped(r: &mut Renderer, x: f32, y: f32, text: &str, bg: [f32; 4], fg: [f32; 4], end: &str) -> f32 {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let n = text.chars().count() as f32;
     r.text(x, y, "\u{e0b6}", bg);
     r.fill(Rect { x: x + cw, y, w: n * cw, h: ch }, bg);
     r.text(x + cw, y, text, fg);
-    r.text(x + (n + 1.0) * cw, y, "\u{e0b0}", bg);
+    r.text(x + (n + 1.0) * cw, y, end, bg);
     x + (n + 2.0) * cw
 }
 

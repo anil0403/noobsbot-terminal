@@ -141,7 +141,7 @@ impl Node {
         match self {
             Node::Leaf(id) if *id == target => {
                 let (old, new) = (Box::new(Node::Leaf(target)), Box::new(Node::Leaf(new)));
-                let across = matches!(side, Dir::Left | Dir::Right);
+                let across = side.across();
                 let (a, b) = if matches!(side, Dir::Left | Dir::Up) { (new, old) } else { (old, new) };
                 *self = Node::Split { across, ratio: 0.5, a, b };
                 true
