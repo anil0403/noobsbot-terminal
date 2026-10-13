@@ -38,6 +38,12 @@ jobs:
           RUST_LOG=info target/Noobsbot.app/Contents/MacOS/noobsbot > "$RUNNER_TEMP/run.log" 2>&1 &
           sleep 15
           screencapture -x "$RUNNER_TEMP/screen.png" || true
+          # Type a command, then Cmd+D (split right) and Option+Left; needs System Events access.
+          osascript -e 'tell application "System Events"' -e 'keystroke "echo hello from noobsbot"' -e 'key code 36' \
+            -e 'delay 1' -e 'keystroke "d" using command down' -e 'delay 2' -e 'keystroke "ls /Applications"' -e 'key code 36' \
+            -e 'end tell' || true
+          sleep 3
+          screencapture -x "$RUNNER_TEMP/keys.png" || true
           kill -0 $! && echo "still running after 15 s"
           kill $! || true
           cat "$RUNNER_TEMP/run.log"
@@ -46,7 +52,7 @@ jobs:
         with:
           name: smoke-test
           path: |
-            ${{ runner.temp }}/screen.png
+            ${{ runner.temp }}/*.png
             ${{ runner.temp }}/run.log
       - name: Zip
         run: |

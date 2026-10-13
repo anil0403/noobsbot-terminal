@@ -135,6 +135,7 @@ pub fn login(shell: &str, pretty: bool) -> (Option<Shell>, HashMap<String, Strin
     match (shell.rsplit('/').next(), dir()) {
         // --rcfile only works for a non-login bash; the script does the login part.
         (Some("bash"), Some(dir)) => {
+            env.insert("BASH_SILENCE_DEPRECATION_WARNING".into(), "1".into()); // "the default shell is now zsh"
             args = vec!["--rcfile".into(), dir.join("noobsbot.bash").to_string_lossy().into_owned()];
         }
         (Some("zsh"), Some(dir)) => {

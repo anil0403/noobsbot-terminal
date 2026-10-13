@@ -33,7 +33,12 @@ impl Font {
 
     /// Switch family/size/weight, keeping the already-scanned system font database.
     pub fn set(&mut self, family: &str, size: f32, weight: u16) {
-        self.family = family.to_owned();
+        // Not installed: Menlo, macOS's monospace, rather than a proportional fallback.
+        let installed = self.system.db().faces().any(|f| f.families.iter().any(|(name, _)| name.eq_ignore_ascii_case(family)));
+        if !installed {
+            log::warn!("font {family:?} not installed; using Menlo");
+        }
+        self.family = if installed { family } else { "Menlo" }.to_owned();
         self.size = size;
         self.weight = weight.clamp(100, 900);
         self.measure();

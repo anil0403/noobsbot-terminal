@@ -1051,7 +1051,11 @@ impl ApplicationHandler<UserEvent> for App {
             crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
         use winit::platform::macos::{OptionAsAlt, WindowAttributesExtMacOS};
         // Left Option is Alt (Meta) for the shell; right Option still types é, @ and friends.
-        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon).with_option_as_alt(OptionAsAlt::OnlyLeft);
+        let mut attrs = Window::default_attributes()
+            .with_title("Noobsbot Terminal")
+            .with_window_icon(icon)
+            .with_option_as_alt(OptionAsAlt::OnlyLeft)
+            .with_theme(Some(winit::window::Theme::Dark));
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.
