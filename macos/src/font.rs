@@ -15,6 +15,8 @@ pub struct Font {
     system: FontSystem,
     cache: SwashCache,
     family: String,
+    /// The family's weights: a static font is only used at one of them.
+    weights: Vec<u16>,
     size: f32,
     weight: u16,
     pub cell_w: f32,
@@ -25,8 +27,17 @@ pub struct Font {
 
 impl Font {
     pub fn new(family: &str, size: f32, weight: u16) -> Self {
-        let mut font =
-            Self { system: FontSystem::new(), cache: SwashCache::new(), family: String::new(), size, weight, cell_w: 0.0, cell_h: 0.0, baseline: 0.0 };
+        let mut font = Self {
+            system: FontSystem::new(),
+            cache: SwashCache::new(),
+            family: String::new(),
+            weights: Vec::new(),
+            size,
+            weight,
+            cell_w: 0.0,
+            cell_h: 0.0,
+            baseline: 0.0,
+        };
         font.set(family, size, weight);
         font
     }
@@ -39,31 +50,28 @@ impl Font {
             log::warn!("font {family:?} not installed; using Menlo");
         }
         self.family = if installed { family } else { "Menlo" }.to_owned();
+        let family = self.family.clone();
+        self.weights = self.system.db().faces().filter(|f| f.families.iter().any(|(n, _)| n.eq_ignore_ascii_case(&family))).map(|f| f.weight.0).collect();
         self.size = size;
         self.weight = weight.clamp(100, 900);
         self.measure();
     }
 
     fn measure(&mut self) {
-        let (key, shaped) = self.shape('M', false, false).expect("font has no 'M' glyph");
+        let (key, advance) = self.shape('M', false, false).expect("font has no 'M' glyph");
         let face = self.system.get_font(key.font_id, Weight::NORMAL).expect("load font face");
-        let face = face.as_swash();
-        let m = face.metrics(&[]).scale(self.size);
-        // The font's own advance: shaping adds Apple fonts' tracking (Menlo, SF Mono).
-        let advance = face.glyph_metrics(&[]).scale(self.size).advance_width(face.charmap().map('M'));
-        self.cell_w = if advance > 0.0 { advance } else { shaped }.round();
+        let m = face.as_swash().metrics(&[]).scale(self.size);
+        self.cell_w = advance.round();
         self.cell_h = (m.ascent + m.descent + m.leading).ceil();
         self.baseline = (m.ascent + m.leading / 2.0).round();
         log::info!("font {:?} {}px → cell {}x{}", self.family, self.size, self.cell_w, self.cell_h);
-        let db = self.system.db();
-        let face = db.face(key.font_id).map(|f| (f.post_script_name.clone(), f.weight, format!("{:?}", f.source).chars().take(120).collect::<String>()));
-        let menlo: Vec<_> = db.faces().filter(|f| f.families.iter().any(|(n, _)| n.contains("Menlo"))).map(|f| (f.families.clone(), f.weight, f.index)).collect();
-        log::info!("DIAG faces={} picked={face:?} menlo={menlo:?}", db.len());
     }
 
     /// Shape one character, letting cosmic-text pick a fallback font if needed.
     fn shape(&mut self, c: char, bold: bool, italic: bool) -> Option<(CacheKey, f32)> {
         let weight = if bold { self.weight.max(700) } else { self.weight };
+        // cosmic-text skips a named static font without this exact weight (Menlo: 400, 700).
+        let weight = self.weights.iter().copied().min_by_key(|w| w.abs_diff(weight)).unwrap_or(weight);
         let attrs = Attrs::new().family(Family::Name(&self.family)).weight(Weight(weight)).style(if italic { Style::Italic } else { Style::Normal });
         let mut buffer = Buffer::new_empty(Metrics::new(self.size, self.size));
         let mut tmp = [0u8; 4];
