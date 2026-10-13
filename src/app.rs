@@ -1141,7 +1141,7 @@ impl ApplicationHandler<UserEvent> for App {
             self.dirty = true;
         }
         let flicker = self.crt && self.config.crt.flicker > 0.0;
-        if flicker || self.panes.values().any(|p| p.theme.fading() || p.failed_at.is_some()) {
+        if flicker || self.panes.values().any(|p| p.theme.fading() || p.failed_at.is_some_and(|t| t.elapsed() < FLASH)) {
             self.dirty = true;
         }
 

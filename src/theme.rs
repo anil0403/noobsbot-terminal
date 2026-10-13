@@ -224,7 +224,7 @@ impl Fade {
 
     /// Needs more frames to finish fading.
     pub fn fading(&self) -> bool {
-        self.pending
+        self.pending && self.start.elapsed() < FADE // by the clock: panes out of sight don't draw frames
     }
 
     /// The palette to draw this frame.
