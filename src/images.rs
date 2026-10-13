@@ -318,29 +318,37 @@ fn load(keys: &Keys, payload: &[u8]) -> Result<Arc<Pic>, String> {
 
 /// Image data sent as a file (`t=f`), temp file (`t=t`, deleted after) or
 /// shared memory (`t=s`). Like kitty, refuse anything that isn't a plain file
-/// or sits in /proc, /sys or /dev: programs only get to show files, not probe devices.
+/// or sits in /proc, /sys or /dev. Output can come from anywhere (a server over
+/// ssh, a file being `cat`ed), so a named file (`t=f`) must be a PNG: no showing
+/// `~/.ssh/id_ed25519` as pixels. Every refusal reads the same, so the reply
+/// doesn't tell whether a file exists or how big it is.
 fn read_file(medium: char, name: &str, keys: &Keys) -> Result<Vec<u8>, String> {
     use std::io::{Read, Seek, SeekFrom};
+    const REFUSED: &str = "EBADF:can't read that file";
     let path = match medium {
         // POSIX shared memory names are `/name`.
         's' if !name.trim_start_matches('/').contains('/') => std::path::PathBuf::from("/dev/shm").join(name.trim_start_matches('/')),
-        's' => return Err("EINVAL:bad shm name".into()),
+        's' => return Err(REFUSED.into()),
         _ => std::path::PathBuf::from(name),
     };
-    let path = path.canonicalize().map_err(|e| format!("EBADF:{e}"))?;
+    let path = path.canonicalize().map_err(|_| REFUSED)?;
     let banned = ["/proc", "/sys", "/dev"].iter().any(|d| path.starts_with(d)) && !path.starts_with("/dev/shm");
-    if banned || !path.is_file() {
-        return Err("EBADF:not a regular file".into());
+    // A temp file (`t=t`) has to be one: in a temp folder, with kitty's marker in the name.
+    let temp = (path.starts_with(std::env::temp_dir()) || path.starts_with("/tmp") || path.starts_with("/dev/shm"))
+        && path.to_string_lossy().contains("tty-graphics-protocol");
+    if banned || !path.is_file() || medium == 't' && !temp {
+        return Err(REFUSED.into());
     }
-    let mut file = std::fs::File::open(&path).map_err(|e| format!("EBADF:{e}"))?;
-    file.seek(SeekFrom::Start(keys.num('O').unwrap_or(0) as u64)).map_err(|e| format!("EBADF:{e}"))?;
+    let mut file = std::fs::File::open(&path).map_err(|_| REFUSED)?;
+    file.seek(SeekFrom::Start(keys.num('O').unwrap_or(0) as u64)).map_err(|_| REFUSED)?;
     let mut data = Vec::new();
-    let size = keys.num('S').filter(|&s| s > 0).map_or(400 << 20, |s| s as u64);
-    file.take(size).read_to_end(&mut data).map_err(|e| format!("EBADF:{e}"))?;
-    // Only delete what the protocol says is ours to delete: shared memory, and
-    // temp files with kitty's marker in the name.
-    let temp = path.starts_with(std::env::temp_dir()) || path.starts_with("/tmp") || path.starts_with("/dev/shm");
-    if medium == 's' || medium == 't' && temp && path.to_string_lossy().contains("tty-graphics-protocol") {
+    let cap = (MAX_SIDE * MAX_SIDE * 4) as u64;
+    let size = keys.num('S').filter(|&s| s > 0).map_or(cap, |s| (s as u64).min(cap));
+    file.take(size).read_to_end(&mut data).map_err(|_| REFUSED)?;
+    if medium == 'f' && !data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(REFUSED.into());
+    }
+    if medium == 's' || medium == 't' {
         let _ = std::fs::remove_file(&path);
     }
     Ok(data)
@@ -580,5 +588,11 @@ mod tests {
         assert!(read_file('f', "/proc/self/environ", &keys).is_err());
         assert!(read_file('f', "/dev/zero", &keys).is_err());
         assert!(read_file('s', "../etc/passwd", &keys).is_err());
+        // Not a PNG: refused, the same way as a file that isn't there.
+        let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        assert_eq!(read_file('f', manifest, &keys), read_file('f', "/nope/nothing", &keys));
+        assert!(read_file('t', manifest, &keys).is_err()); // not a temp file
+        let png = concat!(env!("CARGO_MANIFEST_DIR"), "/extra/noobsbot-128.png");
+        assert!(read_file('f', png, &keys).is_ok());
     }
 }
