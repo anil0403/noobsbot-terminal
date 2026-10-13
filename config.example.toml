@@ -27,7 +27,7 @@ welcome = true
 [cursor]
 # "block", "beam" or "underline". Programs like vim may override it.
 shape = "beam"
-blink = false
+blink = true
 
 [quake]
 # `noobsbot --quake` starts a drop-down terminal at the top of the screen.
