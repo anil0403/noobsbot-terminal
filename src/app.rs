@@ -45,6 +45,12 @@ const CONTEXT_THROTTLE: Duration = Duration::from_millis(200);
 const CONTEXT_CLOCK: Duration = Duration::from_secs(60);
 /// Widest a tab gets, in cells.
 const TAB_CELLS: f32 = 30.0;
+/// Buttons at the right end of the tab bar: label, action.
+const BAR_BUTTONS: [(&str, Action); 3] = [("+", Action::NewTab), ("\u{eb56}", Action::SplitRight), ("\u{eb57}", Action::SplitDown)];
+/// One button: a 1-cell label between a space each side, and its caps.
+const BUTTON_CELLS: f32 = 5.0;
+/// The right-click menu, top to bottom.
+const MENU: [Action; 8] = [Action::Copy, Action::Paste, Action::SplitUp, Action::SplitRight, Action::SplitDown, Action::SplitLeft, Action::NewTab, Action::ClosePane];
 /// Step for keyboard split resizing, as a fraction of the split.
 const RESIZE_STEP: f32 = 0.05;
 /// A command running at least this long notifies when it ends while the window is unfocused.
@@ -82,6 +88,8 @@ pub struct App {
     search: Option<Search>,
     hints: Hints,
     palette: Option<Palette>,
+    /// The right-click menu: top-left corner, and the row under the pointer.
+    menu: Option<((f32, f32), Option<usize>)>,
     /// Link under the pointer while Ctrl is held.
     hover: Option<(PaneId, Link)>,
     mods: ModifiersState,
@@ -151,6 +159,7 @@ impl App {
             search: None,
             hints: Hints::new(),
             palette: None,
+            menu: None,
             hover: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
@@ -235,14 +244,14 @@ impl App {
     /// Height of the tab bar; it only shows with more than one tab.
     fn bar_h(&self) -> f32 {
         match &self.renderer {
-            Some(r) if self.tabs.len() > 1 => (r.font.cell_h * 1.4).round(),
+            Some(r) => (r.font.cell_h * 1.4).round(),
             _ => 0.0,
         }
     }
 
     fn tab_w(&self) -> f32 {
         let Some(r) = &self.renderer else { return 1.0 };
-        (r.size().0 / self.tabs.len() as f32).min(r.font.cell_w * TAB_CELLS).floor()
+        ((r.size().0 - bar_buttons_w(r.font.cell_w)) / self.tabs.len() as f32).min(r.font.cell_w * TAB_CELLS).floor()
     }
 
     /// Start a shell (or `command`) in a new pane, not yet placed in any tab.
@@ -312,11 +321,12 @@ impl App {
         self.check_context(id, true);
     }
 
-    fn split(&mut self, across: bool, command: Option<Vec<String>>) {
+    /// Open a pane on `side` of the focused one.
+    fn split(&mut self, side: Dir, command: Option<Vec<String>>) {
         let cwd = self.new_cwd();
         let Some(id) = self.spawn_pane(cwd, command) else { return };
         let target = self.focused();
-        self.tabs[self.active].root.split(target, id, across);
+        self.tabs[self.active].root.split(target, id, side);
         self.relayout();
         self.focus(id);
         self.check_context(id, true);
@@ -478,7 +488,7 @@ impl App {
         match target {
             Target::Url(url) => links::xdg_open(&url),
             Target::File { path, line } => match links::editor_command(&path, line) {
-                Some(cmd) => self.split(true, Some(cmd)),
+                Some(cmd) => self.split(Dir::Right, Some(cmd)),
                 None => links::xdg_open(&path.to_string_lossy()),
             },
         }
@@ -529,8 +539,10 @@ impl App {
             // With a single tab, Alt+digit stays readline's digit argument.
             Action::GoToTab(i) if i < self.tabs.len() && self.tabs.len() > 1 => self.switch_tab(i),
             Action::GoToTab(_) => return false,
-            Action::SplitRight => self.split(true, None),
-            Action::SplitDown => self.split(false, None),
+            Action::SplitRight => self.split(Dir::Right, None),
+            Action::SplitDown => self.split(Dir::Down, None),
+            Action::SplitLeft => self.split(Dir::Left, None),
+            Action::SplitUp => self.split(Dir::Up, None),
             Action::Focus(dir) => match pane::neighbor(&self.active_rects(), self.focused(), dir) {
                 Some(id) => self.focus(id),
                 None => return false,
@@ -629,6 +641,36 @@ fn human(d: Duration) -> String {
         s if s < 60 => format!("{s}s"),
         s if s < 3600 => format!("{}m {}s", s / 60, s % 60),
         s => format!("{}h {}m", s / 3600, s / 60 % 60),
+    }
+}
+
+// Right-click menu and tab bar buttons.
+impl App {
+    /// A key while the menu is open: arrows pick, Enter runs, Esc closes; the rest are swallowed.
+    fn menu_key(&mut self, event_loop: &ActiveEventLoop, key: &Key) -> bool {
+        let Some((at, hovered)) = self.menu else { return false };
+        let last = MENU.len() - 1;
+        self.dirty = true;
+        match key {
+            Key::Named(NamedKey::ArrowDown) => self.menu = Some((at, Some(hovered.map_or(0, |i| (i + 1).min(last))))),
+            Key::Named(NamedKey::ArrowUp) => self.menu = Some((at, Some(hovered.map_or(last, |i| i.saturating_sub(1))))),
+            Key::Named(NamedKey::Enter) => {
+                self.menu = None;
+                if let Some(i) = hovered {
+                    self.run(event_loop, MENU[i]);
+                }
+            }
+            Key::Named(NamedKey::Escape) => self.menu = None,
+            _ => {}
+        }
+        true
+    }
+
+    fn bar_button_at(&self, x: f32) -> Option<Action> {
+        let cw = self.renderer.as_ref()?.font.cell_w;
+        let start = self.renderer.as_ref()?.size().0 - bar_buttons_w(cw);
+        let i = ((x - start) / (BUTTON_CELLS * cw)).floor();
+        (i >= 0.0).then(|| BAR_BUTTONS.get(i as usize).map(|b| b.1)).flatten()
     }
 }
 
@@ -1067,6 +1109,9 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.palette_key(event_loop, &event.logical_key, event.text.as_deref()) {
                     return;
                 }
+                if self.menu_key(event_loop, &event.logical_key) {
+                    return;
+                }
                 if self.search_key(&event.logical_key, event.text.as_deref()) {
                     return;
                 }
@@ -1145,6 +1190,14 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 let (x, y) = pos;
                 self.mouse_px = (x, y);
+                if let Some((at, hovered)) = self.menu {
+                    let row = menu_row(self.renderer.as_ref().unwrap(), at, (x, y));
+                    if row != hovered {
+                        self.menu = Some((at, row));
+                        self.dirty = true;
+                    }
+                    return;
+                }
                 if let Some(i) = self.drag {
                     let d = &self.dividers[i];
                     let ratio = if d.across { (x - d.area.x) / d.area.w } else { (y - d.area.y) / d.area.h };
@@ -1212,9 +1265,24 @@ impl ApplicationHandler<UserEvent> for App {
                 if !pressed && button == MouseButton::Left && self.drag.take().is_some() {
                     return;
                 }
+                // An open menu takes the next click: an item runs, anywhere else closes it.
+                if let Some((at, _)) = self.menu.filter(|_| pressed) {
+                    self.menu = None;
+                    self.dirty = true;
+                    let r = self.renderer.as_ref().unwrap();
+                    if button == MouseButton::Left
+                        && let Some(i) = menu_row(r, at, (x, y))
+                    {
+                        self.run(event_loop, MENU[i]);
+                    }
+                    return;
+                }
                 if pressed && y < self.bar_h() {
                     if button == MouseButton::Left {
-                        self.switch_tab((x / self.tab_w()) as usize);
+                        match self.bar_button_at(x) {
+                            Some(action) => _ = self.run(event_loop, action),
+                            None => self.switch_tab((x / self.tab_w()) as usize),
+                        }
                     }
                     return;
                 }
@@ -1263,6 +1331,11 @@ impl ApplicationHandler<UserEvent> for App {
                             self.dirty = true;
                         }
                         (MouseButton::Middle, true) => self.paste(true),
+                        (MouseButton::Right, true) => {
+                            let r = self.renderer.as_ref().unwrap();
+                            self.menu = Some((menu_origin(r, (x, y)), None));
+                            self.dirty = true;
+                        }
                         _ => {}
                     }
                     return;
@@ -1317,11 +1390,12 @@ impl ApplicationHandler<UserEvent> for App {
                 for d in &self.dividers {
                     renderer.fill(d.rect, theme::to_f32(theme.selection));
                 }
-                if self.tabs.len() > 1 {
-                    draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w);
-                }
+                draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w);
                 if let Some(p) = &self.palette {
                     draw_palette(renderer, p, &theme);
+                }
+                if let Some((at, hovered)) = self.menu {
+                    draw_menu(renderer, at, hovered, &theme);
                 }
                 renderer.crt_params = self.crt.then(|| self.config.crt.params());
                 renderer.finish(theme.bg);
@@ -1454,6 +1528,61 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
     }
 }
 
+/// Width of the tab bar's buttons, with half a cell of margin on the right.
+fn bar_buttons_w(cw: f32) -> f32 {
+    (BAR_BUTTONS.len() as f32 * BUTTON_CELLS + 0.5) * cw
+}
+
+/// Menu rows: (name, keys) from the action table.
+fn menu_rows() -> impl Iterator<Item = (&'static str, &'static str)> {
+    MENU.iter().filter_map(|a| input::actions().iter().find(|e| e.action == *a)).map(|e| (e.name.as_str(), e.keys.split(" or ").next().unwrap_or("")))
+}
+
+/// The menu's size in cells: room for the longest name, a gap, the longest keys.
+fn menu_cells() -> (f32, f32) {
+    let name = menu_rows().map(|(n, _)| n.chars().count()).max().unwrap_or(0);
+    let keys = menu_rows().map(|(_, k)| k.chars().count()).max().unwrap_or(0);
+    ((name + keys + 6) as f32, MENU.len() as f32)
+}
+
+/// Where the menu goes for a click at `at`: down and right of it, kept inside the window.
+fn menu_origin(r: &Renderer, at: (f32, f32)) -> (f32, f32) {
+    let (cols, rows) = menu_cells();
+    let (w, h) = r.size();
+    let (mw, mh) = (cols * r.font.cell_w, (rows + 1.0) * r.font.cell_h);
+    (at.0.min(w - mw).max(0.0), at.1.min(h - mh).max(0.0))
+}
+
+/// The menu row under `p`, if any.
+fn menu_row(r: &Renderer, origin: (f32, f32), p: (f32, f32)) -> Option<usize> {
+    let (cols, rows) = menu_cells();
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let (x, y) = (p.0 - origin.0, p.1 - origin.1 - ch / 2.0);
+    let i = (y / ch).floor();
+    (x >= 0.0 && x < cols * cw && i >= 0.0 && i < rows).then_some(i as usize)
+}
+
+/// The right-click menu: action names with their keys, the hovered row as a pill.
+fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, theme: &Theme) {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let (cols, rows) = menu_cells();
+    let (fg, ink, accent) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg), theme::to_f32(theme.cursor));
+    let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
+    r.fill(Rect { x: origin.0, y: origin.1, w: cols * cw, h: (rows + 1.0) * ch }, theme::to_f32(surface(theme)));
+    for (i, (name, keys)) in menu_rows().enumerate() {
+        let y = origin.1 + ch / 2.0 + i as f32 * ch;
+        let keys_x = origin.0 + (cols - 2.0 - keys.chars().count() as f32) * cw;
+        if hovered == Some(i) {
+            pill(r, origin.0 + cw / 2.0, y, &" ".repeat(cols as usize - 3), accent, ink);
+            r.text(origin.0 + cw * 2.0, y, name, ink);
+            r.text(keys_x, y, keys, ink);
+        } else {
+            r.text(origin.0 + cw * 2.0, y, name, fg);
+            r.text(keys_x, y, keys, muted);
+        }
+    }
+}
+
 /// One tab per slot, each tinted with its focused pane's situation theme, so a
 /// red production tab stays visible while you work in another one.
 fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32) {
@@ -1479,6 +1608,13 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
             (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.3))
         };
         pill(r, x, y, &label, theme::to_f32(bg), theme::to_f32(fg));
+    }
+    let theme = panes.get_mut(&tabs[active].focused).unwrap().theme.frame();
+    let (bg, fg) = (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.15));
+    let mut x = r.size().0 - bar_buttons_w(cw);
+    for (label, _) in BAR_BUTTONS {
+        pill(r, x, y, &format!(" {label} "), theme::to_f32(bg), theme::to_f32(fg));
+        x += BUTTON_CELLS * cw;
     }
 }
 

@@ -116,14 +116,17 @@ impl Node {
     }
 
     /// Put `new` next to `target` (right of it or below it).
-    pub fn split(&mut self, target: PaneId, new: PaneId, across: bool) -> bool {
+    pub fn split(&mut self, target: PaneId, new: PaneId, side: Dir) -> bool {
         match self {
             Node::Leaf(id) if *id == target => {
-                *self = Node::Split { across, ratio: 0.5, a: Box::new(Node::Leaf(target)), b: Box::new(Node::Leaf(new)) };
+                let (old, new) = (Box::new(Node::Leaf(target)), Box::new(Node::Leaf(new)));
+                let across = matches!(side, Dir::Left | Dir::Right);
+                let (a, b) = if matches!(side, Dir::Left | Dir::Up) { (new, old) } else { (old, new) };
+                *self = Node::Split { across, ratio: 0.5, a, b };
                 true
             }
             Node::Leaf(_) => false,
-            Node::Split { a, b, .. } => a.split(target, new, across) || b.split(target, new, across),
+            Node::Split { a, b, .. } => a.split(target, new, side) || b.split(target, new, side),
         }
     }
 
@@ -238,10 +241,21 @@ mod tests {
     ///   | 3
     fn three() -> Node {
         let mut root = Node::Leaf(1);
-        assert!(root.split(1, 2, true));
-        assert!(root.split(2, 3, false));
-        assert!(!root.split(9, 4, false));
+        assert!(root.split(1, 2, Dir::Right));
+        assert!(root.split(2, 3, Dir::Down));
+        assert!(!root.split(9, 4, Dir::Down));
         root
+    }
+
+    #[test]
+    fn splits_before() {
+        // Left and up put the new pane first.
+        let mut root = Node::Leaf(1);
+        root.split(1, 2, Dir::Left);
+        root.split(1, 3, Dir::Up);
+        assert_eq!(root.leaves(), [2, 3, 1]);
+        let (panes, _) = layout(&root);
+        assert!(panes[0].1.x < panes[2].1.x && panes[1].1.y < panes[2].1.y);
     }
 
     #[test]

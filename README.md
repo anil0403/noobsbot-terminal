@@ -51,8 +51,9 @@ bash and zsh `ssh` sends `TERM=xterm-256color` instead; fish users may want
 | Shift+PgUp / Shift+PgDn, wheel | Scroll through history |
 | Ctrl+Shift+Home / End | Jump to top / bottom of history |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Bigger / smaller / reset font |
-| Ctrl+Shift+T | New tab (opens in the current shell's directory) |
-| Ctrl+Shift+E / Ctrl+Shift+O | Split right / split down |
+| Ctrl+Shift+T | New tab, or the + button in the tab bar (opens in the current shell's directory) |
+| Ctrl+Shift+E / Ctrl+Shift+O | Split right / split down (also the ◫ ⊟ buttons at the right of the tab bar; split up and left from the palette or right-click) |
+| Right-click | Menu: copy, paste, split up / right / down / left, new tab, close pane (Shift+right-click when a program uses the mouse) |
 | Ctrl+Shift+W | Close pane (the last pane closes its tab) |
 | Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
 | Alt+Arrows, click | Move focus between split panes |
