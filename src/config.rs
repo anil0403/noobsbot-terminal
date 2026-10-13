@@ -133,7 +133,7 @@ impl Default for Terminal {
 
 impl Default for Cursor {
     fn default() -> Self {
-        Self { shape: Shape::Block, blink: false }
+        Self { shape: Shape::Beam, blink: false }
     }
 }
 
