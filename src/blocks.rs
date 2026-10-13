@@ -71,8 +71,10 @@ pub fn prompts<T>(term: &Term<T>) -> Vec<(Line, u64)> {
     for i in term.topmost_line().0..=term.bottommost_line().0 {
         let line = Line(i);
         let prompt = prompt_at(term, line);
-        if prompt.is_some() && prompt != last {
-            out.push((line, prompt.unwrap()));
+        if let Some(p) = prompt
+            && prompt != last
+        {
+            out.push((line, p));
         }
         last = prompt;
     }

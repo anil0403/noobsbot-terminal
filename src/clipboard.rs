@@ -14,11 +14,10 @@ impl Clipboard {
     }
 
     pub fn set(&mut self, primary: bool, text: String) {
-        if let Some(cb) = self.0.as_mut() {
-            if let Err(e) = cb.set().clipboard(kind(primary)).text(text) {
+        if let Some(cb) = self.0.as_mut()
+            && let Err(e) = cb.set().clipboard(kind(primary)).text(text) {
                 log::warn!("clipboard set failed: {e}");
             }
-        }
     }
 
     pub fn get(&mut self, primary: bool) -> Option<String> {

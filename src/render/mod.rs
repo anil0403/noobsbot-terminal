@@ -185,8 +185,8 @@ impl Renderer {
     /// One line of UI text (tab titles); returns the x where it ends.
     pub fn text(&mut self, mut x: f32, y: f32, text: &str, color: [f32; 4]) -> f32 {
         for c in text.chars() {
-            if c != ' ' {
-                if let Some(e) = self.atlas.get(&self.queue, &mut self.font, c, false, false) {
+            if c != ' '
+                && let Some(e) = self.atlas.get(&self.queue, &mut self.font, c, false, false) {
                     self.quads.push(Instance {
                         pos: [x + e.left, y + self.font.baseline - e.top],
                         size: [e.rect[2], e.rect[3]],
@@ -195,7 +195,6 @@ impl Renderer {
                         kind: if e.color { COLOR } else { MASK },
                     });
                 }
-            }
             x += self.font.cell_w;
         }
         x

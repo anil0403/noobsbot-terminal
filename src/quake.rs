@@ -109,8 +109,7 @@ fn parse_hotkey(spec: &str) -> Option<(ModMask, u32)> {
     let key = parts.pop()?;
     let mut mods = ModMask::from(0u16);
     for m in parts {
-        mods = mods
-            | match m.to_ascii_lowercase().as_str() {
+        mods |= match m.to_ascii_lowercase().as_str() {
                 "ctrl" => ModMask::CONTROL,
                 "shift" => ModMask::SHIFT,
                 "alt" => ModMask::M1,

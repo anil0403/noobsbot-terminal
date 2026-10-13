@@ -58,11 +58,10 @@ fn ssh_host(args: &[String]) -> Option<String> {
     while let Some(arg) = iter.next() {
         if let Some(flags) = arg.strip_prefix('-').filter(|f| !f.is_empty()) {
             // `-p22` carries its value; `-p 22` takes the next arg.
-            if let Some(pos) = flags.find(|c| TAKES_VALUE.contains(c)) {
-                if pos + 1 == flags.len() {
+            if let Some(pos) = flags.find(|c| TAKES_VALUE.contains(c))
+                && pos + 1 == flags.len() {
                     iter.next();
                 }
-            }
             continue;
         }
         let dest = arg.strip_prefix("ssh://").unwrap_or(arg);

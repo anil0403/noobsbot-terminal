@@ -212,11 +212,10 @@ pub fn load(path: &Path) -> Result<Config, String> {
 pub fn watch(path: &Path, proxy: EventLoopProxy<UserEvent>) -> Option<notify::RecommendedWatcher> {
     let name = path.file_name()?.to_owned();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
-            if (event.kind.is_modify() || event.kind.is_create()) && event.paths.iter().any(|p| p.file_name() == Some(&name)) {
+        if let Ok(event) = res
+            && (event.kind.is_modify() || event.kind.is_create()) && event.paths.iter().any(|p| p.file_name() == Some(&name)) {
                 let _ = proxy.send_event(UserEvent::ConfigChanged);
             }
-        }
     })
     .map_err(|e| log::warn!("config watch failed: {e}"))
     .ok()?;

@@ -99,7 +99,7 @@ impl Tap {
             // `ESC P 0;1;0 q data`: digits and `;`, then `q`.
             Kind::Dcs => {
                 let q = s.iter().position(|&b| !(b.is_ascii_digit() || b == b';'));
-                (q.map(|q| s[q]) == Some(b'q')).then(|| Mark::Sixel(s))
+                (q.map(|q| s[q]) == Some(b'q')).then_some(Mark::Sixel(s))
             }
         };
         if let Some(mark) = mark {
