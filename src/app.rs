@@ -1602,6 +1602,8 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
             label.pop();
             label.push('…');
         }
+        // Fill the slot, so each tab reads as its own block.
+        let label = format!("{label:<fit$}");
         let (bg, fg) = if i == active {
             (theme.cursor, theme.bg)
         } else {
@@ -1610,6 +1612,7 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
         pill(r, x, y, &label, theme::to_f32(bg), theme::to_f32(fg));
     }
     let theme = panes.get_mut(&tabs[active].focused).unwrap().theme.frame();
+    r.fill(Rect { x: 0.0, y: bar_h - 1.0, w: r.size().0, h: 1.0 }, theme::to_f32(theme::blend(backdrop, theme.selection, 0.7)));
     let (bg, fg) = (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.15));
     let mut x = r.size().0 - bar_buttons_w(cw);
     for (label, _) in BAR_BUTTONS {
