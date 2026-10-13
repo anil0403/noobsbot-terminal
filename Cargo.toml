@@ -2,7 +2,13 @@
 name = "noobsbot"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.90"
 license = "MIT"
+description = "GPU-rendered terminal emulator for Linux with tabs, splits, suggestions and situation-aware colors"
+repository = "https://github.com/anil0403/noobsbot-terminal"
+readme = "README.md"
+keywords = ["terminal", "terminal-emulator", "gpu", "linux"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 alacritty_terminal = { version = "0.26.0", default-features = false }
