@@ -69,15 +69,19 @@ impl Renderer {
         let size = window.inner_size();
         let scale = window.scale_factor() as f32;
         // Vulkan first: just asking for every backend loads the OpenGL driver too
-        // (Mesa's with LLVM, ~120 MB). OpenGL only when there's no Vulkan.
+        // (Mesa's with LLVM, ~120 MB). Every backend when Vulkan has no GPU, or
+        // only a software one (lavapipe): OpenGL may still reach the real GPU. OpenGL
+        // needs the display connection to draw on the window.
         let (surface, adapter) = [wgpu::Backends::VULKAN, wgpu::Backends::all()]
             .into_iter()
             .find_map(|backends| {
-                let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_without_display_handle() });
+                let instance =
+                    wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(window.clone())) });
                 let surface = instance.create_surface(window.clone()).ok()?;
                 let options = wgpu::RequestAdapterOptions { compatible_surface: Some(&surface), ..Default::default() };
                 let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
-                Some((surface, adapter))
+                let software = adapter.get_info().device_type == wgpu::DeviceType::Cpu;
+                (!software || backends != wgpu::Backends::VULKAN).then_some((surface, adapter))
             })
             .expect("no GPU adapter");
         log::info!("adapter: {:?}", adapter.get_info());
