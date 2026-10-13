@@ -9,7 +9,8 @@ url="https://github.com/anil0403/$_repo"
 license=('MIT')
 # The X11, Wayland, Vulkan and EGL libraries are loaded at runtime, not linked.
 # nano: the default editor (EDITOR, when none is set) for git, gh and file links.
-depends=('gcc-libs' 'glibc' 'libx11' 'libxcursor' 'libxi' 'libxkbcommon-x11' 'vulkan-icd-loader' 'nano')
+# ttf-jetbrains-mono-nerd: the default font, with the prompt's icons.
+depends=('gcc-libs' 'glibc' 'libx11' 'libxcursor' 'libxi' 'libxkbcommon-x11' 'vulkan-icd-loader' 'nano' 'ttf-jetbrains-mono-nerd')
 makedepends=('cargo' 'git' 'ncurses')
 optdepends=('wayland: run on Wayland'
             'libglvnd: OpenGL fallback when Vulkan is unavailable'

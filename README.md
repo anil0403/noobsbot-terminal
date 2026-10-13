@@ -14,6 +14,20 @@ See [PLAN.md](PLAN.md) for how it was built, milestone by milestone.
 
 ## Install
 
+One command, on Arch, Debian/Ubuntu, Fedora or openSUSE:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/anil0403/noobsbot-terminal/main/install.sh | bash
+```
+
+It installs the dependencies (nano and the JetBrainsMono Nerd Font too), builds
+noobsbot and adds it to your app menu, and makes nano your default editor if you
+haven't picked one. Run it again to update. On Arch it builds the `noobsbot-git`
+package (`sudo pacman -R noobsbot-git` removes it); elsewhere noobsbot goes to
+`/usr/local/bin`, with Rust from rustup if your distro's is too old.
+
+### By hand
+
 On Arch, build the package from [extra/aur](extra/aur):
 
 ```sh
