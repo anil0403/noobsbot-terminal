@@ -44,7 +44,7 @@ curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh \
   | bash
 ```
 
-That one line:
+That command:
 
 - installs every dependency, including **nano** and the **JetBrainsMono Nerd Font** (anything already installed is skipped)
 - builds noobsbot and adds **noobsbot terminal** to your app menu
