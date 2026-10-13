@@ -67,6 +67,8 @@ const NOTIFY_AFTER: Duration = Duration::from_secs(10);
 const FLASH: Duration = Duration::from_millis(400);
 /// Welcome screen characters typed per second.
 const TYPE_RATE: f32 = 3000.0;
+/// Longest the welcome screen keeps redrawing to type (a pane out of view never finishes).
+const TYPING: Duration = Duration::from_secs(3);
 /// Quake window fade in/out.
 const FADE: Duration = Duration::from_millis(150);
 
@@ -1150,7 +1152,12 @@ impl ApplicationHandler<UserEvent> for App {
             self.dirty = true;
         }
         let flicker = self.crt && self.config.crt.flicker > 0.0;
-        if flicker || self.panes.values().any(|p| p.theme.fading() || p.typing.is_some() || p.failed_at.is_some_and(|t| t.elapsed() < FLASH)) {
+        if flicker
+            || self
+                .panes
+                .values()
+                .any(|p| p.theme.fading() || p.typing.is_some_and(|t| t.elapsed() < TYPING) || p.failed_at.is_some_and(|t| t.elapsed() < FLASH))
+        {
             self.dirty = true;
         }
 
@@ -1725,7 +1732,7 @@ fn draw_palette(r: &mut Renderer, p: &Palette, theme: &Theme) {
     const ROWS: usize = 12;
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let w = r.size().0;
-    let cols = ((w / cw) as usize).saturating_sub(4).min(64);
+    let cols = ((w / cw) as usize).saturating_sub(4).clamp(16, 64); // a tiny window clips it
     let (bw, pad) = (cols as f32 * cw, (cw / 2.0).round());
     let (x, y) = (((w - bw) / 2.0).round(), ch * 2.0); // below the tab bar
     let n = p.len().clamp(1, ROWS); // a row for "No matching commands"
