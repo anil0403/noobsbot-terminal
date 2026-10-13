@@ -48,6 +48,9 @@ const TAB_CELLS: f32 = 30.0;
 /// Buttons at the right end of the tab bar: label, action.
 const BAR_BUTTONS: [(&str, Action); 3] = [("+", Action::NewTab), ("\u{eb56}", Action::SplitRight), ("\u{eb57}", Action::SplitDown)];
 /// One button: a 1-cell label between a space each side, and its caps.
+/// Window frame: Cinnamon's WhiteSur-Dark title bar grey (#373737) on every side.
+const BORDER: f32 = 4.0;
+const BORDER_COLOR: [f32; 4] = [55.0 / 255.0, 55.0 / 255.0, 55.0 / 255.0, 1.0];
 const BUTTON_CELLS: f32 = 5.0;
 /// The right-click menu, top to bottom.
 const MENU: [Action; 8] = [Action::Copy, Action::Paste, Action::SplitUp, Action::SplitRight, Action::SplitDown, Action::SplitLeft, Action::NewTab, Action::ClosePane];
@@ -239,7 +242,7 @@ impl App {
         })
     }
 
-    /// Height of the tab bar; it only shows with more than one tab.
+    /// Height of the tab bar (always shown, for its buttons).
     fn bar_h(&self) -> f32 {
         match &self.renderer {
             Some(r) => (r.font.cell_h * 1.4).round(),
@@ -396,7 +399,7 @@ impl App {
         let bar = self.bar_h();
         let Some(renderer) = &self.renderer else { return };
         let (w, h) = renderer.size();
-        let area = Rect { x: 0.0, y: bar, w, h: h - bar };
+        let area = Rect { x: BORDER, y: bar, w: w - 2.0 * BORDER, h: h - bar - BORDER };
         for (i, tab) in self.tabs.iter().enumerate() {
             let (mut rects, mut dividers) = (Vec::new(), Vec::new());
             tab.root.layout(area, &mut rects, &mut dividers);
@@ -1362,6 +1365,15 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.fill(d.rect, theme::to_f32(theme.selection));
                 }
                 draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w);
+                let (w, h) = renderer.size();
+                for rect in [
+                    Rect { x: 0.0, y: 0.0, w, h: BORDER },
+                    Rect { x: 0.0, y: h - BORDER, w, h: BORDER },
+                    Rect { x: 0.0, y: 0.0, w: BORDER, h },
+                    Rect { x: w - BORDER, y: 0.0, w: BORDER, h },
+                ] {
+                    renderer.fill(rect, BORDER_COLOR);
+                }
                 if let Some(p) = &self.palette {
                     draw_palette(renderer, p, &theme);
                 }
