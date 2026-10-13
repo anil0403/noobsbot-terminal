@@ -1,8 +1,6 @@
 struct Globals {
     screen: vec2<f32>,
     atlas: vec2<f32>,
-    // Radius of the rounded bottom corners, 0 for square.
-    corner: f32,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -40,24 +38,14 @@ fn vs(@builtin(vertex_index) vi: u32, i: Instance) -> Varyings {
 const SOLID: u32 = 0u;
 const MASK: u32 = 1u;
 
-// How much of pixel `p` is inside the window's rounded bottom corners (antialiased).
-fn coverage(p: vec2<f32>) -> f32 {
-    let r = g.corner;
-    let q = vec2<f32>(min(p.x, g.screen.x - p.x), g.screen.y - p.y);
-    if r <= 0.0 || q.x >= r || q.y >= r {
-        return 1.0;
-    }
-    return clamp(r - length(vec2<f32>(r) - q) + 0.5, 0.0, 1.0);
-}
-
 @fragment
 fn fs(v: Varyings) -> @location(0) vec4<f32> {
     let texel = textureSample(atlas, samp, v.uv);
-    var out = texel; // color emoji
     if v.kind == SOLID {
-        out = v.color;
-    } else if v.kind == MASK {
-        out = vec4<f32>(v.color.rgb, v.color.a * texel.a);
+        return v.color;
     }
-    return vec4<f32>(out.rgb, out.a * coverage(v.clip.xy));
+    if v.kind == MASK {
+        return vec4<f32>(v.color.rgb, v.color.a * texel.a);
+    }
+    return texel; // color emoji
 }

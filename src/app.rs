@@ -52,7 +52,6 @@ const PAD: f32 = 2.0;
 /// Window frame: Cinnamon's WhiteSur-Dark title bar grey (#373737) on every side.
 const BORDER: f32 = 4.0;
 const BORDER_COLOR: [f32; 4] = [55.0 / 255.0, 55.0 / 255.0, 55.0 / 255.0, 1.0];
-const CORNER: f64 = 10.0;
 /// Font size while the welcome screen shows (never smaller than the configured one).
 const WELCOME_FONT: f32 = 18.0;
 /// One button: a 1-cell label with two cells of padding each side.
@@ -947,7 +946,7 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
         let icon = crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
-        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon).with_transparent(true);
+        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon);
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.
@@ -1398,10 +1397,6 @@ impl ApplicationHandler<UserEvent> for App {
                     draw_menu(renderer, at, hovered, &theme);
                 }
                 renderer.crt_params = self.crt.then(|| self.config.crt.params());
-                // Match the title bar's rounded top corners (WhiteSur-Dark: 10px); square when maximized.
-                let w = self.window.as_ref().unwrap();
-                let square = w.is_maximized() || w.fullscreen().is_some();
-                renderer.corner = if square { 0.0 } else { (CORNER * w.scale_factor()) as f32 };
                 renderer.finish(theme.bg);
             }
             _ => {}
