@@ -12,7 +12,7 @@ use crate::rules::{Patterns, Rule, When};
 use crate::term::UserEvent;
 use crate::theme::{self, Theme, ThemePatch};
 
-const EXAMPLE: &str = include_str!("../config.example.toml");
+const EXAMPLE: &str = include_str!("../extra/config.example.toml");
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]

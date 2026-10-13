@@ -162,7 +162,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 
 ## ⚙️ Config
 
-`~/.config/noobsbot/config.toml` is created on first launch with every option documented ([example](config.example.toml)). Changes apply **as soon as you save**.
+`~/.config/noobsbot/config.toml` is created on first launch with every option documented ([example](extra/config.example.toml)). Changes apply **as soon as you save**.
 
 ## 🐚 Shell integration
 
@@ -263,5 +263,5 @@ cursor = "#5fd7ff"
 ---
 
 <p align="center">
-  <sub>Designed & developed by the Noobsbot Team · <a href="LICENSE">MIT license</a> · <a href="PLAN.md">How it was built</a></sub>
+  <sub>Designed & developed by the Noobsbot Team · <a href="LICENSE">MIT license</a> · <a href="docs/PLAN.md">How it was built</a></sub>
 </p>

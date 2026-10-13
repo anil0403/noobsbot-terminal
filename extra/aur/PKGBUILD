@@ -50,6 +50,6 @@ package() {
   install -Dm644 extra/noobsbot.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/noobsbot.svg"
   install -dm755 "$pkgdir/usr/share/terminfo"
   tic -x -o "$pkgdir/usr/share/terminfo" extra/noobsbot.terminfo
-  install -Dm644 config.example.toml README.md -t "$pkgdir/usr/share/doc/noobsbot"
+  install -Dm644 extra/config.example.toml README.md -t "$pkgdir/usr/share/doc/noobsbot"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
