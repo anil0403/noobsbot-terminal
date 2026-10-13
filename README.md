@@ -95,7 +95,7 @@ font is one). It applies to shells started after the change.
 
 ## Welcome screen
 
-A new window opens with a cat drawn in dots and dashes beside a summary of the
+A new window opens with a cat drawn in text beside a summary of the
 machine: a powerline header (user, host, date), distro, kernel, uptime, package
 count, desktop, shell, CPU and GPU, with meters for load, memory, swap, disk
 and battery (green, yellow, red as they get worse), the theme's colors and a

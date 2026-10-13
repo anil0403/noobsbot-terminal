@@ -1,38 +1,38 @@
-//! The welcome screen (terminal.welcome): a dot-and-dash cat beside the
+//! The welcome screen (terminal.welcome): a text-drawn cat beside the
 //! machine's specs, shown in a new window before the shell's first prompt.
 //! Everything is read from /proc and /etc; nothing is spawned.
 
 use std::fs::read_to_string;
 
-/// Dots are the fur; dashes the inner ears, stripes, eyes, nose, whiskers,
-/// mouth, collar and toes.
+/// Colons are the fur (dense enough to read on black); dashes the inner ears,
+/// stripes, eyes, whiskers, mouth, collar and toes.
 const CAT: &str = r"
-      ..                      ..
-     ..-..                  ..-..
-     ..---..              ..---..
-     ..----....-..--..-....----..
-    ............-.--.-............
-   ................................
-   ......------........------......
-   ......- .. -........- .. -......
-   ......------........------......
-   ................................
------ ...........----........... -----
-  -----...........--...........-----
------ ........----..----........ -----
-        ......................
-         ---------..---------
-      ..........................
-     ---......................---
-    ..............................
-   ---..........................---      ...
-   ................................    ..--..
-   ---..........................---   ......
-    ..............  ..............  ..--..
-     ...-..-..-..    ..-..-..-... ......
-      --------------------------.....
+     ::                  ::
+    ::-::              ::-::
+    ::---::          ::---::
+    ::----:::-:--:-:::----::
+   :::::::::::-::-:::::::::::
+  ::::::::::::::::::::::::::::
+  :::::-----::::::::-----:::::
+  :::::- o -::::::::- o -:::::
+  :::::-----::::::::-----:::::
+  :::::::::::::vv:::::::::::::
+---- ::::::::::--:::::::::: ----
+ ----::::::::--::--::::::::----
+---- ::::::---::::---:::::: ----
+       ::::::::::::::::::
+        -------::-------
+     ::::::::::::::::::::::
+    ---::::::::::::::::::---
+   ::::::::::::::::::::::::::
+  ---::::::::::::::::::::::---    :::
+  ::::::::::::::::::::::::::::   :--::
+  ---::::::::::::::::::::::---  :::::
+   ::::::::::::  :::::::::::: ::--:
+    ::-::-::-:    :-::-::-:: :::::
+     ----------------------::::
 ";
-const CAT_W: usize = 45;
+const CAT_W: usize = 38;
 /// Narrower than this, the cat is left out.
 const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
@@ -49,13 +49,8 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
     for row in 0..rows {
         if !cat.is_empty() {
             let line = row.checked_sub(cat_top).and_then(|r| cat.get(r)).copied().unwrap_or("");
-            for c in line.chars() {
-                match c {
-                    '.' => out.push_str("\x1b[1;38;5;15m."),
-                    '-' => out.push_str("\x1b[1;38;5;15m-"),
-                    c => out.push(c),
-                }
-            }
+            out.push_str("\x1b[1;38;5;15m"); // bright white
+            out.push_str(line);
             out.push_str(&" ".repeat(CAT_W + 3 - line.len()));
         } else {
             out.push(' ');
@@ -268,9 +263,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cat_is_dots_and_dashes_and_fits() {
+    fn cat_fits() {
         let lines: Vec<&str> = CAT.lines().skip(1).collect();
-        assert!(lines.iter().all(|l| l.chars().all(|c| matches!(c, '.' | '-' | ' '))));
         assert_eq!(lines.iter().map(|l| l.len()).max(), Some(CAT_W));
         // Nothing beside the cat may wrap in the narrowest window that shows it.
         assert!(TIPS.iter().all(|t| t.len() <= MIN_COLS - CAT_W - 3));
@@ -295,8 +289,8 @@ mod tests {
         assert_eq!(tidy("Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz"), "Intel Core i7-8550U");
         assert_eq!(tidy("AMD Ryzen 7 5800X 8-Core Processor"), "AMD Ryzen 7 5800X 8-Core");
         // Wide: every line starts with the cat's column. Narrow: no cat.
-        assert!(screen(120, "gpu", "zsh").contains("1;38;5;15m-"));
-        assert!(!screen(80, "gpu", "zsh").contains("1;38;5;15m-"));
+        assert!(screen(120, "gpu", "zsh").contains("::-::"));
+        assert!(!screen(80, "gpu", "zsh").contains("::-::"));
         assert_eq!((greeting(8), greeting(14), greeting(19), greeting(2)), ("Good morning", "Good afternoon", "Good evening", "Up late"));
     }
 }
