@@ -168,7 +168,7 @@ fn greeting(hour: u32) -> &'static str {
 }
 
 /// The local hour and "Tue 13 Oct 00:13".
-fn now() -> (u32, String) {
+pub fn now() -> (u32, String) {
     let mut text = [0u8; 64];
     // SAFETY: plain libc calls on our own values; strftime gets the buffer's size.
     unsafe {

@@ -30,7 +30,7 @@ pub fn detect(pty_fd: RawFd, shell_pid: u32) -> Context {
     let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).or_else(|_| std::fs::read_link(format!("/proc/{shell_pid}/cwd"))).ok();
     let git_branch = cwd.as_deref().and_then(git_branch);
 
-    Context { process, user, ssh_host, cwd, git_branch, hour: local_hour() }
+    Context { process, user, ssh_host, cwd, git_branch, hour: crate::welcome::now().0 }
 }
 
 fn effective_uid(status: &str) -> Option<u32> {
@@ -88,15 +88,6 @@ fn parse_head(head: &str) -> Option<String> {
     match head.strip_prefix("ref: ") {
         Some(r) => Some(r.strip_prefix("refs/heads/").unwrap_or(r).to_owned()),
         None => head.get(..7).map(String::from),
-    }
-}
-
-fn local_hour() -> u32 {
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        let mut tm = std::mem::zeroed::<libc::tm>();
-        libc::localtime_r(&now, &mut tm);
-        tm.tm_hour as u32
     }
 }
 
