@@ -46,6 +46,9 @@ impl Pty {
             libc::fcntl(fd, libc::F_SETFL, libc::fcntl(fd, libc::F_GETFL) & !libc::O_NONBLOCK);
         }
 
+        // The shell's exit, seen even while a background job it started keeps
+        // the terminal open (`sleep 600 &`, then `exit`). -1 on kernels before 5.3.
+        let shell_exit = unsafe { libc::syscall(libc::SYS_pidfd_open, pty.child().id(), 0) } as i32;
         let woken = Arc::new(AtomicBool::new(false));
         let woken_reader = woken.clone();
         std::thread::Builder::new()
@@ -57,6 +60,14 @@ impl Pty {
                 let mut marks = Vec::new();
                 let mut prompt = 0;
                 loop {
+                    let mut fds = [
+                        libc::pollfd { fd: reader.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+                        libc::pollfd { fd: shell_exit, events: libc::POLLIN, revents: 0 },
+                    ];
+                    unsafe { libc::poll(fds.as_mut_ptr(), if shell_exit < 0 { 1 } else { 2 }, -1) };
+                    if fds[1].revents != 0 && fds[0].revents & libc::POLLIN == 0 {
+                        break; // the shell is gone and so is its output
+                    }
                     let n = match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break, // EIO once the shell exits
                         Ok(n) => n,
@@ -104,6 +115,9 @@ impl Pty {
                     if !woken_reader.swap(true, Ordering::AcqRel) {
                         let _ = proxy.send_event(UserEvent::Term(pane, Event::Wakeup));
                     }
+                }
+                if shell_exit >= 0 {
+                    unsafe { libc::close(shell_exit) };
                 }
                 let _ = proxy.send_event(UserEvent::Term(pane, Event::Exit));
             })
