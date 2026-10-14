@@ -570,14 +570,20 @@ impl App {
 
 impl App {
     fn paste(&mut self, primary: bool) {
-        let Some(text) = self.clipboard.get(primary) else { return };
+        if let Some(text) = self.clipboard.get(primary) {
+            self.paste_text(&text);
+        }
+    }
+
+    /// Text into the focused pane as a paste (bracketed when the program asks).
+    fn paste_text(&mut self, text: &str) {
         let pane = self.focused_pane();
         pane.clear_welcome();
         let mut term = pane.term.lock();
         let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
         term.scroll_display(Scroll::Bottom);
         drop(term);
-        pane.pty.write(&paste_bytes(&text, bracketed));
+        pane.pty.write(&paste_bytes(text, bracketed));
         self.dirty = true;
     }
 
@@ -1207,6 +1213,8 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.update_hover();
             }
+            // A file dragged in from a file manager: its path, quoted, as if pasted.
+            WindowEvent::DroppedFile(path) => self.paste_text(&format!("{} ", input::shell_quote(&path.to_string_lossy()))),
             WindowEvent::Focused(focused) => {
                 self.renderer.as_mut().unwrap().focused = focused;
                 focus_report(self.focused_pane(), focused);
