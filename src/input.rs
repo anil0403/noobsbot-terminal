@@ -305,6 +305,15 @@ pub fn key_bytes(key: &Key, text: Option<&str>, mods: ModifiersState, app_cursor
     }
 }
 
+/// A path as a shell word: as is when it's plain, else in single quotes
+/// ("my notes.txt" -> 'my notes.txt', it's -> 'it'\''s').
+pub fn shell_quote(path: &str) -> String {
+    if !path.is_empty() && path.chars().all(|c| c.is_alphanumeric() || "/._-+,:@%=~".contains(c)) && !path.starts_with('~') {
+        return path.to_owned();
+    }
+    format!("'{}'", path.replace('\'', "'\\''"))
+}
+
 /// Bytes for pasted text. With bracketed paste the app sees it as a paste, not typing,
 /// so a pasted newline can't run a command by itself.
 pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
@@ -373,6 +382,11 @@ mod tests {
 
     #[test]
     fn encodes_paste() {
+        assert_eq!(shell_quote("/home/me/src/main.rs"), "/home/me/src/main.rs");
+        assert_eq!(shell_quote("/tmp/my notes.txt"), "'/tmp/my notes.txt'");
+        assert_eq!(shell_quote("/tmp/it's $HOME;rm"), "'/tmp/it'\\''s $HOME;rm'");
+        assert_eq!(shell_quote("~literal"), "'~literal'");
+        assert_eq!(shell_quote("/tmp/café.png"), "/tmp/café.png");
         assert_eq!(paste_bytes("a\nb\r\nc", false), b"a\rb\rc");
         assert_eq!(paste_bytes("ls\n", true), b"\x1b[200~ls\n\x1b[201~");
         assert_eq!(paste_bytes("x\x1b[201~rm -rf ~\n", true), b"\x1b[200~x[201~rm -rf ~\n\x1b[201~");
