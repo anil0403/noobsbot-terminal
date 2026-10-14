@@ -101,6 +101,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
 | 💡 **Suggestions** | Grey text after the cursor as you type (bash, zsh): commands that worked in this folder first, then anywhere, then your shell's history, then file names. → takes it. |
 | 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. |
+| 📂 **Drag and drop** | Drop files from your file manager onto the terminal to type their paths, quoted when they have spaces. |
 | 🖼️ **Inline images** | kitty graphics protocol and sixel. |
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
 | 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |

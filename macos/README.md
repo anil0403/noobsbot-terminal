@@ -63,6 +63,8 @@ The left <kbd>Option</kbd> key is Alt (Meta) for the shell and programs; the rig
 
 Links: click to open, <kbd>c</kbd> while hovering copies, <kbd>Cmd</kbd>+click opens files like `src/main.rs:12` in your editor.
 
+Drag files from Finder onto the terminal to type their paths, quoted when they have spaces.
+
 ## ⚙️ Config
 
 `~/.config/noobsbot/config.toml`, written with comments on first run, as on Linux; see the [main README](../README.md#config). Differences on the Mac:
