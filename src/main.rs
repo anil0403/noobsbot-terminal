@@ -12,6 +12,7 @@ mod pane;
 mod pty;
 mod quake;
 mod render;
+mod restart;
 mod rules;
 mod search;
 mod shell;
@@ -25,8 +26,10 @@ use winit::event_loop::EventLoop;
 
 fn main() {
     env_logger::init();
-    if std::env::args().nth(1).as_deref() == Some("--update") {
-        std::process::exit(update());
+    match std::env::args().nth(1).as_deref() {
+        Some("--update") => std::process::exit(update()),
+        Some("--restart") => std::process::exit(restart::cli()),
+        _ => {}
     }
     let quake = std::env::args().skip(1).any(|a| a == "--quake");
     if quake && quake::toggle_running() {
@@ -44,7 +47,7 @@ fn update() -> i32 {
     const INSTALL: &str = "curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh | bash";
     match std::process::Command::new("bash").args(["-o", "pipefail", "-c", INSTALL]).status() {
         Ok(s) if s.success() => {
-            println!("Updated. Close noobsbot and open it again to use the new version.");
+            println!("Updated. Run `noobsbot --restart` to use the new version.");
             0
         }
         Ok(s) => s.code().unwrap_or(1),

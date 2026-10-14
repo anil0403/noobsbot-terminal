@@ -303,6 +303,8 @@ impl App {
             Some(cmd) => (cmd.split_first().map(|(program, args)| tty::Shell::new(program.clone(), args.to_vec())), HashMap::new()),
             None => shell::login(&self.shell, self.config.terminal.pretty_prompt),
         };
+        let mut env = env;
+        env.insert("NOOBSBOT_PID".into(), std::process::id().to_string()); // for `noobsbot --restart`
         let what = format!("{shell:?}");
         // The first shell of a window opens under the welcome screen.
         let welcome = id == 0 && command_is_shell && self.config.terminal.welcome;
@@ -635,6 +637,10 @@ impl App {
                     self.dirty = true;
                 }
             }
+            Action::Restart => match crate::restart::launch(&std::env::args_os().skip(1).collect::<Vec<_>>(), None) {
+                Ok(()) => event_loop.exit(),
+                Err(e) => notify("noobsbot can't restart".into(), e.to_string()),
+            },
             Action::ToggleCrt => {
                 self.crt = !self.crt;
                 self.dirty = true;
