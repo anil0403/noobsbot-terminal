@@ -1,4 +1,5 @@
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
 
 use alacritty_terminal::selection::SelectionType;
 use alacritty_terminal::vi_mode::ViMotion;
@@ -133,8 +134,36 @@ pub struct Entry {
     pub action: Action,
     /// What the command palette shows.
     pub name: String,
+    /// The name in the config's `[keys]`: `name` in snake_case ("split_right").
+    pub id: String,
     /// Default keys, like "Cmd+Shift+T"; alternatives separated by " or ".
     pub keys: String,
+}
+
+/// Keys from the config's `[keys]`, by action id, in place of the defaults.
+static USER_KEYS: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
+
+/// Check the config's `[keys]` (action ids and key specs).
+pub fn check_keys(keys: &HashMap<String, String>) -> Result<(), String> {
+    for (id, spec) in keys {
+        if !actions().iter().any(|e| e.id == *id) {
+            return Err(format!("[keys]: no action called `{id}`"));
+        }
+        if let Some(bad) = spec.split(" or ").find(|s| !s.is_empty() && parse(s).is_none()) {
+            return Err(format!("[keys]: can't read `{bad}` for `{id}` (like \"Cmd+Shift+T\")"));
+        }
+    }
+    Ok(())
+}
+
+/// Use the config's `[keys]` from now on.
+pub fn set_keys(keys: &HashMap<String, String>) {
+    *USER_KEYS.write().unwrap() = Some(keys.clone());
+}
+
+/// An action's keys: the config's if it sets them, else the default.
+pub fn keys(e: &Entry) -> String {
+    USER_KEYS.read().unwrap().as_ref().and_then(|k| k.get(&e.id).cloned()).unwrap_or_else(|| e.keys.clone())
 }
 
 /// Every action, registered once: name for the palette and default keys.
@@ -181,20 +210,35 @@ pub fn actions() -> &'static [Entry] {
         for i in 0..9 {
             list.push((A::GoToTab(i), format!("Go to tab {}", i + 1), format!("Cmd+{}", i + 1)));
         }
-        list.into_iter().map(|(action, name, keys)| Entry { action, name, keys }).collect()
+        list.into_iter()
+            .map(|(action, name, keys)| {
+                let id = name.to_lowercase().replace(' ', "_").chars().filter(|c| c.is_alphanumeric() || *c == '_').collect();
+                Entry { action, name, id, keys }
+            })
+            .collect()
     })
 }
 
 /// The action bound to a key, checked before the key goes to the shell.
 pub fn binding(key: &Key, mods: ModifiersState) -> Option<Action> {
-    actions().iter().find(|e| e.keys.split(" or ").any(|spec| matches(spec, key, mods))).map(|e| e.action)
+    binding_in(USER_KEYS.read().unwrap().as_ref().unwrap_or(&HashMap::new()), key, mods)
 }
 
-/// Does a key spec like "Cmd+Shift+T" describe this key press exactly?
-fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
-    if spec.is_empty() {
-        return false; // palette only
-    }
+/// With `user` keys in place of the defaults. Keys the user set win over a
+/// default on the same keys.
+fn binding_in(user: &HashMap<String, String>, key: &Key, mods: ModifiersState) -> Option<Action> {
+    let key = match key {
+        Key::Character(c) => Key::Character(c.to_lowercase().into()),
+        k => k.clone(),
+    };
+    let hit = |keys: &str| keys.split(" or ").any(|spec| parse(spec).is_some_and(|(want, k)| mods == want && k == key));
+    let mine = actions().iter().find(|e| user.get(&e.id).is_some_and(|k| hit(k)));
+    mine.or_else(|| actions().iter().find(|e| !user.contains_key(&e.id) && hit(&e.keys))).map(|e| e.action)
+}
+
+/// A key spec like "Cmd+Shift+T" as modifiers and key; None if it isn't one
+/// (or is empty: palette only).
+fn parse(spec: &str) -> Option<(ModifiersState, Key)> {
     let (prefix, name) = match spec.strip_suffix("++") {
         Some(prefix) => (prefix, "+"),
         None => spec.rsplit_once('+').unwrap_or(("", spec)),
@@ -204,9 +248,9 @@ fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
         want |= match m {
             "Ctrl" => ModifiersState::CONTROL,
             "Shift" => ModifiersState::SHIFT,
-            "Alt" => ModifiersState::ALT,
-            "Cmd" => ModifiersState::SUPER,
-            _ => return false,
+            "Alt" | "Option" => ModifiersState::ALT,
+            "Cmd" | "Super" => ModifiersState::SUPER,
+            _ => return None,
         };
     }
     let named = match name {
@@ -222,9 +266,26 @@ fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
         "Right" => NamedKey::ArrowRight,
         "Up" => NamedKey::ArrowUp,
         "Down" => NamedKey::ArrowDown,
-        _ => return mods == want && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case(name)),
+        "Escape" => NamedKey::Escape,
+        "Backspace" => NamedKey::Backspace,
+        "Delete" => NamedKey::Delete,
+        "F1" => NamedKey::F1,
+        "F2" => NamedKey::F2,
+        "F3" => NamedKey::F3,
+        "F4" => NamedKey::F4,
+        "F5" => NamedKey::F5,
+        "F6" => NamedKey::F6,
+        "F7" => NamedKey::F7,
+        "F8" => NamedKey::F8,
+        "F9" => NamedKey::F9,
+        "F10" => NamedKey::F10,
+        "F11" => NamedKey::F11,
+        "F12" => NamedKey::F12,
+        // One character; letters match either case ("T" is what Shift+t sends).
+        _ if name.chars().count() == 1 => return Some((want, Key::Character(name.to_lowercase().into()))),
+        _ => return None,
     };
-    mods == want && *key == Key::Named(named)
+    Some((want, Key::Named(named)))
 }
 
 /// xterm modifier parameter: 1 + shift|alt<<1|ctrl<<2|super<<3. 1 means "no modifiers".
@@ -403,6 +464,26 @@ mod tests {
         assert_eq!(binding(&ch("t"), ModifiersState::CONTROL), None);
         assert_eq!(binding(&Key::Named(NamedKey::Enter), cmd_shift), Some(Action::ToggleZoom));
         assert_eq!(binding(&Key::Named(NamedKey::Enter), NONE), None);
+    }
+
+    #[test]
+    fn user_keys() {
+        let cmd = ModifiersState::SUPER;
+        let user: HashMap<String, String> =
+            [("split_right", "Cmd+T or Super+F5"), ("split_down", "Option+F6"), ("close_pane", "")].map(|(a, k)| (a.into(), k.into())).into();
+        assert!(check_keys(&user).is_ok());
+        // Theirs beat the default on the same keys (Cmd+T is New tab); the replaced default is gone.
+        assert_eq!(binding_in(&user, &ch("t"), cmd), Some(Action::SplitRight));
+        assert_eq!(binding_in(&user, &Key::Named(NamedKey::F5), cmd), Some(Action::SplitRight));
+        assert_eq!(binding_in(&user, &Key::Named(NamedKey::F6), ModifiersState::ALT), Some(Action::SplitDown));
+        assert_eq!(binding_in(&user, &ch("d"), cmd), None);
+        assert_eq!(binding_in(&user, &ch("w"), cmd), None);
+        assert_eq!(binding_in(&user, &ch("P"), cmd | ModifiersState::SHIFT), Some(Action::CommandPalette));
+        assert!(actions().iter().any(|e| e.id == "copy_last_commands_output"));
+        let bad = |a: &str, k: &str| check_keys(&[(a.to_owned(), k.to_owned())].into()).is_err();
+        assert!(bad("split_sideways", "Cmd+E"));
+        assert!(bad("split_right", "Cmd+Hyper+E"));
+        assert!(bad("split_right", "Cmd+Esc"));
     }
 
     #[test]
