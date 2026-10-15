@@ -55,6 +55,8 @@ pub struct Renderer {
     pub focused: bool,
     /// Blink phase; the app toggles it on a timer.
     pub cursor_on: bool,
+    /// Opacity of the theme's background, 0..=1.
+    pub opacity: f32,
     /// Inline images: GPU copies by picture uid, and this frame's draws
     /// (position among `quads`, picture, quad).
     textures: HashMap<u64, Texture>,
@@ -82,6 +84,12 @@ impl Renderer {
         let mut config = surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).expect("surface unsupported by adapter");
         // Terminal colors are sRGB bytes; write them as-is instead of gamma-converting.
         config.format = config.format.remove_srgb_suffix();
+        // The frame's alpha reaches the compositor (for `opacity`); colors are blended
+        // as premultiplied below. Opaque when the platform can't do either.
+        let modes = surface.get_capabilities(&adapter).alpha_modes;
+        if let Some(mode) = [wgpu::CompositeAlphaMode::PreMultiplied, wgpu::CompositeAlphaMode::PostMultiplied].into_iter().find(|m| modes.contains(m)) {
+            config.alpha_mode = mode;
+        }
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("cells.wgsl"));
@@ -107,7 +115,9 @@ impl Renderer {
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    // Color: straight alpha over what's there. Alpha: "over" too, so a
+                    // solid frame stays solid (alpha blending would thin glyph edges).
+                    blend: Some(wgpu::BlendState { color: wgpu::BlendState::ALPHA_BLENDING.color, alpha: wgpu::BlendComponent::OVER }),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -159,6 +169,7 @@ impl Renderer {
             glyphs: Vec::new(),
             focused: true,
             cursor_on: true,
+            opacity: 1.0,
             crt,
             crt_params: None,
             started: std::time::Instant::now(),
@@ -209,13 +220,17 @@ impl Renderer {
         x
     }
 
-    /// Draw everything queued since the last frame on a `bg`-cleared window.
+    /// Draw everything queued since the last frame on a `bg`-cleared window
+    /// (cleared to nothing when see-through: panes and borders fill their own).
     pub fn finish(&mut self, bg: Rgb) {
         // Taken now, so a frame skipped below doesn't leave them for the next one.
         let mut instances = std::mem::take(&mut self.quads);
         let draws = std::mem::take(&mut self.image_draws);
         let [r, g, b, _] = theme::to_f32(bg);
-        let bg = wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 };
+        let bg = match self.opacity < 1.0 {
+            true => wgpu::Color::TRANSPARENT,
+            false => wgpu::Color { r: r as f64, g: g as f64, b: b as f64, a: 1.0 },
+        };
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
@@ -309,7 +324,8 @@ impl Renderer {
     ) -> bool {
         let (cw, ch, baseline) = (self.font.cell_w, self.font.cell_h, self.font.baseline);
         let (ox, oy) = (rect.x, rect.y);
-        self.fill(rect, theme::to_f32(theme.bg));
+        let [r, g, b, _] = theme::to_f32(theme.bg);
+        self.fill(rect, [r, g, b, self.opacity]);
         let line_h = (ch / 14.0).round().max(1.0);
         let content = term.renderable_content();
         let offset = content.display_offset as i32;

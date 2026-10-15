@@ -97,6 +97,8 @@ pub struct Terminal {
     pub welcome: bool,
     /// Grey suggestions after the cursor at the prompt (bash and zsh).
     pub suggestions: bool,
+    /// Background opacity, 0 (see-through) to 1 (solid).
+    pub opacity: f32,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -131,7 +133,7 @@ impl Default for Font {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true, suggestions: true }
+        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true, suggestions: true, opacity: 1.0 }
     }
 }
 
