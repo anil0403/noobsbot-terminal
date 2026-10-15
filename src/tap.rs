@@ -1,6 +1,6 @@
 //! Watches the PTY byte stream for escape codes alacritty_terminal ignores:
 //! OSC 133 (prompt and command marks from shell integration), OSC 7 (cwd),
-//! and images: kitty graphics (APC `G`) and sixel (DCS `q`).
+//! images: kitty graphics (APC `G`) and sixel (DCS `q`); and XTVERSION (CSI `> q`).
 
 use std::path::PathBuf;
 
@@ -15,18 +15,24 @@ pub enum Mark {
     Graphics(Vec<u8>),
     /// Sixel image: parameters, `q`, data.
     Sixel(Vec<u8>),
+    /// XTVERSION (`CSI > q`): the app asks which terminal this is.
+    XtVersion,
 }
 
 /// Longest OSC we bother to collect; longer ones aren't ours.
 const MAX: usize = 4096;
 /// Longest image sequence we collect.
 const MAX_IMAGE: usize = 64 << 20;
+/// CSI parameters kept; ours are at most `>0`.
+const MAX_CSI: usize = 8;
 
 #[derive(Default)]
 pub struct Tap {
     state: State,
     kind: Kind,
     osc: Vec<u8>,
+    /// A CSI's parameter and intermediate bytes so far.
+    csi: Vec<u8>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -37,6 +43,7 @@ enum State {
     Str,
     /// ESC inside a string ends it; a following `\` belongs to it too.
     StrEnd,
+    Csi,
 }
 
 /// Which kind of string sequence is being collected.
@@ -98,6 +105,24 @@ impl Tap {
                     };
                     State::Str
                 }
+                (State::Esc, b'[') => {
+                    self.csi.clear();
+                    State::Csi
+                }
+                (State::Csi, 0x20..=0x3f) => {
+                    if self.csi.len() < MAX_CSI {
+                        self.csi.push(b);
+                    }
+                    State::Csi
+                }
+                (State::Csi, b'q') => {
+                    if matches!(&self.csi[..], b">" | b">0") {
+                        out.push((i, Mark::XtVersion));
+                    }
+                    State::Ground
+                }
+                // C0 controls inside a CSI run without ending it.
+                (State::Csi, 0x00..=0x1a | 0x1c..=0x1f) => State::Csi,
                 (_, 0x1b) => State::Esc,
                 _ => State::Ground,
             };
@@ -221,5 +246,16 @@ mod tests {
         // BEL doesn't end these, and other DCS/APC aren't ours.
         assert_eq!(scan(&[b"\x1b_Gq=1\x07;x\x1b\\"]), vec![(11, Mark::Graphics(b"q=1\x07;x".to_vec()))]);
         assert_eq!(scan(&[b"\x1bP=1s\x1b\\\x1b_X\x1b\\"]), vec![]);
+    }
+
+    #[test]
+    fn xtversion() {
+        assert_eq!(scan(&[b"a\x1b[>qb"]), vec![(5, Mark::XtVersion)]);
+        assert_eq!(scan(&[b"\x1b[>0q"]), vec![(5, Mark::XtVersion)]);
+        assert_eq!(scan(&[b"\x1b[", b">", b"q"]), vec![(1, Mark::XtVersion)]);
+        // Claude Code's probe: XTVERSION, DECRQM 2026, then DA1.
+        assert_eq!(scan(&[b"\x1b[>0q\x1b[?2026$p\x1b[c"]), vec![(5, Mark::XtVersion)]);
+        // Other `q`s aren't it: DECSCUSR (cursor shape), DECLL, XTVERSION with a stray parameter.
+        assert_eq!(scan(&[b"\x1b[2 q\x1b[1q\x1b[>1q\x1b[>00000000q\x1b[0m"]), vec![]);
     }
 }

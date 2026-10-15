@@ -116,6 +116,12 @@ impl Pty {
                                     images.evict(&term);
                                 }
                             }
+                            // Name and version, so apps go on to ask about features (Claude Code then
+                            // checks DEC 2026 and uses synchronized output instead of flickering).
+                            Mark::XtVersion => {
+                                let reply = format!("\x1bP>|noobsbot {}\x1b\\", env!("CARGO_PKG_VERSION"));
+                                let _ = proxy.send_event(UserEvent::Term(pane, Event::PtyWrite(reply)));
+                            }
                             mark => {
                                 let _ = proxy.send_event(UserEvent::Shell(pane, prompt, mark));
                             }
