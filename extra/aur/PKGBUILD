@@ -19,6 +19,8 @@ provides=('noobsbot')
 conflicts=('noobsbot')
 source=("git+$url.git")
 sha256sums=('SKIP')
+# The release profile strips the binary, so there is nothing for a -debug package.
+options=('!debug')
 
 pkgver() {
   cd "$_repo"
