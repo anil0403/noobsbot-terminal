@@ -103,6 +103,8 @@ pub struct App {
     search: Option<Search>,
     hints: Hints,
     palette: Option<Palette>,
+    /// Keyboard link hints in the focused pane.
+    link_hints: Option<LinkHints>,
     /// The right-click menu: top-left corner, and the row under the pointer.
     menu: Option<((f32, f32), Option<usize>)>,
     /// Link under the pointer: a URL, or any link while Cmd is held.
@@ -189,6 +191,7 @@ impl App {
             menu: None,
             hover: None,
             link_copied: false,
+            link_hints: None,
             typed_since_move: false,
             link_press: None,
             bar_hover: None,
@@ -430,6 +433,9 @@ impl App {
         if self.search.as_ref().is_some_and(|s| s.pane != new) {
             self.search = None;
         }
+        if self.link_hints.as_ref().is_some_and(|h| h.pane != new) {
+            self.link_hints = None;
+        }
         if old != Some(new) && self.renderer.as_ref().is_some_and(|r| r.focused) {
             if let Some(pane) = old.and_then(|id| self.panes.get_mut(&id)) {
                 focus_report(pane, false);
@@ -563,6 +569,36 @@ impl App {
         }
     }
 
+    /// A key while link hints are up: a label's letters open its link (with Shift,
+    /// copy it), Backspace takes one back, Esc or anything else closes them.
+    fn link_hints_key(&mut self, key: &Key) -> bool {
+        let Some(h) = &mut self.link_hints else { return false };
+        self.dirty = true;
+        match key {
+            Key::Named(NamedKey::Shift | NamedKey::CapsLock | NamedKey::Control | NamedKey::Alt | NamedKey::Super) => {}
+            Key::Named(NamedKey::Backspace) => _ = h.typed.pop(),
+            Key::Character(c) if c.chars().all(char::is_alphabetic) => {
+                h.typed.push_str(&c.to_lowercase());
+                let Some(i) = h.links.iter().position(|(label, _)| *label == h.typed) else {
+                    if !h.links.iter().any(|(label, _)| label.starts_with(&h.typed)) {
+                        self.link_hints = None;
+                    }
+                    return true;
+                };
+                let (_, link) = self.link_hints.take().unwrap().links.swap_remove(i);
+                match self.mods.shift_key() {
+                    true => self.clipboard.set_both(match link.target {
+                        Target::Url(url) => url,
+                        Target::File { path, .. } => path.to_string_lossy().into_owned(),
+                    }),
+                    false => self.open_link(link.target),
+                }
+            }
+            _ => self.link_hints = None,
+        }
+        true
+    }
+
     /// URLs go to the browser; files open in `$EDITOR` in a split next to the output.
     fn open_link(&mut self, target: Target) {
         match target {
@@ -648,6 +684,14 @@ impl App {
                 None => return false,
             },
             Action::Search => self.open_search(),
+            Action::LinkHints => {
+                let id = self.focused();
+                let pane = &self.panes[&id];
+                // ponytail: positions are taken now; output that scrolls the screen moves the links from under their labels.
+                let links = self.hints.visible(&pane.term.lock(), pane.cwd());
+                let links = links::labels(links.len()).into_iter().zip(links).collect();
+                self.link_hints = Some(LinkHints { pane: id, links, typed: String::new() });
+            }
             Action::ViMode => {
                 if self.focused_pane().term.lock().mode().contains(TermMode::VI) {
                     self.vi(Vi::Exit);
@@ -1277,6 +1321,9 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.palette_key(event_loop, &event.logical_key, event.text.as_deref()) {
                     return;
                 }
+                if self.link_hints_key(&event.logical_key) {
+                    return;
+                }
                 if self.menu_key(event_loop, &event.logical_key) {
                     return;
                 }
@@ -1607,6 +1654,9 @@ impl ApplicationHandler<UserEvent> for App {
                     };
                     let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
+                    if let Some(h) = self.link_hints.as_ref().filter(|h| h.pane == id) {
+                        draw_link_labels(renderer, &pane.term.lock(), pane.rect, h, &theme);
+                    }
                     if id == tab.focused {
                         if let Some(s) = &suggestion {
                             draw_suggestion(renderer, &pane.term.lock(), pane.rect, s, &theme);
@@ -1691,6 +1741,22 @@ fn draw_suggestion(r: &mut Renderer, term: &Term, rect: Rect, s: &str, theme: &T
     r.text(x, y, &text, theme::to_f32(theme::blend(theme.fg, theme.bg, 0.55)));
 }
 
+/// Labels on the first cell of each link still matching what's been typed.
+fn draw_link_labels(r: &mut Renderer, term: &Term, rect: Rect, h: &LinkHints, theme: &Theme) {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let offset = term.grid().display_offset() as i32;
+    for (label, link) in h.links.iter().filter(|(label, _)| label.starts_with(&h.typed)) {
+        let p = link.range.start();
+        let line = p.line.0 + offset;
+        if !(0..term.screen_lines() as i32).contains(&line) {
+            continue;
+        }
+        let (x, y) = (rect.x + p.column.0 as f32 * cw, rect.y + line as f32 * ch);
+        r.fill(Rect { x, y, w: label.len() as f32 * cw, h: ch }, theme::to_f32(theme.cursor));
+        r.text(x, y, label, theme::to_f32(theme.bg));
+    }
+}
+
 /// A note under the hovered link (over it on the last line) of what clicking and `c` do.
 fn draw_link_hint(r: &mut Renderer, rect: Rect, range: &alacritty_terminal::term::search::Match, offset: i32, text: &str, theme: &Theme) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
@@ -1700,6 +1766,14 @@ fn draw_link_hint(r: &mut Renderer, rect: Rect, range: &alacritty_terminal::term
     let w = (text.chars().count() + 2) as f32 * cw;
     let x = (rect.x + range.start().column.0 as f32 * cw).min(rect.x + rect.w - w).max(rect.x);
     pill(r, x, rect.y + line.max(0) as f32 * ch, text, theme::to_f32(theme.selection), theme::to_f32(theme.fg));
+}
+
+/// Keyboard link hints: each link on screen with its label.
+struct LinkHints {
+    pane: PaneId,
+    links: Vec<(String, Link)>,
+    /// Letters of a label typed so far.
+    typed: String,
 }
 
 struct PaneUi<'a> {

@@ -44,6 +44,8 @@ pub enum Action {
     CopyOutput,
     /// A fresh noobsbot in place of this one.
     Restart,
+    /// Label the links on screen; typing a label opens that link.
+    LinkHints,
 }
 
 /// Keys while vi mode is on.
@@ -178,6 +180,7 @@ pub fn actions() -> &'static [Entry] {
             (A::CopyOutput, "Copy last command's output", "Cmd+Shift+C"),
             (A::Search, "Search", "Cmd+F"),
             (A::ViMode, "Vi mode", "Cmd+Shift+Space"),
+            (A::LinkHints, "Link hints", "Cmd+Shift+L"),
             (A::PrevPrompt, "Previous prompt", "Cmd+Up"),
             (A::NextPrompt, "Next prompt", "Cmd+Down"),
             (A::NewTab, "New tab", "Cmd+T"),

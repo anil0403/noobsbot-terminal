@@ -55,6 +55,7 @@ cp -R target/Noobsbot.app /Applications/
 | Focus pane · Resize split | <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>Arrow</kbd> · <kbd>Cmd</kbd>+<kbd>Ctrl</kbd>+<kbd>Arrow</kbd> |
 | Zoom the focused pane to fill the tab, and back | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> |
 | Previous · next prompt | <kbd>Cmd</kbd>+<kbd>↑</kbd> · <kbd>Cmd</kbd>+<kbd>↓</kbd> |
+| Link hints: every link on screen gets a letter; type it to open, Shift + it to copy, Esc cancels | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> |
 | Font size | <kbd>Cmd</kbd>+<kbd>=</kbd> · <kbd>Cmd</kbd>+<kbd>-</kbd> · <kbd>Cmd</kbd>+<kbd>0</kbd> |
 | Quit | <kbd>Cmd</kbd>+<kbd>Q</kbd> |
 
