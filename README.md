@@ -97,7 +97,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | ⚡ **GPU rendering** | Drawn with wgpu (Vulkan or OpenGL), smooth at your screen's refresh rate. |
 | 🐱 **Welcome screen** | A cat beside your machine's specs and live meters that types itself out, gone as soon as you type. |
 | 💎 **Pretty prompt** | A powerline prompt for bash, zsh and fish: user, folder, git branch, exit status. |
-| 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. |
+| 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. Zoom one pane to fill the tab and back. |
 | 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
 | 💡 **Suggestions** | Grey text after the cursor as you type (bash, zsh): commands that worked in this folder first, then anywhere, then your shell's history, then file names. → takes it. |
 | 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. |
@@ -106,7 +106,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
 | 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |
 | ⬇️ **Drop-down mode** | A quake-style terminal that slides in with F12. |
-| 🔔 **Command tracking** | Pass/fail marks per prompt, jump between commands, notifications when long ones finish. |
+| 🔔 **Command tracking** | Pass/fail marks per prompt, jump between commands, notifications when long ones finish. A visual bell flashes the pane's border. |
 
 <a id="shortcuts"></a>
 
@@ -141,6 +141,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
 | Alt+Arrows, click | Move focus between split panes |
 | Ctrl+Shift+Arrows, drag the divider | Resize splits |
+| Ctrl+Shift+Enter | Zoom the focused pane to fill the tab, or bring the splits back (Alt+Arrows, a new split or closing a pane also bring them back) |
 
 </details>
 
@@ -183,6 +184,8 @@ bash and zsh start with a small script that tells the terminal where prompts, co
 - a mark left of each prompt: 🟢 the command worked, 🔴 it failed, 🟡 it's still running, plus a short red flash around the pane on failure
 - prompt jumps and copy-last-output (see the shortcuts)
 - a desktop notification when a command that ran 10 s or more ends while the window isn't focused
+
+Separately, when a program rings the bell, the pane's border flashes in the theme's cursor color, and an unfocused window asks for attention in your taskbar.
 - new tabs, splits and `file:line` links that open in the shell's directory
 
 ### 💎 Pretty prompt

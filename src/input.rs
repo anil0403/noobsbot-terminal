@@ -30,6 +30,8 @@ pub enum Action {
     SplitUp,
     Focus(Dir),
     Resize(Dir),
+    /// The focused pane fills the tab, or the splits come back.
+    ToggleZoom,
     Search,
     ViMode,
     CommandPalette,
@@ -155,6 +157,7 @@ pub fn actions() -> &'static [Entry] {
             (A::SplitLeft, "Split left", ""),
             (A::SplitUp, "Split up", ""),
             (A::ClosePane, "Close pane", "Ctrl+Shift+W"),
+            (A::ToggleZoom, "Zoom pane", "Ctrl+Shift+Enter"),
             (A::NextTab, "Next tab", "Ctrl+Tab"),
             (A::PrevTab, "Previous tab", "Ctrl+Shift+Tab"),
             (A::ScrollPageUp, "Scroll page up", "Shift+PageUp"),
@@ -212,6 +215,7 @@ fn matches(spec: &str, key: &Key, mods: ModifiersState) -> bool {
         "Insert" => NamedKey::Insert,
         "Tab" => NamedKey::Tab,
         "Space" => NamedKey::Space,
+        "Enter" => NamedKey::Enter,
         "Left" => NamedKey::ArrowLeft,
         "Right" => NamedKey::ArrowRight,
         "Up" => NamedKey::ArrowUp,
@@ -372,6 +376,8 @@ mod tests {
         assert_eq!(binding(&Key::Named(NamedKey::Insert), ModifiersState::SHIFT), Some(Action::Paste));
         assert_eq!(binding(&Key::Named(NamedKey::Space), ctrl_shift), Some(Action::ViMode));
         assert_eq!(binding(&ch("t"), ModifiersState::CONTROL), None);
+        assert_eq!(binding(&Key::Named(NamedKey::Enter), ctrl_shift), Some(Action::ToggleZoom));
+        assert_eq!(binding(&Key::Named(NamedKey::Enter), NONE), None);
     }
 
     #[test]

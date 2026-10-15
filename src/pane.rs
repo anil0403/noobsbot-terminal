@@ -35,6 +35,8 @@ pub struct Pane {
     pub cwd: Option<PathBuf>,
     /// When the last command failed, for the red border flash.
     pub failed_at: Option<Instant>,
+    /// When the program last rang the bell (BEL), for the border flash.
+    pub bell_at: Option<Instant>,
     /// The shell is waiting at its prompt (shell integration), not running a command.
     pub at_prompt: bool,
     /// The command running and where it started, for the suggestions once it succeeds.
@@ -71,6 +73,15 @@ impl Pane {
 pub struct Tab {
     pub root: Node,
     pub focused: PaneId,
+    /// The focused pane fills the tab; the others are hidden, not resized.
+    pub zoomed: bool,
+}
+
+impl Tab {
+    /// Panes on screen, in tree order.
+    pub fn visible(&self) -> Vec<PaneId> {
+        if self.zoomed { vec![self.focused] } else { self.root.leaves() }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
