@@ -100,7 +100,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. Zoom one pane to fill the tab and back. |
 | 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
 | 💡 **Suggestions** | Grey text after the cursor as you type (bash, zsh): commands that worked in this folder first, then anywhere, then your shell's history, then file names. → takes it. |
-| 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. |
+| 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. Or Ctrl+Shift+L and type a link's letter, no mouse needed. |
 | 📂 **Drag and drop** | Drop files from your file manager onto the terminal to type their paths, quoted when they have spaces. |
 | 🖼️ **Inline images** | kitty graphics protocol and sixel. |
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
@@ -157,6 +157,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | Ctrl+Shift+Space | Vi mode: `hjkl` `wbe` `0$^` `g` `G` `Ctrl+U/D`, `v` / `V` / `Ctrl+V` select, `y` copy, `/` search, `n` / `N` next, Esc / `q` leave |
 | → or End / Ctrl+→ | Take the grey suggestion / its next word |
 | Hover a URL: click / `c` | Open it / copy it |
+| Ctrl+Shift+L | Link hints: every link on screen gets a letter; type it to open the link, Shift + it to copy, Esc to cancel |
 | Ctrl + hover / click | Underline / open a link: URLs and terminal hyperlinks in the browser, `file.rs:12[:5]` in `$VISUAL`/`$EDITOR` (in a split, at that line; no editor set: the desktop's default app) |
 
 </details>

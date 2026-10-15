@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use alacritty_terminal::Term;
-use alacritty_terminal::index::{Boundary, Direction, Point};
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point};
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 
 /// URLs, or a file path with a line number. No uppercase, so the search is
@@ -46,6 +47,42 @@ impl Hints {
         let (path, line) = parse_file(&text)?;
         let path = resolve(path, cwd)?;
         Some(Link { range: m, target: Target::File { path, line } })
+    }
+
+    /// Every link on screen, top to bottom, for keyboard hints.
+    pub fn visible<T>(&mut self, term: &Term<T>, cwd: Option<PathBuf>) -> Vec<Link> {
+        let offset = term.grid().display_offset() as i32;
+        let (top, bottom) = (Line(-offset), Line(term.screen_lines() as i32 - 1 - offset));
+        let mut starts: Vec<Point> =
+            RegexIter::new(Point::new(top, Column(0)), Point::new(bottom, term.last_column()), Direction::Right, term, &mut self.0).map(|m| *m.start()).collect();
+        // OSC 8 hyperlinks: the first cell of each run.
+        for line in top.0..=bottom.0 {
+            for col in 0..term.columns() {
+                let link = |c: usize| term.grid()[Point::new(Line(line), Column(c))].hyperlink();
+                if link(col).is_some() && (col == 0 || link(col - 1) != link(col)) {
+                    starts.push(Point::new(Line(line), Column(col)));
+                }
+            }
+        }
+        starts.sort();
+        let mut links: Vec<Link> = Vec::new();
+        for p in starts {
+            if links.last().is_some_and(|l| p <= *l.range.end()) {
+                continue; // a URL in a hyperlink's text
+            }
+            links.extend(self.at(term, p, || cwd.clone()));
+        }
+        links
+    }
+}
+
+/// Labels for `n` hints: a letter each while they last, else two (all the
+/// same length, so none is the start of another).
+pub fn labels(n: usize) -> Vec<String> {
+    let keys: Vec<char> = "asdfjklghqweruiopzxcvbnmty".chars().collect(); // home row first
+    match n <= keys.len() {
+        true => keys[..n].iter().map(char::to_string).collect(),
+        false => keys.iter().flat_map(|a| keys.iter().map(move |b| format!("{a}{b}"))).take(n).collect(),
     }
 }
 
@@ -188,6 +225,22 @@ mod tests {
         assert_eq!(at("src/main.rs:3", 0, Some(cwd)), Some((0, 12, file(3))));
         assert!(at("src/nope.rs:3", 0, Some(cwd)).is_none());
         assert!(at("src/main.rs:3", 0, None).is_none());
+    }
+
+    #[test]
+    fn visible_links() {
+        let cwd = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let term = mock_term("a https://x.org b\r\nsrc/main.rs:3 and http://y.org/z.");
+        let links = Hints::new().visible(&term, Some(cwd.into()));
+        let targets: Vec<_> = links.iter().map(|l| &l.target).collect();
+        assert_eq!(
+            targets,
+            [&Target::Url("https://x.org".into()), &Target::File { path: cwd.join("src/main.rs"), line: 3 }, &Target::Url("http://y.org/z".into())]
+        );
+        assert!(Hints::new().visible(&term, None).len() == 2); // no cwd: no relative files
+        assert_eq!(labels(3), ["a", "s", "d"]);
+        let many = labels(30);
+        assert_eq!((many[0].as_str(), many[29].as_str()), ("aa", "sf"));
     }
 
     #[test]
