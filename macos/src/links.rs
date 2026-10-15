@@ -53,8 +53,9 @@ impl Hints {
     pub fn visible<T>(&mut self, term: &Term<T>, cwd: Option<PathBuf>) -> Vec<Link> {
         let offset = term.grid().display_offset() as i32;
         let (top, bottom) = (Line(-offset), Line(term.screen_lines() as i32 - 1 - offset));
-        let mut starts: Vec<Point> =
-            RegexIter::new(Point::new(top, Column(0)), Point::new(bottom, term.last_column()), Direction::Right, term, &mut self.0).map(|m| *m.start()).collect();
+        let mut starts: Vec<Point> = RegexIter::new(Point::new(top, Column(0)), Point::new(bottom, term.last_column()), Direction::Right, term, &mut self.0)
+            .map(|m| *m.start())
+            .collect();
         // OSC 8 hyperlinks: the first cell of each run.
         for line in top.0..=bottom.0 {
             for col in 0..term.columns() {

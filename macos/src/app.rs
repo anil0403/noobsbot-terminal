@@ -1737,7 +1737,8 @@ impl ApplicationHandler<UserEvent> for App {
                         (None, Some(a)) => Some((theme.cursor, a)),
                         (None, None) => None,
                     };
-                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, broadcast: tab.broadcast, cursor_row };
+                    let ui =
+                        PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, broadcast: tab.broadcast, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
                     if let Some(h) = self.link_hints.as_ref().filter(|h| h.pane == id) {
                         draw_link_labels(renderer, &pane.term.lock(), pane.rect, h, &theme);
@@ -1753,7 +1754,11 @@ impl ApplicationHandler<UserEvent> for App {
                 // The window border around the panes (left, right, bottom).
                 let ((w, h), b) = (renderer.size(), renderer.px(BORDER));
                 let [red, g, bl, _] = theme::to_f32(theme.bg);
-                for r in [Rect { x: 0.0, y: bar_h, w: b, h: h - bar_h }, Rect { x: w - b, y: bar_h, w: b, h: h - bar_h }, Rect { x: b, y: h - b, w: w - 2.0 * b, h: b }] {
+                for r in [
+                    Rect { x: 0.0, y: bar_h, w: b, h: h - bar_h },
+                    Rect { x: w - b, y: bar_h, w: b, h: h - bar_h },
+                    Rect { x: b, y: h - b, w: w - 2.0 * b, h: b },
+                ] {
                     renderer.fill(r, [red, g, bl, renderer.opacity]);
                 }
                 for (i, d) in self.dividers.iter().enumerate() {
@@ -2073,7 +2078,9 @@ fn button_icon(r: &mut Renderer, action: Action, cx: f32, cy: f32, color: [f32; 
 
 /// Menu rows: (name, keys) from the action table.
 fn menu_rows() -> impl Iterator<Item = (&'static str, String)> {
-    MENU.iter().filter_map(|a| input::actions().iter().find(|e| e.action == *a)).map(|e| (e.name.as_str(), input::keys(e).split(" or ").next().unwrap_or("").to_owned()))
+    MENU.iter()
+        .filter_map(|a| input::actions().iter().find(|e| e.action == *a))
+        .map(|e| (e.name.as_str(), input::keys(e).split(" or ").next().unwrap_or("").to_owned()))
 }
 
 /// The menu's width in cells (room for the longest name, a gap, the longest
