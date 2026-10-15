@@ -177,6 +177,8 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 
 `~/.config/noobsbot/config.toml` is created on first launch with every option documented ([example](extra/config.example.toml)). Changes apply **as soon as you save**.
 
+For a see-through background, set `opacity = 0.85` (0 to 1) under `[terminal]`. Text and colors that programs paint themselves stay solid. It needs a compositor and is ignored while CRT mode is on.
+
 ## 🐚 Shell integration
 
 bash and zsh start with a small script that tells the terminal where prompts, commands and output are, and which directory you're in. It doesn't edit your dotfiles, and your own rc files still load. Fish does this by itself. You get:

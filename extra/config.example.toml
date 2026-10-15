@@ -29,6 +29,10 @@ welcome = true
 # own): commands that worked in this folder, then anywhere, then your shell's
 # history, then file names. Right arrow or End takes it, Ctrl+Right one word.
 suggestions = true
+# Background opacity, from 0 (see-through) to 1 (solid). Text, and colors
+# programs paint themselves (vim's background), stay solid. Needs a
+# compositor; ignored while the CRT effect is on.
+opacity = 1.0
 
 [cursor]
 # "block", "beam" or "underline". Programs like vim may override it.

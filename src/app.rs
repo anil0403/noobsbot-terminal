@@ -1072,7 +1072,8 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let icon =
             crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
-        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon);
+        // Transparent always, so `opacity` can change without a new window.
+        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon).with_transparent(true);
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.
@@ -1558,6 +1559,8 @@ impl ApplicationHandler<UserEvent> for App {
                 let (bar_h, tab_w) = (self.bar_h(), self.tab_w());
                 let suggestion = self.suggestion();
                 let renderer = self.renderer.as_mut().unwrap();
+                // The CRT pass draws a solid frame.
+                renderer.opacity = if self.crt { 1.0 } else { self.config.terminal.opacity.clamp(0.0, 1.0) };
                 let tab = &self.tabs[self.active];
                 let mut focused_theme = None;
                 for id in tab.visible() {
@@ -1601,6 +1604,12 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
                 let theme = focused_theme.expect("focused pane is in its tab");
+                // The window border around the panes (left, right, bottom).
+                let ((w, h), b) = (renderer.size(), renderer.px(BORDER));
+                let [red, g, bl, _] = theme::to_f32(theme.bg);
+                for r in [Rect { x: 0.0, y: bar_h, w: b, h: h - bar_h }, Rect { x: w - b, y: bar_h, w: b, h: h - bar_h }, Rect { x: b, y: h - b, w: w - 2.0 * b, h: b }] {
+                    renderer.fill(r, [red, g, bl, renderer.opacity]);
+                }
                 for (i, d) in self.dividers.iter().enumerate() {
                     // The one you can grab lights up, at twice the width.
                     let (color, grow) = match self.divider_hover == Some(i) {
@@ -1971,7 +1980,8 @@ fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_c
 fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32, hover: Option<BarHit>) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let backdrop = theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg);
-    r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, theme::to_f32(backdrop));
+    let [red, g, b, _] = theme::to_f32(backdrop);
+    r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, [red, g, b, r.opacity]);
     let y = r.px(BORDER) + r.px(PAD);
     let fit = tab_cells(cw, tab_w);
     let closable = fit >= CLOSE_MIN;
