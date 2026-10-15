@@ -97,6 +97,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | ⚡ **GPU rendering** | Drawn with wgpu (Vulkan or OpenGL), smooth at your screen's refresh rate. |
 | 🐱 **Welcome screen** | A cat beside your machine's specs and live meters that types itself out, gone as soon as you type. |
 | 💎 **Pretty prompt** | A powerline prompt for bash, zsh and fish: user, folder, git branch, exit status. |
+| 💾 **Session restore** | Opt in, and closing the window keeps its tabs, splits and folders for next time. |
 | 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. Zoom one pane to fill the tab and back, or type into all of them at once. |
 | 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
 | 💡 **Suggestions** | Grey text after the cursor as you type (bash, zsh): commands that worked in this folder first, then anywhere, then your shell's history, then file names. → takes it. |
@@ -187,6 +188,8 @@ split_right = "Ctrl+Shift+D"
 zoom_pane = "Ctrl+Shift+Z or F11"
 vi_mode = ""   # unbound, still in the palette
 ```
+
+To pick up where you left off, set `restore_session = true` under `[terminal]`. Closing the window saves its tabs, splits and each shell's folder (in `~/.local/state/noobsbot/session`), and the next window opens them again. Programs that were running aren't restarted, and ending the last shell with `exit` starts the next window fresh.
 
 For a see-through background, set `opacity = 0.85` (0 to 1) under `[terminal]`. Text and colors that programs paint themselves stay solid. It needs a compositor and is ignored while CRT mode is on.
 

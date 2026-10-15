@@ -101,6 +101,8 @@ pub struct Terminal {
     pub suggestions: bool,
     /// Background opacity, 0 (see-through) to 1 (solid). Needs a compositor.
     pub opacity: f32,
+    /// Save tabs, splits and folders when the window closes; the next window reopens them.
+    pub restore_session: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -135,7 +137,7 @@ impl Default for Font {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true, suggestions: true, opacity: 1.0 }
+        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true, suggestions: true, opacity: 1.0, restore_session: false }
     }
 }
 

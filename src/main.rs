@@ -15,6 +15,7 @@ mod render;
 mod restart;
 mod rules;
 mod search;
+mod session;
 mod shell;
 mod suggest;
 mod tap;
