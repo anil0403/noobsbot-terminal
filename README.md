@@ -177,6 +177,15 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 
 `~/.config/noobsbot/config.toml` is created on first launch with every option documented ([example](extra/config.example.toml)). Changes apply **as soon as you save**.
 
+To change a shortcut, add a `[keys]` table that names the action as the palette shows it, in snake_case:
+
+```toml
+[keys]
+split_right = "Ctrl+Shift+D"
+zoom_pane = "Ctrl+Shift+Z or F11"
+vi_mode = ""   # unbound, still in the palette
+```
+
 For a see-through background, set `opacity = 0.85` (0 to 1) under `[terminal]`. Text and colors that programs paint themselves stay solid. It needs a compositor and is ignored while CRT mode is on.
 
 ## 🐚 Shell integration

@@ -31,7 +31,7 @@ impl Palette {
         let actions = input::actions().iter().filter(|e| e.action != Action::CommandPalette).map(|e| Row {
             item: Item::Action(e.action),
             name: e.name.clone(),
-            keys: e.keys.clone(),
+            keys: input::keys(e),
         });
         let themes = themes.into_iter().map(|t| Row { name: format!("Theme: {t}"), item: Item::Theme(t), keys: String::new() });
         let shells =

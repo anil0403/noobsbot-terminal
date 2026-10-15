@@ -157,6 +157,7 @@ impl App {
             notify("noobsbot: config error, using defaults".into(), e);
             Config::default()
         });
+        input::set_keys(&config.keys);
         if quake {
             crate::quake::serve(proxy.clone());
             if !config.quake.hotkey.is_empty() {
@@ -1048,6 +1049,7 @@ impl App {
             }
         };
         log::info!("config reloaded");
+        input::set_keys(&config.keys);
         let font_changed = config.font != self.config.font;
         if config.crt.enabled != self.config.crt.enabled {
             self.crt = config.crt.enabled;
@@ -1899,8 +1901,8 @@ fn button_icon(r: &mut Renderer, action: Action, cx: f32, cy: f32, color: [f32; 
 }
 
 /// Menu rows: (name, keys) from the action table.
-fn menu_rows() -> impl Iterator<Item = (&'static str, &'static str)> {
-    MENU.iter().filter_map(|a| input::actions().iter().find(|e| e.action == *a)).map(|e| (e.name.as_str(), e.keys.split(" or ").next().unwrap_or("")))
+fn menu_rows() -> impl Iterator<Item = (&'static str, String)> {
+    MENU.iter().filter_map(|a| input::actions().iter().find(|e| e.action == *a)).map(|e| (e.name.as_str(), input::keys(e).split(" or ").next().unwrap_or("").to_owned()))
 }
 
 /// The menu's width in cells (room for the longest name, a gap, the longest
@@ -1967,10 +1969,10 @@ fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_c
         if hovered == Some(i) && enabled {
             pill(r, origin.0 + cw / 2.0, y, &" ".repeat(cols as usize - 3), accent, ink);
             r.text(origin.0 + cw * 2.0, y, name, ink);
-            r.text(keys_x, y, keys, ink);
+            r.text(keys_x, y, &keys, ink);
         } else {
             r.text(origin.0 + cw * 2.0, y, name, if enabled { fg } else { faint });
-            r.text(keys_x, y, keys, if enabled { muted } else { faint });
+            r.text(keys_x, y, &keys, if enabled { muted } else { faint });
         }
     }
 }

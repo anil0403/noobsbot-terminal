@@ -28,6 +28,8 @@ pub struct Config {
     pub rules: Vec<Rule>,
     pub quake: Quake,
     pub crt: Crt,
+    /// Keys for actions by id ("split_right"), in place of the defaults.
+    pub keys: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -157,6 +159,7 @@ impl Default for Config {
             ],
             quake: Quake::default(),
             crt: Crt::default(),
+            keys: HashMap::new(),
         }
     }
 }
@@ -198,7 +201,11 @@ pub fn path() -> PathBuf {
 /// Read the config. A missing file gets the documented example written in its place.
 pub fn load(path: &Path) -> Result<Config, String> {
     match std::fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+        Ok(text) => {
+            let config: Config = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            crate::input::check_keys(&config.keys).map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok(config)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);

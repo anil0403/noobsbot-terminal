@@ -106,3 +106,17 @@ theme = "danger"
 # [[rules]]
 # when = { hours = "22-6" }
 # theme = "night"
+
+# ── Keys ──────────────────────────────────────────────────────────────────
+# Rebind any action from the command palette (Ctrl+Shift+P). Its name there,
+# in snake_case, is the action: "Split right" is split_right, "Copy last
+# command's output" is copy_last_commands_output. Modifiers: Ctrl, Shift,
+# Alt, Super. Keys: a letter or symbol, Enter, Space, Tab, Escape, Backspace,
+# Delete, Insert, Home, End, PageUp, PageDown, Left/Right/Up/Down, F1-F12.
+# "A or B" binds both; "" unbinds (still in the palette). Your keys win over
+# a default on the same keys.
+#
+# [keys]
+# split_right = "Ctrl+Shift+D"
+# zoom_pane = "Ctrl+Shift+Z or F11"
+# vi_mode = ""
