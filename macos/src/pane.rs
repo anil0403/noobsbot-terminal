@@ -75,6 +75,8 @@ pub struct Tab {
     pub focused: PaneId,
     /// The focused pane fills the tab; the others are hidden, not resized.
     pub zoomed: bool,
+    /// Typing and pastes go to every pane in the tab.
+    pub broadcast: bool,
 }
 
 impl Tab {

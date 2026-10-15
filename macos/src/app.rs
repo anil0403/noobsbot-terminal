@@ -354,7 +354,7 @@ impl App {
         let cwd = self.new_cwd();
         let Some(id) = self.spawn_pane(cwd, None) else { return };
         let old = self.tabs.get(self.active).map(|t| t.focused);
-        self.tabs.push(Tab { root: Node::Leaf(id), focused: id, zoomed: false });
+        self.tabs.push(Tab { root: Node::Leaf(id), focused: id, zoomed: false, broadcast: false });
         self.active = self.tabs.len() - 1;
         self.mouse_pane = None;
         self.relayout();
@@ -623,14 +623,22 @@ impl App {
 
     /// Text into the focused pane as a paste (bracketed when the program asks).
     fn paste_text(&mut self, text: &str) {
-        let pane = self.focused_pane();
-        pane.clear_welcome();
-        let mut term = pane.term.lock();
-        let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
-        term.scroll_display(Scroll::Bottom);
-        drop(term);
-        pane.pty.write(&paste_bytes(text, bracketed));
+        for id in self.typing_to() {
+            let pane = self.panes.get_mut(&id).unwrap();
+            pane.clear_welcome();
+            let mut term = pane.term.lock();
+            let bracketed = term.mode().contains(TermMode::BRACKETED_PASTE);
+            term.scroll_display(Scroll::Bottom);
+            drop(term);
+            pane.pty.write(&paste_bytes(text, bracketed));
+        }
         self.dirty = true;
+    }
+
+    /// Panes typing goes to: the focused one, or the whole tab while broadcasting.
+    fn typing_to(&self) -> Vec<PaneId> {
+        let tab = &self.tabs[self.active];
+        if tab.broadcast { tab.root.leaves() } else { vec![tab.focused] }
     }
 
     fn scroll(&mut self, scroll: Scroll) {
@@ -666,6 +674,11 @@ impl App {
             Action::SplitDown => self.split(Dir::Down, None),
             Action::SplitLeft => self.split(Dir::Left, None),
             Action::SplitUp => self.split(Dir::Up, None),
+            Action::Broadcast => {
+                let tab = &mut self.tabs[self.active];
+                tab.broadcast = !tab.broadcast && tab.root.leaves().len() > 1;
+                self.dirty = true;
+            }
             Action::ToggleZoom => {
                 let tab = &mut self.tabs[self.active];
                 tab.zoomed = !tab.zoomed && tab.root.leaves().len() > 1;
@@ -1352,27 +1365,31 @@ impl ApplicationHandler<UserEvent> for App {
                     && let Some(s) = self.suggestion()
                 {
                     let s = if word { suggest::word(&s) } else { &s };
-                    self.focused_pane().pty.write(s.as_bytes());
+                    for id in self.typing_to() {
+                        self.panes.get_mut(&id).unwrap().pty.write(s.as_bytes());
+                    }
                     return;
                 }
                 let mods = self.mods;
-                let pane = self.panes.get_mut(&self.tabs[self.active].focused).unwrap();
-                let app_cursor = pane.term.lock().mode().contains(TermMode::APP_CURSOR);
-                let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor) else { return };
-                if pane.clear_welcome() {
-                    self.dirty = true;
-                    // Enter only clears the welcome screen; any other key also types.
-                    if event.logical_key == Key::Named(NamedKey::Enter) {
-                        return;
+                for id in self.typing_to() {
+                    let pane = self.panes.get_mut(&id).unwrap();
+                    let app_cursor = pane.term.lock().mode().contains(TermMode::APP_CURSOR);
+                    let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor) else { return };
+                    if pane.clear_welcome() {
+                        self.dirty = true;
+                        // Enter only clears the welcome screen; any other key also types.
+                        if event.logical_key == Key::Named(NamedKey::Enter) {
+                            continue;
+                        }
                     }
+                    let mut term = pane.term.lock();
+                    if term.grid().display_offset() != 0 {
+                        term.scroll_display(Scroll::Bottom);
+                        self.dirty = true;
+                    }
+                    drop(term);
+                    pane.pty.write(&bytes);
                 }
-                let mut term = pane.term.lock();
-                if term.grid().display_offset() != 0 {
-                    term.scroll_display(Scroll::Bottom);
-                    self.dirty = true;
-                }
-                drop(term);
-                pane.pty.write(&bytes);
                 // Keep the cursor solid while typing.
                 self.renderer.as_mut().unwrap().cursor_on = true;
                 self.next_blink = Instant::now() + BLINK;
@@ -1652,7 +1669,7 @@ impl ApplicationHandler<UserEvent> for App {
                         (None, Some(a)) => Some((theme.cursor, a)),
                         (None, None) => None,
                     };
-                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, cursor_row };
+                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, broadcast: tab.broadcast, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
                     if let Some(h) = self.link_hints.as_ref().filter(|h| h.pane == id) {
                         draw_link_labels(renderer, &pane.term.lock(), pane.rect, h, &theme);
@@ -1782,6 +1799,8 @@ struct PaneUi<'a> {
     gutter: Vec<(usize, [f32; 4])>,
     /// Failed-command or bell border: its color, fading from 1 to 0.
     flash: Option<(alacritty_terminal::vte::ansi::Rgb, f32)>,
+    /// A yellow border while the tab broadcasts typing (under a flash).
+    broadcast: bool,
     /// The cursor's row on screen, if shown: the search box keeps off it.
     cursor_row: Option<usize>,
 }
@@ -1794,7 +1813,8 @@ fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, ui: PaneUi) {
     for (line, color) in ui.gutter {
         r.fill(Rect { x: rect.x, y: rect.y + line as f32 * ch, w: bar, h: ch }, color);
     }
-    if let Some((color, a)) = ui.flash {
+    let border = ui.flash.or(ui.broadcast.then_some((theme.ansi[3], 1.0)));
+    if let Some((color, a)) = border {
         let [red, g, b, _] = theme::to_f32(color);
         let c = [red, g, b, a];
         let w = bar;

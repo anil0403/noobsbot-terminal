@@ -53,6 +53,7 @@ cp -R target/Noobsbot.app /Applications/
 | Next · previous tab | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd> · <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> (or <kbd>Ctrl</kbd>+<kbd>Tab</kbd>) |
 | Go to tab 1–9 | <kbd>Cmd</kbd>+<kbd>1</kbd>…<kbd>9</kbd> |
 | Focus pane · Resize split | <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>Arrow</kbd> · <kbd>Cmd</kbd>+<kbd>Ctrl</kbd>+<kbd>Arrow</kbd> |
+| Broadcast input: typing and pastes go to every pane in the tab (yellow borders while on); again to stop | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> |
 | Zoom the focused pane to fill the tab, and back | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> |
 | Previous · next prompt | <kbd>Cmd</kbd>+<kbd>↑</kbd> · <kbd>Cmd</kbd>+<kbd>↓</kbd> |
 | Link hints: every link on screen gets a letter; type it to open, Shift + it to copy, Esc cancels | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> |
