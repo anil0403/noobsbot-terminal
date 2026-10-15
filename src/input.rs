@@ -46,6 +46,8 @@ pub enum Action {
     Restart,
     /// Label the links on screen; typing a label opens that link.
     LinkHints,
+    /// Typing goes to every pane in the tab, or back to just the focused one.
+    Broadcast,
 }
 
 /// Keys while vi mode is on.
@@ -190,6 +192,7 @@ pub fn actions() -> &'static [Entry] {
             (A::SplitUp, "Split up", ""),
             (A::ClosePane, "Close pane", "Ctrl+Shift+W"),
             (A::ToggleZoom, "Zoom pane", "Ctrl+Shift+Enter"),
+            (A::Broadcast, "Broadcast input to all panes", "Ctrl+Shift+B"),
             (A::NextTab, "Next tab", "Ctrl+Tab"),
             (A::PrevTab, "Previous tab", "Ctrl+Shift+Tab"),
             (A::ScrollPageUp, "Scroll page up", "Shift+PageUp"),
