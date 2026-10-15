@@ -39,6 +39,8 @@ pub enum Action {
     NextPrompt,
     /// Copy the last command's output.
     CopyOutput,
+    /// A fresh noobsbot in place of this one.
+    Restart,
 }
 
 /// Keys while vi mode is on.
@@ -164,6 +166,7 @@ pub fn actions() -> &'static [Entry] {
             (A::ZoomOut, "Smaller font", "Cmd+-"),
             (A::ZoomReset, "Reset font size", "Cmd+0"),
             (A::ToggleCrt, "Toggle CRT effect", ""),
+            (A::Restart, "Restart noobsbot", ""),
         ]
         .into_iter()
         .map(|(a, n, k)| (a, n.to_owned(), k.to_owned()))

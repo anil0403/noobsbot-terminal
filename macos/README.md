@@ -23,7 +23,7 @@ That command:
 - installs **Noobsbot.app** in `/Applications` (or `~/Applications`): the latest release, or built from source when there is none (it then asks for the Xcode Command Line Tools and installs Rust with rustup)
 - adds the `noobsbot` command (`noobsbot --quake` starts the drop-down terminal)
 - installs the **JetBrainsMono Nerd Font** for the prompt's icons
-- updates noobsbot when you run it again
+- updates noobsbot when you run it again, or when you run `noobsbot --update`; `noobsbot --restart` (or "Restart noobsbot" in Cmd+Shift+P) then swaps the window for a fresh one
 
 The app is signed ad hoc, not by Apple: the installer clears the download quarantine so Gatekeeper doesn't call it damaged. To remove noobsbot, delete `Noobsbot.app` and the `noobsbot` link.
 
