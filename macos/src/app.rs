@@ -32,6 +32,7 @@ use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
 use crate::render::{Renderer, crt};
 use crate::search::Search;
+use crate::session;
 use crate::shell;
 use crate::suggest::{self, Suggest};
 use crate::tap::Mark;
@@ -105,6 +106,8 @@ pub struct App {
     palette: Option<Palette>,
     /// Keyboard link hints in the focused pane.
     link_hints: Option<LinkHints>,
+    /// Restarting saved the session already; the new noobsbot may have taken it.
+    session_saved: bool,
     /// The right-click menu: top-left corner, and the row under the pointer.
     menu: Option<((f32, f32), Option<usize>)>,
     /// Link under the pointer: a URL, or any link while Cmd is held.
@@ -192,6 +195,7 @@ impl App {
             hover: None,
             link_copied: false,
             link_hints: None,
+            session_saved: false,
             typed_since_move: false,
             link_press: None,
             bar_hover: None,
@@ -713,8 +717,11 @@ impl App {
                     self.dirty = true;
                 }
             }
-            Action::Restart => match crate::restart::launch(&std::env::args_os().skip(1).collect::<Vec<_>>(), None) {
-                Ok(()) => event_loop.exit(),
+            Action::Restart => match self.save_session().and(crate::restart::launch(&std::env::args_os().skip(1).collect::<Vec<_>>(), None)) {
+                Ok(()) => {
+                    self.session_saved = true;
+                    event_loop.exit();
+                }
                 Err(e) => notify("noobsbot can't restart".into(), e.to_string()),
             },
             Action::ToggleCrt => {
@@ -1131,7 +1138,66 @@ impl App {
     }
 }
 
+// Session restore.
+impl App {
+    fn session_on(&self) -> bool {
+        self.quake.is_none() && self.config.terminal.restore_session
+    }
+
+    /// Save the tabs for the next window; with none left (the last shell exited),
+    /// forget the old session.
+    fn save_session(&self) -> std::io::Result<()> {
+        let Some(path) = session::path().filter(|_| self.session_on()) else { return Ok(()) };
+        if self.tabs.is_empty() {
+            return std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) });
+        }
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(&path, session::encode(&self.tabs, self.active, |id| self.panes.get(&id).and_then(Pane::cwd)))
+    }
+
+    /// Open the saved session's tabs, if there is one. True if any opened.
+    fn restore_session(&mut self) -> bool {
+        let Some(path) = session::path().filter(|_| self.session_on()) else { return false };
+        let Some((saved, active)) = std::fs::read_to_string(&path).ok().and_then(|t| session::decode(&t)) else { return false };
+        let _ = std::fs::remove_file(&path); // one window takes it
+        self.next_pane = self.next_pane.max(1); // the welcome screen is pane 0's
+        for mut tab in saved {
+            let ids: Vec<Option<PaneId>> = tab.cwds.into_iter().map(|cwd| self.spawn_pane(cwd.filter(|p| p.is_dir()), None)).collect();
+            let Some(ids) = ids.iter().copied().collect::<Option<Vec<_>>>() else {
+                for id in ids.into_iter().flatten() {
+                    let pane = self.panes.remove(&id);
+                    std::thread::spawn(move || drop(pane));
+                }
+                continue;
+            };
+            session::renumber(&mut tab.root, &ids);
+            self.tabs.push(Tab { root: tab.root, focused: ids[tab.focused], zoomed: false, broadcast: false });
+        }
+        if self.tabs.is_empty() {
+            return false;
+        }
+        self.active = active.min(self.tabs.len() - 1);
+        self.relayout();
+        self.focus_changed(None);
+        let ids: Vec<PaneId> = self.panes.keys().copied().collect();
+        for id in ids {
+            self.check_context(id, true);
+        }
+        true
+    }
+}
+
 impl ApplicationHandler<UserEvent> for App {
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // ponytail: only a window closed normally saves; `noobsbot --restart` (SIGTERM) or a logout keeps the last save.
+        if self.session_saved {
+            return;
+        }
+        if let Err(e) = self.save_session() {
+            log::warn!("can't save the session: {e}");
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -1169,7 +1235,9 @@ impl ApplicationHandler<UserEvent> for App {
         let font = Font::new(&self.config.font.family, self.font_px(&window), self.config.font.weight);
         self.renderer = Some(Renderer::new(window.clone(), font));
         self.window = Some(window);
-        self.new_tab();
+        if !self.restore_session() {
+            self.new_tab();
+        }
         if self.tabs.is_empty() {
             event_loop.exit(); // no shell to run
         }

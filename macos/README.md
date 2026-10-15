@@ -78,6 +78,7 @@ When a program rings the bell, the pane's border flashes in the theme's cursor c
 - the drop-down terminal's hotkey is <kbd>Ctrl</kbd>+<kbd>`</kbd> (`hotkey = "Ctrl+grave"`; `Cmd`, `Option`, `Shift`, `Ctrl` and `F1`–`F20` work), and needs no Accessibility permission
 - the shell starts as a login shell, like Terminal.app, so Homebrew's PATH is set up
 - `opacity = 0.85` (0 to 1) under `[terminal]` makes the background see-through; text and colors programs paint themselves stay solid, and CRT mode ignores it
+- `restore_session = true` under `[terminal]`: closing the window or quitting (Cmd+Q) saves its tabs, splits and each shell's folder (in `~/.local/state/noobsbot/session`), and the next window opens them again; running programs aren't restarted, and ending the last shell with `exit` starts fresh
 - a `[keys]` table rebinds any palette action by its snake_case name, with Mac modifiers: `split_right = "Cmd+Shift+E"`, `zoom_pane = "Cmd+Shift+Z or F11"`, `vi_mode = ""` (unbound)
 
 ## How the port differs
