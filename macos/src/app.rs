@@ -261,7 +261,7 @@ impl App {
     }
 
     fn pane_at(&self, x: f32, y: f32) -> Option<PaneId> {
-        self.tabs[self.active].root.leaves().into_iter().find(|id| self.panes[id].rect.contains(x, y))
+        self.tabs[self.active].visible().into_iter().find(|id| self.panes[id].rect.contains(x, y))
     }
 
     fn divider_at(&self, x: f32, y: f32) -> Option<usize> {
@@ -330,6 +330,7 @@ impl App {
             blocks: Blocks::default(),
             cwd: None,
             failed_at: None,
+            bell_at: None,
             at_prompt: false,
             running: None,
             welcome,
@@ -349,7 +350,7 @@ impl App {
         let cwd = self.new_cwd();
         let Some(id) = self.spawn_pane(cwd, None) else { return };
         let old = self.tabs.get(self.active).map(|t| t.focused);
-        self.tabs.push(Tab { root: Node::Leaf(id), focused: id });
+        self.tabs.push(Tab { root: Node::Leaf(id), focused: id, zoomed: false });
         self.active = self.tabs.len() - 1;
         self.mouse_pane = None;
         self.relayout();
@@ -362,7 +363,9 @@ impl App {
         let cwd = self.new_cwd();
         let Some(id) = self.spawn_pane(cwd, command) else { return };
         let target = self.focused();
-        self.tabs[self.active].root.split(target, id, side);
+        let tab = &mut self.tabs[self.active];
+        tab.root.split(target, id, side);
+        tab.zoomed = false;
         self.relayout();
         self.focus(id);
         self.check_context(id, true);
@@ -377,6 +380,7 @@ impl App {
         let Some(ti) = self.tabs.iter().position(|t| t.root.contains(id)) else { return };
         let old = self.focused();
         let tab = &mut self.tabs[ti];
+        tab.zoomed = false;
         match tab.root.remove(id) {
             Some(next) if tab.focused == id => tab.focused = next,
             Some(_) => {}
@@ -468,7 +472,10 @@ impl App {
         let area = Rect { x: border, y: bar, w: w - 2.0 * border, h: h - bar - border };
         for (i, tab) in self.tabs.iter().enumerate() {
             let (mut rects, mut dividers) = (Vec::new(), Vec::new());
-            tab.root.layout(area, &mut rects, &mut dividers);
+            match tab.zoomed {
+                true => rects.push((tab.focused, area)),
+                false => tab.root.layout(area, &mut rects, &mut dividers),
+            }
             if i == self.active {
                 // A drag or hover holds an index: it goes when the splits change under it.
                 let same = |d: Option<usize>| d.is_some_and(|d| dividers.get(d).map(|n| &n.path) == self.dividers.get(d).map(|o| &o.path));
@@ -500,7 +507,7 @@ impl App {
     }
 
     fn active_rects(&self) -> Vec<(PaneId, Rect)> {
-        self.tabs[self.active].root.leaves().into_iter().map(|id| (id, self.panes[&id].rect)).collect()
+        self.tabs[self.active].visible().into_iter().map(|id| (id, self.panes[&id].rect)).collect()
     }
 }
 
@@ -622,6 +629,17 @@ impl App {
             Action::SplitDown => self.split(Dir::Down, None),
             Action::SplitLeft => self.split(Dir::Left, None),
             Action::SplitUp => self.split(Dir::Up, None),
+            Action::ToggleZoom => {
+                let tab = &mut self.tabs[self.active];
+                tab.zoomed = !tab.zoomed && tab.root.leaves().len() > 1;
+                self.relayout();
+            }
+            // Moving out of a zoomed pane brings the splits back first.
+            Action::Focus(_) if self.tabs[self.active].zoomed => {
+                self.tabs[self.active].zoomed = false;
+                self.relayout();
+                return self.run(event_loop, action);
+            }
             Action::Focus(dir) => match pane::neighbor(&self.active_rects(), self.focused(), dir) {
                 Some(id) => self.focus(id),
                 // At a prompt, nothing; programs still get the arrows.
@@ -1140,6 +1158,13 @@ impl ApplicationHandler<UserEvent> for App {
                 let rgb = pane.theme.target().resolve(color, pane.term.lock().colors());
                 pane.pty.write(reply(rgb).as_bytes());
             }
+            Event::Bell => {
+                pane.bell_at = Some(Instant::now());
+                self.dirty = true;
+                if let Some(w) = self.window.as_ref().filter(|_| !self.renderer.as_ref().is_some_and(|r| r.focused)) {
+                    w.request_user_attention(Some(winit::window::UserAttentionType::Informational));
+                }
+            }
             Event::ClipboardStore(ty, text) => self.clipboard.set(ty == ClipboardType::Selection, text),
             Event::ClipboardLoad(ty, format) => {
                 // OSC 52 read; only reaches us if `terminal.clipboard` allows pasting.
@@ -1181,7 +1206,7 @@ impl ApplicationHandler<UserEvent> for App {
             || self
                 .panes
                 .values()
-                .any(|p| p.theme.fading() || p.typing.is_some_and(|t| t.elapsed() < TYPING) || p.failed_at.is_some_and(|t| t.elapsed() < FLASH))
+                .any(|p| p.theme.fading() || p.typing.is_some_and(|t| t.elapsed() < TYPING) || p.failed_at.or(p.bell_at).is_some_and(|t| t.elapsed() < FLASH))
         {
             self.dirty = true;
         }
@@ -1543,7 +1568,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let renderer = self.renderer.as_mut().unwrap();
                 let tab = &self.tabs[self.active];
                 let mut focused_theme = None;
-                for id in tab.root.leaves() {
+                for id in tab.visible() {
                     let pane = self.panes.get_mut(&id).unwrap();
                     let theme = pane.theme.frame();
                     let term = pane.term.lock();
@@ -1561,10 +1586,19 @@ impl ApplicationHandler<UserEvent> for App {
                     let gutter = gutter(&term, &pane.blocks, &theme);
                     let cursor_row = usize::try_from(term.grid().cursor.point.line.0 + term.grid().display_offset() as i32).ok();
                     drop(term);
-                    let flash = pane.failed_at.map(|t| 1.0 - t.elapsed().as_secs_f32() / FLASH.as_secs_f32()).filter(|&a| a > 0.0);
-                    if flash.is_none() {
-                        pane.failed_at = None;
-                    }
+                    let fade = |at: &mut Option<Instant>| {
+                        let a = at.map(|t| 1.0 - t.elapsed().as_secs_f32() / FLASH.as_secs_f32()).filter(|&a| a > 0.0);
+                        if a.is_none() {
+                            *at = None;
+                        }
+                        a
+                    };
+                    // A failure (red) wins over the bell (cursor color).
+                    let flash = match (fade(&mut pane.failed_at), fade(&mut pane.bell_at)) {
+                        (Some(a), _) => Some((theme.ansi[1], a)),
+                        (None, Some(a)) => Some((theme.cursor, a)),
+                        (None, None) => None,
+                    };
                     let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
                     if id == tab.focused {
@@ -1660,8 +1694,8 @@ struct PaneUi<'a> {
     vi: bool,
     search: Option<&'a Search>,
     gutter: Vec<(usize, [f32; 4])>,
-    /// Failed-command border, fading from 1 to 0.
-    flash: Option<f32>,
+    /// Failed-command or bell border: its color, fading from 1 to 0.
+    flash: Option<(alacritty_terminal::vte::ansi::Rgb, f32)>,
     /// The cursor's row on screen, if shown: the search box keeps off it.
     cursor_row: Option<usize>,
 }
@@ -1674,8 +1708,8 @@ fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, ui: PaneUi) {
     for (line, color) in ui.gutter {
         r.fill(Rect { x: rect.x, y: rect.y + line as f32 * ch, w: bar, h: ch }, color);
     }
-    if let Some(a) = ui.flash {
-        let [red, g, b, _] = theme::to_f32(theme.ansi[1]);
+    if let Some((color, a)) = ui.flash {
+        let [red, g, b, _] = theme::to_f32(color);
         let c = [red, g, b, a];
         let w = bar;
         r.fill(Rect { x: rect.x, y: rect.y, w: rect.w, h: w }, c);

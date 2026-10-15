@@ -53,6 +53,7 @@ cp -R target/Noobsbot.app /Applications/
 | Next · previous tab | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd> · <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> (or <kbd>Ctrl</kbd>+<kbd>Tab</kbd>) |
 | Go to tab 1–9 | <kbd>Cmd</kbd>+<kbd>1</kbd>…<kbd>9</kbd> |
 | Focus pane · Resize split | <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>Arrow</kbd> · <kbd>Cmd</kbd>+<kbd>Ctrl</kbd>+<kbd>Arrow</kbd> |
+| Zoom the focused pane to fill the tab, and back | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> |
 | Previous · next prompt | <kbd>Cmd</kbd>+<kbd>↑</kbd> · <kbd>Cmd</kbd>+<kbd>↓</kbd> |
 | Font size | <kbd>Cmd</kbd>+<kbd>=</kbd> · <kbd>Cmd</kbd>+<kbd>-</kbd> · <kbd>Cmd</kbd>+<kbd>0</kbd> |
 | Quit | <kbd>Cmd</kbd>+<kbd>Q</kbd> |
@@ -64,6 +65,8 @@ The left <kbd>Option</kbd> key is Alt (Meta) for the shell and programs; the rig
 Links: click to open, <kbd>c</kbd> while hovering copies, <kbd>Cmd</kbd>+click opens files like `src/main.rs:12` in your editor.
 
 Drag files from Finder onto the terminal to type their paths, quoted when they have spaces.
+
+When a program rings the bell, the pane's border flashes in the theme's cursor color, and the Dock icon bounces once if the window isn't focused.
 
 ## ⚙️ Config
 
