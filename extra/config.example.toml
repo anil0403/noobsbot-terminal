@@ -19,9 +19,9 @@ shell = ""
 # "off", "copy" (default: programs may copy, not read), "paste", "copy-paste".
 clipboard = "copy"
 # Powerline-style prompt (user, folder, git branch, last exit status) in place
-# of your shell's own, for bash, zsh and fish. Needs a Nerd Font for the icons.
-# Applies to new shells.
-pretty_prompt = false
+# of your shell's own, for bash, zsh and fish. Needs a Nerd Font for the icons
+# (the installer adds one). false keeps your shell's prompt. Applies to new shells.
+pretty_prompt = true
 # Greet each new window with a cat, your system's specs and resource meters
 # (new tabs and splits stay clean).
 welcome = true

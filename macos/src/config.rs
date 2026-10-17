@@ -143,7 +143,7 @@ impl Default for Terminal {
             scrollback: 10_000,
             shell: String::new(),
             clipboard: Clipboard::Copy,
-            pretty_prompt: false,
+            pretty_prompt: true,
             welcome: true,
             update_check: true,
             suggestions: true,

@@ -139,7 +139,7 @@ impl Default for Font {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: false, welcome: true, update_check: true, suggestions: true, opacity: 1.0, restore_session: false }
+        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: true, welcome: true, update_check: true, suggestions: true, opacity: 1.0, restore_session: false }
     }
 }
 
