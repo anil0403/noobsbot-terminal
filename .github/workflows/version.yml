@@ -1,12 +1,13 @@
-# Cuts a release after each push to main, from the commits since the last tag.
+# Cuts a release once a day, or when started by hand, from the commits since the
+# last tag (none → no release).
 # The bump is read from commit subjects: "feat!:" / "BREAKING" → major, "feat:" → minor,
 # anything else → patch. Bumps both crates, tags, creates the GitHub release
 # (auto notes), then starts the Linux and macOS release builds for the tag.
 name: version
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       bump:
@@ -17,9 +18,7 @@ permissions:
   contents: write
   actions: write
 
-# One at a time: a push made while a release runs waits, then releases whatever
-# is new on main's tip (checked out below, not the pushed commit), if anything.
-# The "vX.Y.Z" commit this pushes uses GITHUB_TOKEN, which starts no workflows.
+# One at a time, so a manual run and the daily one can't cut the same version.
 concurrency:
   group: version
   cancel-in-progress: false
