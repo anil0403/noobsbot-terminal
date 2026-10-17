@@ -147,6 +147,35 @@ fn newer(tag: &str, ours: &str) -> bool {
     parts(tag) > parts(ours)
 }
 
+/// The last CPU reading, (busy, total) ticks, and the share it gave.
+static CPU: Mutex<Option<((u64, u64), f64)>> = Mutex::new(None);
+
+/// Share of the CPU in use, all cores, since the last call (the screen refreshes
+/// every 2 s); the first call watches 100 ms.
+fn cpu_use() -> Option<f64> {
+    let now = cpu_ticks()?;
+    let mut last = CPU.lock().unwrap();
+    let share = match *last {
+        // Called again within a tick (a resize right after a refresh): the last share stands.
+        Some((prev, share)) => busy_share(prev, now).unwrap_or(share),
+        None => {
+            std::thread::sleep(Duration::from_millis(100));
+            let later = cpu_ticks()?;
+            let share = busy_share(now, later).unwrap_or(0.0);
+            *last = Some((later, share));
+            return Some(share);
+        }
+    };
+    *last = Some((now, share));
+    Some(share)
+}
+
+/// Busy share of the ticks between two (busy, total) readings.
+fn busy_share(prev: (u64, u64), now: (u64, u64)) -> Option<f64> {
+    let total = now.1.checked_sub(prev.1).filter(|&t| t > 0)?;
+    Some(now.0.saturating_sub(prev.0) as f64 / total as f64)
+}
+
 /// Widens the blank gaps (middle ones first) so the text is as tall as the cat.
 fn stretch(lines: Vec<String>, height: usize) -> Vec<String> {
     let mut gaps: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].is_empty()).collect();
@@ -204,15 +233,21 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
     let mut meter = |label: &str, bar: String, text: String| {
         lines.push(format!("\x1b[1;38;5;12m{label:<10}\x1b[0m{bar} {text}"));
     };
-    if let Some(load) = first_line("/proc/loadavg").split(' ').next().and_then(|l| l.parse::<f64>().ok()) {
-        meter("Load", bar(load / cores, false), format!("{load:.2} on {cores} cores"));
+    // What the CPU is doing now; the load average (runnable threads, high on few cores
+    // even when they're mostly idle) is kept as text, and is the meter only without it.
+    match (cpu_use(), load()) {
+        (Some(busy), load) => meter("CPU use", bar(busy, false), load.map_or(String::new(), |l| format!("load {l:.2}"))),
+        (None, Some(load)) => meter("Load", bar(load / cores, false), format!("{load:.2} on {cores} cores")),
+        (None, None) => {}
     }
     if let Some((total, free)) = mem.ram {
         meter("Memory", bar(1.0 - free / total, false), format!("{:.1} / {:.1} GiB", gib(total - free), gib(total)));
     }
-    if let Some((total, free)) = mem.swap.filter(|s| s.0 > 0.0) {
-        meter("Swap", bar(1.0 - free / total, false), format!("{:.1} / {:.1} GiB", gib(total - free), gib(total)));
-    }
+    // Always listed after memory, so the screen keeps its height: `0.0 / 0.0 GiB` with
+    // none set up (macOS makes swap files only once it needs them).
+    let (total, free) = mem.swap.unwrap_or_default();
+    let used = if total > 0.0 { 1.0 - free / total } else { 0.0 };
+    meter("Swap", bar(used, false), format!("{:.1} / {:.1} GiB", gib(total - free), gib(total)));
     if let Some((total, free)) = disk("/") {
         meter("Disk", bar(1.0 - free / total, false), format!("{:.0} / {:.0} GiB", gib(total - free), gib(total)));
     }
@@ -336,6 +371,24 @@ struct Memory {
     swap: Option<(f64, f64)>,
 }
 
+fn load() -> Option<f64> {
+    first_line("/proc/loadavg").split(' ').next()?.parse().ok()
+}
+
+/// (busy, total) CPU ticks since boot, all cores.
+fn cpu_ticks() -> Option<(u64, u64)> {
+    proc_stat(&read_to_string("/proc/stat").ok()?)
+}
+
+/// `cpu  user nice system idle iowait irq softirq steal …` → (busy, total);
+/// idle and iowait aren't busy.
+fn proc_stat(text: &str) -> Option<(u64, u64)> {
+    let ticks: Vec<u64> = text.lines().next()?.strip_prefix("cpu ")?.split_whitespace().take(8).map(|t| t.parse().ok()).collect::<Option<_>>()?;
+    let total: u64 = ticks.iter().sum();
+    let idle = ticks.get(3)? + ticks.get(4).unwrap_or(&0);
+    Some((total.saturating_sub(idle), total))
+}
+
 fn memory() -> Memory {
     meminfo(&read_to_string("/proc/meminfo").unwrap_or_default())
 }
@@ -395,6 +448,23 @@ mod tests {
         assert_eq!(stretch(s(&["a", "", "b", "", "c"]), 7), s(&["a", "", "", "b", "", "", "c"]));
         assert_eq!(stretch(s(&["a", "b"]), 4), s(&["a", "b"]));
         assert_eq!((greeting(8), greeting(14), greeting(19), greeting(2)), ("Good morning", "Good afternoon", "Good evening", "Up late"));
+    }
+
+    #[test]
+    fn cpu_meter() {
+        assert_eq!(busy_share((100, 400), (150, 500)), Some(0.5));
+        assert_eq!(busy_share((100, 400), (100, 400)), None);
+        let (busy, total) = cpu_ticks().unwrap();
+        assert!(busy <= total && total > 0);
+        let share = cpu_use().unwrap();
+        assert!((0.0..=1.0).contains(&share));
+        // Both meters always there, swap right after memory.
+        let s = screen(120, "gpu", "zsh");
+        let (cpu, mem, swap) = (s.find("CPU use").unwrap(), s.find("Memory").unwrap(), s.find("Swap").unwrap());
+        assert!(cpu < mem && mem < swap);
+        assert!(s[swap..].contains(" GiB"));
+        assert_eq!(proc_stat("cpu  10 0 20 60 10 0 0 0 0 0\ncpu0 1 2 3 4\n"), Some((30, 100)));
+        assert_eq!(proc_stat("intr 1 2 3\n"), None);
     }
 
     #[test]
