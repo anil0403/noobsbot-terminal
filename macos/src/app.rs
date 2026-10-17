@@ -1403,11 +1403,13 @@ impl ApplicationHandler<UserEvent> for App {
                 wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
             }
         }
-        // A reader that woke us is let do so again at most once per frame: output that
-        // comes in the meantime piles up in its terminal and the frame shows it whole.
-        // Program output arrives in pieces as small as a line, and a wakeup for each one
-        // (a user event, a pass through here, the terminal lock to blink) left the reader
-        // and this thread fighting over the lock instead of parsing.
+        // A reader that woke us is let do so again at most once per frame (and once a
+        // frame drew its pane, see `RedrawRequested`): output that comes in the meantime
+        // piles up in its terminal and the frame shows it whole. Program output arrives
+        // in pieces as small as a line, and a wakeup for each one (a user event, a pass
+        // through here, the terminal lock to blink) left the reader and this thread
+        // fighting over the lock instead of parsing. Panes out of sight (another tab)
+        // are only let through here.
         let ack = self.last_ack + self.frame_time;
         if now >= ack {
             self.last_ack = now;
@@ -1777,6 +1779,11 @@ impl ApplicationHandler<UserEvent> for App {
                 for id in tab.visible() {
                     let pane = self.panes.get_mut(&id).unwrap();
                     let theme = pane.theme.frame();
+                    // Output parsed from here on wakes the loop again (before the lock: the
+                    // reader sets it after dropping its own). Left set until the ack, output
+                    // between this frame and the ack went undrawn: the reader stayed quiet
+                    // and nothing else asked for a frame.
+                    pane.pty.woken.store(false, Ordering::Release);
                     let term = pane.term.lock();
                     let search = self.search.as_mut().filter(|s| s.pane == id);
                     let (matches, current) = match search {
