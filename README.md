@@ -206,7 +206,7 @@ Separately, when a program rings the bell, the pane's border flashes in the them
 
 ### 💎 Pretty prompt
 
-Set `pretty_prompt = true` under `[terminal]` for a powerline prompt in bash, zsh or fish, in place of your shell's own. It shows:
+bash, zsh and fish get a powerline prompt in place of your shell's own (`pretty_prompt = false` under `[terminal]` keeps yours). It shows:
 
 - the user (and host over SSH)
 - the folder
