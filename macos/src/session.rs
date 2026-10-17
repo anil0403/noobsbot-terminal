@@ -80,7 +80,7 @@ fn read_node<'a>(lines: &mut impl Iterator<Item = &'a str>, cwds: &mut Vec<Optio
         "-" => false,
         _ => return None,
     };
-    let ratio = ratio.parse::<f32>().ok()?.clamp(0.1, 0.9);
+    let ratio = ratio.parse::<f32>().ok().filter(|r| r.is_finite())?.clamp(0.1, 0.9);
     let a = Box::new(read_node(lines, cwds)?);
     let b = Box::new(read_node(lines, cwds)?);
     Some(Node::Split { across, ratio, a, b })
@@ -129,5 +129,7 @@ mod tests {
         for bad in ["", "active x", "active 0\ntab 1\npane /a\n", "active 0\ntab 0\nsplit | 0.5\npane /a\n", "active 0\nsplit / 0.5"] {
             assert!(decode(bad).is_none(), "{bad:?}");
         }
+        // A ratio that isn't a number would make zero-width panes.
+        assert!(decode("active 0\ntab 0\nsplit | NaN\npane /a\npane /b\n").is_none());
     }
 }

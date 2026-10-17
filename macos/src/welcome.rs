@@ -58,16 +58,18 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
     let rows = cat.len().max(info.len());
     let (cat_top, info_top) = ((rows - cat.len()) / 2, (rows - info.len()) / 2);
     for row in 0..rows {
+        let mut line = String::new();
         if !cat.is_empty() {
-            let line = row.checked_sub(cat_top).and_then(|r| cat.get(r)).copied().unwrap_or("");
-            out.push_str("\x1b[1;38;5;15m"); // bright white
-            out.push_str(&paint(line));
-            out.push_str(&" ".repeat(CAT_W + 3 - line.len()));
+            let cat = row.checked_sub(cat_top).and_then(|r| cat.get(r)).copied().unwrap_or("");
+            line.push_str("\x1b[1;38;5;15m"); // bright white
+            line.push_str(&paint(cat));
+            line.push_str(&" ".repeat(CAT_W + 3 - cat.len()));
         } else {
-            out.push(' ');
+            line.push(' ');
         }
-        out.push_str("\x1b[0m");
-        out.push_str(row.checked_sub(info_top).and_then(|r| info.get(r)).map_or("", String::as_str));
+        line.push_str("\x1b[0m");
+        line.push_str(row.checked_sub(info_top).and_then(|r| info.get(r)).map_or("", String::as_str));
+        out.push_str(&fit(&line, cols));
         out.push_str("\x1b[0m\r\n");
     }
     out.push_str("\r\n");
@@ -79,25 +81,73 @@ pub fn rows(screen: &str) -> usize {
     screen.matches("\r\n").count()
 }
 
-/// Draws `screen` again over the one drawn `rows` tall at the top, keeping the cursor
-/// (and what's below) where it is. Only while it's all still there: nothing scrolled
-/// off, no full-screen app, the prompt below it, and the same height. True if it did.
-pub fn redraw<T: EventListener>(term: &mut Term<T>, screen: &str, rows: usize) -> bool {
-    let grid = term.grid();
-    if self::rows(screen) != rows
-        || grid.history_size() > 0
+/// The line cut to `cols` visible characters (escapes kept), so it never wraps.
+fn fit(line: &str, cols: usize) -> String {
+    let (mut out, mut shown, mut chars) = (String::new(), 0, line.chars());
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            out.push(c);
+            // A CSI runs to its final byte.
+            if let Some(d) = chars.next() {
+                out.push(d);
+                if d == '[' {
+                    for e in chars.by_ref() {
+                        out.push(e);
+                        if ('@'..='~').contains(&e) {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if shown < cols {
+            out.push(c);
+            shown += 1;
+        }
+    }
+    out
+}
+
+/// Draws `screen` over the one drawn `rows` tall at the top, keeping the cursor (and
+/// what's below) with the text. A different height moves what's below up or down
+/// (`rows` is then the new one); an empty screen takes it away. Only while it's all
+/// still there: nothing scrolled off, no full-screen app, the prompt below it, and
+/// room below for it to grow. True if it did.
+pub fn redraw<T: EventListener>(term: &mut Term<T>, screen: &str, rows: &mut usize) -> bool {
+    let (new, cols, grid) = (self::rows(screen), term.columns(), term.grid());
+    let shift = new as i32 - *rows as i32;
+    let line = grid.cursor.point.line.0;
+    if grid.history_size() > 0
         || grid.display_offset() > 0
         || term.mode().contains(TermMode::ALT_SCREEN)
-        || grid.cursor.point.line.0 < rows as i32
+        || line < *rows as i32
+        || line + shift >= grid.screen_lines() as i32
     {
         return false;
     }
-    let (cursor, saved) = (grid.cursor.clone(), grid.saved_cursor.clone());
-    // Each line erased to its end: a value can get shorter.
-    let text = format!("\x1b[H{}", screen.replace("\r\n", "\x1b[K\r\n"));
+    let (mut cursor, mut saved) = (grid.cursor.clone(), grid.saved_cursor.clone());
+    // Lines put in (or taken out) under the old screen move the prompt with them.
+    let mut text = match shift {
+        0 => String::new(),
+        1.. => format!("\x1b[{};1H\x1b[{shift}L", *rows + 1),
+        _ => format!("\x1b[{};1H\x1b[{}M", new + 1, -shift),
+    };
+    // Each line cut to the pane, so none wraps onto the prompt, and erased to its end:
+    // a value can get shorter.
+    text.push_str("\x1b[H");
+    for line in screen.split_inclusive("\r\n") {
+        text.push_str(&fit(line.trim_end_matches("\r\n"), cols));
+        text.push_str(if line.ends_with("\r\n") { "\x1b[K\r\n" } else { "" });
+    }
     Processor::<StdSyncHandler>::new().advance(term, text.as_bytes());
+    // Lines taken out at the top go to the scrollback, empty before: they were ours.
+    term.grid_mut().clear_history();
+    cursor.point.line.0 += shift;
+    if saved.point.line.0 >= *rows as i32 {
+        saved.point.line.0 += shift;
+    }
     let grid = term.grid_mut();
     (grid.cursor, grid.saved_cursor) = (cursor, saved);
+    *rows = new;
     true
 }
 
@@ -569,19 +619,110 @@ mod tests {
         let cursor = term.grid().cursor.point;
         assert_eq!(cursor, Point::new(Line(4), Column(4)));
         // Shorter values leave nothing behind; the prompt, cursor and saved cursor stay.
-        assert!(redraw(&mut term, "\r\nup 6 min\r\nload 1\r\n\r\n", rows(old)));
+        let mut rows = self::rows(old);
+        assert!(redraw(&mut term, "\r\nup 6 min\r\nload 1\r\n\r\n", &mut rows));
         assert_eq!((text(&term, 1), text(&term, 2), text(&term, 4)), ("up 6 min".into(), "load 1".into(), "$ ls".into()));
         assert_eq!(term.grid().cursor.point, cursor);
         assert_eq!(term.grid().saved_cursor.point, cursor);
-        // A different height, or the prompt not below it, and it's left alone.
-        assert!(!redraw(&mut term, "\r\nup 7 min\r\n\r\n", rows(old)));
-        assert!(!redraw(&mut term, "\r\nx\r\ny\r\nz\r\nw\r\n", 5));
+        // The prompt not below it, or no room below to grow: left alone.
+        assert!(!redraw(&mut term, "\r\nx\r\ny\r\nz\r\nw\r\nv\r\n", &mut 5));
+        assert!(!redraw(&mut term, "\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n\r\n", &mut rows));
         // Scrolled off the top, or under a full-screen app: left alone too.
         parser.advance(&mut term, b"\x1b[?1049h");
-        assert!(!redraw(&mut term, old, rows(old)));
+        assert!(!redraw(&mut term, old, &mut rows));
         parser.advance(&mut term, b"\x1b[?1049l\r\n\n\n\n\n\n");
-        assert!(!redraw(&mut term, old, rows(old)));
+        assert!(!redraw(&mut term, old, &mut rows));
         // Three lines scrolled up: the prompt moved with them, nothing was drawn over it.
         assert_eq!(text(&term, 1), "$ ls");
+    }
+
+    #[test]
+    fn redraws_at_a_new_height() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::index::{Column, Line, Point};
+        use alacritty_terminal::term::Config;
+        use alacritty_terminal::term::test::TermSize;
+        let text = |term: &Term<VoidListener>, line: i32| (0..20).map(|c| term.grid()[Line(line)][Column(c)].c).collect::<String>().trim_end().to_owned();
+        let mut term = Term::new(Config::default(), &TermSize::new(20, 8), VoidListener);
+        let mut parser: Processor = Processor::new();
+        let old = "\r\nup 5 min\r\n\r\n";
+        parser.advance(&mut term, old.as_bytes());
+        parser.advance(&mut term, b"$ ls\x1b7");
+        let mut rows = self::rows(old);
+        // The update line arrives after the first draw: the prompt moves down with it.
+        assert!(redraw(&mut term, "\r\nup 5 min\r\nv9 is out\r\n\r\n", &mut rows));
+        assert_eq!((rows, text(&term, 2), text(&term, 4)), (4, "v9 is out".into(), "$ ls".into()));
+        assert_eq!(term.grid().cursor.point, Point::new(Line(4), Column(4)));
+        assert_eq!(term.grid().saved_cursor.point, Point::new(Line(4), Column(4)));
+        // And back up when it's shorter; an empty screen takes it all away.
+        assert!(redraw(&mut term, old, &mut rows));
+        assert_eq!((rows, text(&term, 1), text(&term, 2), text(&term, 3)), (3, "up 5 min".into(), "".into(), "$ ls".into()));
+        assert!(redraw(&mut term, "", &mut rows));
+        assert_eq!((rows, text(&term, 0), term.grid().cursor.point), (0, "$ ls".into(), Point::new(Line(0), Column(4))));
+        assert_eq!(term.grid().history_size(), 0);
+        // The real screen at its real heights.
+        found(None);
+        let mut term = Term::new(Config::default(), &TermSize::new(121, 40), VoidListener);
+        let before = screen(121, "gpu", "zsh");
+        parser.advance(&mut term, before.as_bytes());
+        parser.advance(&mut term, b"$ ");
+        let mut rows = self::rows(&before);
+        found(Some("v99.0.0".into()));
+        let after = screen(121, "gpu", "zsh");
+        found(None);
+        assert!(self::rows(&after) > rows);
+        assert!(redraw(&mut term, &after, &mut rows));
+        assert_eq!(rows, self::rows(&after));
+        assert_eq!(term.grid().cursor.point.line.0 as usize, rows);
+    }
+
+    #[test]
+    fn never_wraps() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::index::{Column, Line};
+        use alacritty_terminal::term::Config;
+        use alacritty_terminal::term::test::TermSize;
+        assert_eq!(fit("\x1b[1mabcdef\x1b[0m", 3), "\x1b[1mabc\x1b[0m");
+        for cols in [2, 20, 40, 60, 94, 95, 121] {
+            let s = screen(cols, "Intel(R) UHD Graphics 617", "zsh");
+            let mut term = Term::new(Config::default(), &TermSize::new(cols, 60), VoidListener);
+            let mut parser: Processor = Processor::new();
+            parser.advance(&mut term, s.as_bytes());
+            assert_eq!(term.grid().cursor.point.line.0 as usize, self::rows(&s), "{cols} columns: a line wrapped");
+        }
+        // A refresh with a longer line is cut too, and leaves the prompt alone.
+        let mut term = Term::new(Config::default(), &TermSize::new(20, 10), VoidListener);
+        let mut parser: Processor = Processor::new();
+        let old = format!("\r\n{}\r\n\r\n", "a".repeat(10));
+        parser.advance(&mut term, old.as_bytes());
+        parser.advance(&mut term, b"$ ls");
+        let mut rows = self::rows(&old);
+        assert!(redraw(&mut term, &format!("\r\n{}\r\n\r\n", "b".repeat(45)), &mut rows));
+        let text = |line: i32| (0..20).map(|c| term.grid()[Line(line)][Column(c)].c).collect::<String>().trim_end().to_owned();
+        assert_eq!((text(1), text(3)), ("b".repeat(20), "$ ls".into()));
+    }
+
+    #[test]
+    fn resize_keeps_what_the_shell_printed() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::index::{Column, Line};
+        use alacritty_terminal::term::Config;
+        use alacritty_terminal::term::test::TermSize;
+        let text =
+            |term: &Term<VoidListener>, line: i32| (0..term.columns()).map(|c| term.grid()[Line(line)][Column(c)].c).collect::<String>().trim_end().to_owned();
+        let mut term = Term::new(Config::default(), &TermSize::new(60, 50), VoidListener);
+        let mut parser: Processor = Processor::new();
+        let before = screen(60, "gpu", "zsh");
+        parser.advance(&mut term, before.as_bytes());
+        parser.advance(&mut term, b"Last login: Fri\r\n$ ");
+        let mut rows = self::rows(&before);
+        // What the app does on a resize: take it out, reflow the rest, put it back.
+        assert!(redraw(&mut term, "", &mut rows));
+        term.resize(TermSize::new(30, 50));
+        let after = screen(30, "gpu", "zsh");
+        assert!(redraw(&mut term, &after, &mut rows));
+        assert_eq!(rows, self::rows(&after));
+        assert_eq!((text(&term, rows as i32), text(&term, rows as i32 + 1)), ("Last login: Fri".into(), "$".into()));
+        assert_eq!(term.grid().cursor.point.line.0 as usize, rows + 1);
     }
 }

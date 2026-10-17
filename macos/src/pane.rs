@@ -65,7 +65,7 @@ impl Pane {
         }
         let mut term = self.term.lock();
         let screen = crate::welcome::screen(term.columns(), gpu, shell);
-        crate::welcome::redraw(&mut term, &screen, self.welcome_rows)
+        crate::welcome::redraw(&mut term, &screen, &mut self.welcome_rows)
     }
 
     /// Clears the welcome screen (and its scrollback) on the first key at the
