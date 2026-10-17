@@ -259,8 +259,8 @@ mod tests {
         s.ran("cd /usr", &base);
         let here = Some(base.as_path());
         let mut get = |typed: &str| List::new(typed, here, &mut s).map(|l| l.entries.into_iter().map(|(n, _)| n).collect::<Vec<_>>());
-        // cd: every folder; files and dot folders left out.
-        assert_eq!(get("cd ").unwrap(), vec!["Documents", "Downloads", "elsewhere", "my docs"]);
+        // cd: `..`, then every folder; files and dot folders left out.
+        assert_eq!(get("cd ").unwrap(), vec!["..", "Documents", "Downloads", "elsewhere", "my docs"]);
         assert_eq!(get("cd").unwrap(), get("cd ").unwrap());
         assert!(get("cdx").is_none());
         let bare = |typed: &str| List::new(typed, here, &mut Suggest::default()).unwrap().bare;
@@ -268,12 +268,20 @@ mod tests {
         // Starts with first (case aside), then contains.
         assert_eq!(get("cd do").unwrap(), vec!["Documents", "Downloads", "my docs"]);
         assert_eq!(get("cd .c").unwrap(), vec![".config"]);
+        assert_eq!(get("cd .").unwrap(), vec!["..", ".config"]);
+        assert_eq!(get("cd ..").unwrap(), vec![".."]);
+        // Step by step: `..` inside `../` too, but never above /.
+        assert_eq!(get("cd ../").unwrap()[0], "..");
+        assert!(!get("cd /").unwrap().contains(&"..".to_owned()));
+        assert!(!get("cd ../../../../../../../../../../../../../../../../").unwrap().contains(&"..".to_owned()));
         // A subfolder: its own folders.
-        assert_eq!(get("cd Documents/").unwrap(), vec!["Private", "projects"]);
+        assert_eq!(get("cd Documents/").unwrap(), vec!["..", "Private", "projects"]);
         assert_eq!(get("cd Documents/ro").unwrap(), vec!["projects"]);
         assert_eq!(get("cd my\\ d").unwrap(), vec!["my docs"]);
         assert_eq!(get("cd us").unwrap(), Vec::<String>::new());
-        // ls: files too, in the same order; dot files only for a dot.
+        // Tab on `..` alone goes up: `../`, and the grid then lists the parent.
+        assert_eq!(List::new("cd ..", here, &mut Suggest::default()).unwrap().key(ListKey::Tab, false), Done::Write(b"\x7f\x7f../".to_vec()));
+        // ls: files too, in the same order, no `..`; dot files only for a dot.
         assert_eq!(get("ls ").unwrap(), vec!["Doc.txt", "Documents", "Downloads", "elsewhere", "my docs"]);
         assert_eq!(get("ls -la Documents/p").unwrap(), vec!["Private", "plan.md", "projects"]);
         assert_eq!(get("ls .").unwrap(), vec![".config", ".env", "Doc.txt"]);

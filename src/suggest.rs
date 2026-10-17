@@ -161,21 +161,25 @@ impl Suggest {
     /// What the argument `arg` (unescaped), typed in `cwd`, can name: the
     /// entries of the folder before its last slash whose name starts with
     /// what's after it (case aside), then those that contain it; folders only
-    /// unless `files`. Names, each with whether it's a folder.
+    /// unless `files`, and then `..` first while it matches (not at /).
+    /// Names, each with whether it's a folder.
     pub fn entries(&mut self, arg: &str, cwd: Option<&Path>, files: bool) -> Vec<(String, bool)> {
         let rooted = arg.starts_with('/');
         // A path from / or ~ needs no folder to start from.
         let Some(cwd) = cwd.or((rooted || arg.starts_with('~')).then_some(Path::new("/"))) else { return Vec::new() };
         let (dir, needle) = arg.rsplit_once('/').map_or(("", arg), |(d, n)| (d, n));
         let needle = needle.to_lowercase();
-        let names = self.names(&place(dir, rooted, cwd)).unwrap_or_default();
+        let path = place(dir, rooted, cwd);
+        // Back up a level: cd only (ls lists what's there).
+        let up = !files && "..".starts_with(&needle) && fs::canonicalize(&path).is_ok_and(|p| p.parent().is_some());
+        let names = self.names(&path).unwrap_or_default();
         let entries = names
             .iter()
             .map(|n| n.strip_suffix('/').map_or((n.as_str(), false), |d| (d, true)))
             .filter(|&(n, dir)| (dir || files) && (needle.starts_with('.') || !n.starts_with('.')));
         let (starts, inside): (Vec<_>, Vec<_>) =
             entries.filter(|(n, _)| n.to_lowercase().contains(&needle)).partition(|(n, _)| n.to_lowercase().starts_with(&needle));
-        starts.into_iter().chain(inside).map(|(n, dir)| (n.to_owned(), dir)).collect()
+        up.then(|| ("..".to_owned(), true)).into_iter().chain(starts.into_iter().chain(inside).map(|(n, dir)| (n.to_owned(), dir))).collect()
     }
 }
 
