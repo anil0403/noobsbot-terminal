@@ -47,11 +47,11 @@ curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh \
 That command:
 
 - installs every dependency, including **nano** and the **JetBrainsMono Nerd Font** (anything already installed is skipped)
-- builds noobsbot and adds **noobsbot terminal** to your app menu
+- downloads the latest prebuilt noobsbot (x86_64 with glibc 2.35 or newer; anywhere else it builds from source) and adds **noobsbot terminal** to your app menu
 - makes **nano your default editor** for git, gh and the rest, unless you've already picked one
 - updates noobsbot when you run it again, or when you run `noobsbot --update` (`noobsbot --version` shows what you have); `noobsbot --restart` (or "Restart noobsbot" in Ctrl+Shift+P) then swaps the window for a fresh one
 
-On Arch it installs the `noobsbot-git` package (`sudo pacman -R noobsbot-git` removes it). Elsewhere noobsbot goes to `/usr/local/bin`, and Rust comes from rustup if your distro's is too old.
+On Arch it installs the `noobsbot-bin` package, or `noobsbot-git` when it builds from source (`sudo pacman -R noobsbot-bin` removes it). Elsewhere noobsbot goes to `/usr/local/bin`. A source build gets Rust from rustup if your distro's is too old; `NOOBSBOT_FROM_SOURCE=1` always builds.
 
 **On a Mac?** The macOS port has its own installer; see [macos/](macos/README.md):
 
@@ -65,7 +65,7 @@ curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/macos/install.
 
 <br>
 
-On Arch, build the package from [extra/aur](extra/aur):
+On Arch, build the package from [extra/aur](extra/aur) (or the prebuilt one from [extra/aur-bin](extra/aur-bin)):
 
 ```sh
 git clone https://github.com/anil0403/noobsbot-terminal && cd noobsbot-terminal/extra/aur

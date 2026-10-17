@@ -1,0 +1,33 @@
+# Maintainer: anil <dev.shresthaanil@gmail.com>
+# The prebuilt release (built by .github/workflows/release.yml). install.sh sets
+# pkgver and sha256sums to the latest release's.
+pkgname=noobsbot-bin
+_repo=noobsbot-terminal
+pkgver=0.4.0
+pkgrel=1
+pkgdesc='GPU-rendered terminal emulator with situation-aware color palettes'
+arch=('x86_64')
+url="https://github.com/anil0403/$_repo"
+license=('MIT')
+# The same runtime needs as noobsbot-git (see extra/aur/PKGBUILD).
+depends=('gcc-libs' 'glibc' 'libx11' 'libxcursor' 'libxi' 'libxkbcommon-x11' 'vulkan-icd-loader' 'nano' 'ttf-jetbrains-mono-nerd')
+makedepends=('ncurses')
+optdepends=('wayland: run on Wayland'
+            'libglvnd: OpenGL fallback when Vulkan is unavailable'
+            'kitty: kitten icat, to show images')
+provides=('noobsbot')
+conflicts=('noobsbot')
+source=("$url/releases/download/v$pkgver/noobsbot-$pkgver-x86_64-linux.tar.gz")
+sha256sums=('3e64307bb7f846853730022db1e9555e3388bed68b3379ada1ef9b563a6d805b')
+options=('!debug')
+
+package() {
+  cd "noobsbot-$pkgver-x86_64-linux"
+  install -Dm755 noobsbot "$pkgdir/usr/bin/noobsbot"
+  install -Dm644 noobsbot.desktop "$pkgdir/usr/share/applications/noobsbot.desktop"
+  install -Dm644 noobsbot.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/noobsbot.svg"
+  install -dm755 "$pkgdir/usr/share/terminfo"
+  tic -x -o "$pkgdir/usr/share/terminfo" noobsbot.terminfo
+  install -Dm644 config.example.toml README.md -t "$pkgdir/usr/share/doc/noobsbot"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

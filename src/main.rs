@@ -97,7 +97,7 @@ fn parse(args: &[String]) -> Result<Cli, String> {
     }
 }
 
-/// `noobsbot --update`: rerun the installer, which fetches and builds the latest version.
+/// `noobsbot --update`: rerun the installer, which installs the latest version.
 fn update() -> i32 {
     const INSTALL: &str = "curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh | bash";
     match std::process::Command::new("bash").args(["-o", "pipefail", "-c", INSTALL]).status() {

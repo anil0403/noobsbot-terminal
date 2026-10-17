@@ -2,8 +2,9 @@
 # noobsbot terminal installer:
 #   curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh | bash
 # Installs the dependencies (nano and the JetBrainsMono Nerd Font included),
-# builds noobsbot from source and makes nano the default editor.
-# Running it again updates noobsbot.
+# installs the latest release's prebuilt noobsbot (or builds it from source when
+# that can't run here) and makes nano the default editor.
+# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds.
 set -euo pipefail
 
 # All in a function, so nothing runs until the whole script has downloaded.
@@ -42,32 +43,70 @@ else
     say "X11 (libX11, libXcursor, libXi, libxkbcommon-x11) and Vulkan libraries yourself."
 fi
 
+# The latest release's prebuilt tarball, when it runs here: x86_64 with glibc 2.35
+# or newer (what release.yml builds against). Empty → build from source: no
+# release yet, its build still running, another CPU, musl, or NOOBSBOT_FROM_SOURCE=1.
+tarball="" ver=""
+glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2 || true)
+if [[ -z ${NOOBSBOT_FROM_SOURCE:-} && $(uname -m) == x86_64 && -n $glibc &&
+      $(printf '2.35\n%s\n' "$glibc" | sort -V | head -1) == 2.35 ]]; then
+    tarball=$(curl -fsSL "https://api.github.com/repos/${REPO#https://github.com/}/releases/latest" 2>/dev/null |
+        sed -n 's/.*"browser_download_url": *"\([^"]*x86_64-linux\.tar\.gz\)".*/\1/p' | head -1 || true)
+    ver=$(basename "$tarball" | sed -n 's/^noobsbot-\(.*\)-x86_64-linux\.tar\.gz$/\1/p')
+    [[ -n $ver ]] || tarball=""
+fi
+sha256() { curl -fsSL "$tarball.sha256" | cut -d' ' -f1; }
+
 if has pacman; then
-    # Arch: a real package (pacman -R noobsbot-git removes it), built from extra/aur.
-    say "Building the noobsbot-git package"
-    rm -rf "$SRC" && mkdir -p "$SRC"
-    curl -fsSL "$REPO/raw/main/extra/aur/PKGBUILD" -o "$SRC/PKGBUILD"
-    (cd "$SRC" && makepkg -si --noconfirm --needed --cleanbuild)
+    # Arch: a real package (pacman -R noobsbot-bin or noobsbot-git removes it):
+    # noobsbot-bin wraps the tarball (extra/aur-bin), noobsbot-git builds (extra/aur).
+    if [[ -n $tarball ]]; then pkg=noobsbot-bin dir=aur-bin old=noobsbot-git
+    else pkg=noobsbot-git dir=aur old=noobsbot-bin; fi
+    if [[ -n $tarball && $(pacman -Q $pkg 2>/dev/null) == "$pkg $ver-1" ]]; then
+        say "noobsbot $ver is already installed"
+    else
+        say "Making the $pkg package"
+        rm -rf "$SRC" && mkdir -p "$SRC"
+        curl -fsSL "$REPO/raw/main/extra/$dir/PKGBUILD" -o "$SRC/PKGBUILD"
+        if [[ -n $tarball ]]; then
+            sed -i "s/^pkgver=.*/pkgver=$ver/; s/^sha256sums=.*/sha256sums=('$(sha256)')/" "$SRC/PKGBUILD"
+        fi
+        (cd "$SRC" && makepkg -sf --noconfirm --cleanbuild)
+        # The two conflict, and under --noconfirm pacman refuses to swap them itself.
+        if pacman -Q $old >/dev/null 2>&1; then $SUDO pacman -R --noconfirm $old; fi
+        $SUDO pacman -U --noconfirm "$SRC"/$pkg-*.pkg.tar.*
+    fi
 else
-    # Rust: the distro's if new enough, else rustup's (in ~/.cargo, no root).
-    [[ -f $HOME/.cargo/env ]] && . "$HOME/.cargo/env"
-    minor=$(rustc --version 2>/dev/null | sed -n 's/^rustc 1\.\([0-9]*\).*/\1/p' || true)
-    if (( ${minor:-0} < RUST_MIN )); then
-        say "Installing Rust (rustup)"
-        if has rustup; then rustup update stable && rustup default stable
-        else curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal; fi
-        . "$HOME/.cargo/env"
+    if [[ -n $tarball ]]; then
+        say "Downloading $(basename "$tarball")"
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
+        curl -fsSL "$tarball" -o "$tmp/noobsbot.tar.gz"
+        echo "$(sha256)  $tmp/noobsbot.tar.gz" | sha256sum -c --quiet || die "the download doesn't match its checksum."
+        tar -xzf "$tmp/noobsbot.tar.gz" -C "$tmp"
+        bin=$tmp/noobsbot-$ver-x86_64-linux/noobsbot files=$tmp/noobsbot-$ver-x86_64-linux
+    else
+        # Rust: the distro's if new enough, else rustup's (in ~/.cargo, no root).
+        [[ -f $HOME/.cargo/env ]] && . "$HOME/.cargo/env"
+        minor=$(rustc --version 2>/dev/null | sed -n 's/^rustc 1\.\([0-9]*\).*/\1/p' || true)
+        if (( ${minor:-0} < RUST_MIN )); then
+            say "Installing Rust (rustup)"
+            if has rustup; then rustup update stable && rustup default stable
+            else curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal; fi
+            . "$HOME/.cargo/env"
+        fi
+
+        say "Building noobsbot (a few minutes)"
+        if [[ -d $SRC/.git ]]; then git -C "$SRC" pull --ff-only; else rm -rf "$SRC"; git clone --depth 1 "$REPO" "$SRC"; fi
+        (cd "$SRC" && cargo build --release --locked)
+        bin=$SRC/target/release/noobsbot files=$SRC/extra
     fi
 
-    say "Building noobsbot (a few minutes)"
-    if [[ -d $SRC/.git ]]; then git -C "$SRC" pull --ff-only; else rm -rf "$SRC"; git clone --depth 1 "$REPO" "$SRC"; fi
-    (cd "$SRC" && cargo build --release --locked)
-
     say "Installing"
-    $SUDO install -Dm755 "$SRC/target/release/noobsbot" /usr/local/bin/noobsbot
-    $SUDO install -Dm644 "$SRC/extra/noobsbot.desktop" /usr/local/share/applications/noobsbot.desktop
-    $SUDO install -Dm644 "$SRC/extra/noobsbot.svg" /usr/local/share/icons/hicolor/scalable/apps/noobsbot.svg
-    has tic && $SUDO tic -x "$SRC/extra/noobsbot.terminfo"
+    $SUDO install -Dm755 "$bin" /usr/local/bin/noobsbot
+    $SUDO install -Dm644 "$files/noobsbot.desktop" /usr/local/share/applications/noobsbot.desktop
+    $SUDO install -Dm644 "$files/noobsbot.svg" /usr/local/share/icons/hicolor/scalable/apps/noobsbot.svg
+    has tic && $SUDO tic -x "$files/noobsbot.terminfo"
 
     if [[ $(fc-list 2>/dev/null) != *"$FONT"* ]]; then
         say "Installing the $FONT font"
