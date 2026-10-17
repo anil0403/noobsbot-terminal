@@ -30,6 +30,7 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("--update") => std::process::exit(update()),
         Some("--restart") => std::process::exit(restart::cli()),
+        Some("--version" | "-V") => return println!("noobsbot {}", env!("CARGO_PKG_VERSION")),
         _ => {}
     }
     let quake = std::env::args().skip(1).any(|a| a == "--quake");

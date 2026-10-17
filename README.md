@@ -49,7 +49,7 @@ That command:
 - installs every dependency, including **nano** and the **JetBrainsMono Nerd Font** (anything already installed is skipped)
 - builds noobsbot and adds **noobsbot terminal** to your app menu
 - makes **nano your default editor** for git, gh and the rest, unless you've already picked one
-- updates noobsbot when you run it again, or when you run `noobsbot --update`; `noobsbot --restart` (or "Restart noobsbot" in Ctrl+Shift+P) then swaps the window for a fresh one
+- updates noobsbot when you run it again, or when you run `noobsbot --update` (`noobsbot --version` shows what you have); `noobsbot --restart` (or "Restart noobsbot" in Ctrl+Shift+P) then swaps the window for a fresh one
 
 On Arch it installs the `noobsbot-git` package (`sudo pacman -R noobsbot-git` removes it). Elsewhere noobsbot goes to `/usr/local/bin`, and Rust comes from rustup if your distro's is too old.
 
