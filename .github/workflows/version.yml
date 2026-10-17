@@ -43,7 +43,8 @@ jobs:
           esac
           sed -i "0,/^version = /s/^version = .*/version = \"$v\"/" Cargo.toml macos/Cargo.toml
           sed -i "/^name = \"noobsbot\"\$/{n;s/^version = .*/version = \"$v\"/}" Cargo.lock macos/Cargo.lock
-          git -c user.name=github-actions -c user.email=actions@github.com commit -am "v$v"
+          git config user.name github-actions && git config user.email actions@github.com
+          git commit -am "v$v"
           git tag -a "v$v" -m "v$v"
           git push --follow-tags
           gh release create "v$v" --generate-notes
