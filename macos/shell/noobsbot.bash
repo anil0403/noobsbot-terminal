@@ -57,7 +57,8 @@ __noobsbot_pretty() {
         [[ $st == *$'\n'[!#]* ]] && branch+=" ●"
         __noobsbot_seg 14 0 $'\xee\x9c\xa5'" $branch"
     fi
-    if (( ${__noobsbot_last:-0} == 0 )); then
+    # 130 is Ctrl-C (also at an empty prompt): not a failure.
+    if (( ${__noobsbot_last:-0} == 0 || __noobsbot_last == 130 )); then
         __noobsbot_seg 12 15 $'\xef\x80\x8c'
     else
         __noobsbot_seg 1 15 $'\xef\x80\x8d'" $__noobsbot_last"

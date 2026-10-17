@@ -48,7 +48,8 @@ if test "$NOOBSBOT_PROMPT" = pretty
             string match -qv '#*' -- $st; and set branch "$branch ●"
             __noobsbot_seg 14 0 " $branch"
         end
-        if test $s -eq 0
+        # 130 is Ctrl-C (also at an empty prompt): not a failure.
+        if test $s -eq 0 -o $s -eq 130
             __noobsbot_seg 12 15 
         else
             __noobsbot_seg 1 15 " $s"
