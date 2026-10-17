@@ -50,9 +50,10 @@ pub fn set_term() {
         // SAFETY: called at startup, before any other thread exists.
         unsafe { std::env::set_var("LANG", locale()) };
     }
+    // Its file in the usual places first: `infocmp` is a process, 140 ms a run.
     let installed = || {
         let quiet = || std::process::Stdio::null();
-        Command::new("infocmp").arg("noobsbot").stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success())
+        terminfo_file().is_some() || Command::new("infocmp").arg("noobsbot").stdout(quiet()).stderr(quiet()).status().is_ok_and(|s| s.success())
     };
     if !installed() {
         use std::io::Write;
@@ -81,6 +82,24 @@ pub fn set_term() {
             std::env::set_var("EDITOR", "nano");
         }
     }
+}
+
+/// The noobsbot terminfo, compiled, in one of the places ncurses looks first
+/// ($TERMINFO, ~/.terminfo, the system database).
+fn terminfo_file() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".terminfo"));
+    let dirs = std::env::var_os("TERMINFO")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(home)
+        .chain(["/usr/share/terminfo", "/usr/local/share/terminfo", "/opt/homebrew/share/terminfo"].map(PathBuf::from));
+    terminfo_in(dirs)
+}
+
+/// The entry in the first of `dirs` holding it: under a directory named for its first
+/// letter, in hex (macOS) or as is (Linux).
+fn terminfo_in(dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    dirs.into_iter().flat_map(|d| [d.join("6e/noobsbot"), d.join("n/noobsbot")]).find(|p| p.is_file())
 }
 
 /// The user's region as a UTF-8 locale ("en_GB.UTF-8"), if the system has it.
@@ -155,4 +174,35 @@ pub fn login(shell: &str, pretty: bool) -> (Option<Shell>, HashMap<String, Strin
         _ => {}
     }
     (Some(Shell::new(shell, args)), env)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_the_compiled_terminfo() {
+        let dir = std::env::temp_dir().join(format!("noobsbot-terminfo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(terminfo_in([dir.clone()]), None);
+        std::fs::create_dir_all(dir.join("6e")).unwrap();
+        std::fs::write(dir.join("6e/noobsbot"), "x").unwrap();
+        assert_eq!(terminfo_in([PathBuf::from("/nonexistent"), dir.clone()]), Some(dir.join("6e/noobsbot")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn zsh_reports_the_directory_as_is() {
+        // A backslash in a folder name reached the terminal as an escape (`\a` ended the
+        // OSC early, with whatever followed taken as output), the way zsh's print reads it.
+        let base = std::env::temp_dir().join(format!("noobsbot-zsh-{}", std::process::id()));
+        let dir = base.join(r"a\nb\ac");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/shell/zsh/noobsbot.zsh");
+        let out = Command::new("zsh").args(["-f", "-c", r#"source "$1" && cd "$2" && __noobsbot_precmd"#, "-", script]).arg(&dir).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("\x1b]7;file://") && text.contains(&format!("{}\x07", dir.display())), "{text:?}");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

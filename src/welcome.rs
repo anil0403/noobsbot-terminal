@@ -195,6 +195,17 @@ fn newer(tag: &str, ours: &str) -> bool {
     parts(tag) > parts(ours)
 }
 
+/// Starts the reading the first screen would otherwise wait for: the CPU meter's
+/// first sample (100 ms). Called at launch, so it's in by the time the window is up
+/// and the screen is built.
+pub fn prime() {
+    std::thread::spawn(prime_now);
+}
+
+fn prime_now() {
+    cpu_use();
+}
+
 /// The last CPU reading, (busy, total) ticks, and the share it gave.
 static CPU: Mutex<Option<((u64, u64), f64)>> = Mutex::new(None);
 
@@ -521,6 +532,14 @@ mod tests {
         assert!(s[swap..].contains(" GiB"));
         assert_eq!(proc_stat("cpu  10 0 20 60 10 0 0 0 0 0\ncpu0 1 2 3 4\n"), Some((30, 100)));
         assert_eq!(proc_stat("intr 1 2 3\n"), None);
+    }
+
+    #[test]
+    fn primed_screen_has_its_reading() {
+        prime_now();
+        // Taken, so the screen built next doesn't wait 100 ms for a CPU sample.
+        assert!(CPU.lock().unwrap().is_some());
+        assert!(screen(121, "gpu", "zsh").contains("CPU use"));
     }
 
     #[test]

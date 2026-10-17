@@ -35,7 +35,8 @@ pub struct Pty {
     // Dropping this hangs up the shell.
     pty: tty::Pty,
     writer: Sender<Vec<u8>>,
-    /// A wakeup is on its way to the app: the reader sends no more until it's handled.
+    /// A wakeup is on its way to the app: the reader sends no more until the app lets
+    /// it, once a frame has passed (`about_to_wait`).
     pub woken: Arc<AtomicBool>,
 }
 
@@ -49,8 +50,8 @@ impl Pty {
     ) -> std::io::Result<Self> {
         let Listener { proxy, pane } = listener;
         let pty = tty::new(options, size, 0)?;
-        let mut file: File = pty.file().try_clone().expect("clone pty fd");
-        let mut reader = pty.file().try_clone().expect("clone pty fd");
+        let mut file: File = pty.file().try_clone()?;
+        let mut reader = pty.file().try_clone()?;
         // alacritty sets O_NONBLOCK for its mio loop; we use a plain blocking thread.
         // That makes writes blocking too (flags are per open file), so they get their own thread:
         // a big paste then never stalls the UI while the shell is busy.

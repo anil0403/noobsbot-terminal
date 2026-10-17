@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -127,6 +128,11 @@ pub struct App {
     divider_hover: Option<usize>,
     mods: ModifiersState,
     next_blink: Instant,
+    /// The focused pane's cursor blinks, as of its last frame: the terminal isn't
+    /// locked to find out, which would contend with its reader on every wakeup.
+    blinking: bool,
+    /// When the readers were last allowed to wake the loop again (see `about_to_wait`).
+    last_ack: Instant,
     /// When welcome screens still up are next drawn again.
     next_welcome: Instant,
     /// Something on screen changed since the last frame.
@@ -174,8 +180,12 @@ impl App {
             }
         }
         let quake = quake.then(|| Quake { visible: false, fade: None, last_toggle: Instant::now() - Duration::from_secs(1) });
+        if config.terminal.welcome {
+            crate::welcome::prime();
+        }
         Self {
             crt: config.crt.enabled,
+            blinking: config.cursor.blink,
             suggest: Suggest::new(),
             shell: config.terminal.shell.clone(),
             shell_name: shell_name(&config.terminal.shell),
@@ -206,6 +216,7 @@ impl App {
             divider_hover: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
+            last_ack: Instant::now(),
             next_welcome: Instant::now(),
             dirty: false,
             last_frame: Instant::now(),
@@ -1295,9 +1306,9 @@ impl ApplicationHandler<UserEvent> for App {
             Event::PtyWrite(text) if text == "\x1b[?6c" => pane.pty.write(b"\x1b[?62;4;22c"),
             Event::PtyWrite(text) => pane.pty.write(text.as_bytes()),
             Event::Wakeup => {
-                pane.pty.woken.store(false, std::sync::atomic::Ordering::Release);
                 // Drawn from about_to_wait at most once per refresh, so a flood of output
-                // doesn't make the renderer hog the terminal lock.
+                // doesn't make the renderer hog the terminal lock; the reader may wake us
+                // again once a frame has passed (see there).
                 self.dirty |= self.tabs.get(self.active).is_some_and(|t| t.root.contains(id));
                 self.context_poke(id);
             }
@@ -1348,8 +1359,8 @@ impl ApplicationHandler<UserEvent> for App {
             pane.settle();
             self.dirty = true;
         }
-        // Only matters while focused (unfocused, the cursor is a hollow block): no lock otherwise.
-        let blinking = self.renderer.as_ref().is_some_and(|r| r.focused) && self.focused_pane().term.lock().cursor_style().blinking;
+        // Only matters while focused (unfocused, the cursor is a hollow block).
+        let blinking = self.renderer.as_ref().is_some_and(|r| r.focused) && self.blinking;
         let mut wake = self.fade_quake(now);
         let (Some(renderer), Some(window)) = (self.renderer.as_mut(), &self.window) else { return };
 
@@ -1391,6 +1402,22 @@ impl ApplicationHandler<UserEvent> for App {
             } else {
                 wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
             }
+        }
+        // A reader that woke us is let do so again at most once per frame (and once a
+        // frame drew its pane, see `RedrawRequested`): output that comes in the meantime
+        // piles up in its terminal and the frame shows it whole. Program output arrives
+        // in pieces as small as a line, and a wakeup for each one (a user event, a pass
+        // through here, the terminal lock to blink) left the reader and this thread
+        // fighting over the lock instead of parsing. Panes out of sight (another tab)
+        // are only let through here.
+        let ack = self.last_ack + self.frame_time;
+        if now >= ack {
+            self.last_ack = now;
+            for pane in self.panes.values() {
+                pane.pty.woken.store(false, Ordering::Release);
+            }
+        } else if self.panes.values().any(|p| p.pty.woken.load(Ordering::Acquire)) {
+            wake = Some(wake.map_or(ack, |w: Instant| w.min(ack)));
         }
         for due in self.panes.values().flat_map(|p| [p.context_due, p.held.as_ref().map(|h| h.due)]).flatten() {
             wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
@@ -1752,6 +1779,11 @@ impl ApplicationHandler<UserEvent> for App {
                 for id in tab.visible() {
                     let pane = self.panes.get_mut(&id).unwrap();
                     let theme = pane.theme.frame();
+                    // Output parsed from here on wakes the loop again (before the lock: the
+                    // reader sets it after dropping its own). Left set until the ack, output
+                    // between this frame and the ack went undrawn: the reader stayed quiet
+                    // and nothing else asked for a frame.
+                    pane.pty.woken.store(false, Ordering::Release);
                     let term = pane.term.lock();
                     let search = self.search.as_mut().filter(|s| s.pane == id);
                     let (matches, current) = match search {
@@ -1765,6 +1797,9 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     let vi = term.mode().contains(TermMode::VI);
                     let cursor_row = usize::try_from(term.grid().cursor.point.line.0 + term.grid().display_offset() as i32).ok();
+                    if id == tab.focused {
+                        self.blinking = term.cursor_style().blinking;
+                    }
                     drop(term);
                     let fade = |at: &mut Option<Instant>| {
                         let a = at.map(|t| 1.0 - t.elapsed().as_secs_f32() / FLASH.as_secs_f32()).filter(|&a| a > 0.0);

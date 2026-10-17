@@ -5,7 +5,8 @@
 use std::fs::read_to_string;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::EventListener;
 use alacritty_terminal::grid::Dimensions;
@@ -473,20 +474,50 @@ fn packages() -> String {
     }
 }
 
+/// Starts the readings the first screen would otherwise wait for: the CPU meter's
+/// first sample (100 ms) and the battery (`pmset`, a process). Called at launch, so
+/// both are in by the time the window is up and the screen is built.
+pub fn prime() {
+    std::thread::spawn(prime_now);
+}
+
+fn prime_now() {
+    // Holding the lock while reading: a screen built meanwhile waits for the reading
+    // instead of starting its own.
+    let mut last = BATTERY.lock().unwrap();
+    if last.is_none() {
+        *last = Some((Instant::now(), read_battery()));
+    }
+    drop(last);
+    cpu_use();
+}
+
+/// The last battery reading and when it was taken.
+static BATTERY: Mutex<Reading> = Mutex::new(None);
+type Reading = Option<(Instant, Option<(f64, String)>)>;
+/// A fresh reading is on its way.
+static READING_BATTERY: AtomicBool = AtomicBool::new(false);
+
 /// The internal battery's charge (0..=1) and "charging" / "discharging" / "charged",
 /// read at most every 30 s: the screen refreshes more often, and pmset is a process.
+/// Later readings are taken in the background (the screen shows the last one meanwhile):
+/// pmset takes ~100 ms, too long to stall the window for every 30 s.
 fn battery() -> Option<(f64, String)> {
-    type Reading = Option<(std::time::Instant, Option<(f64, String)>)>;
-    static LAST: Mutex<Reading> = Mutex::new(None);
-    let mut last = LAST.lock().unwrap();
-    if let Some((at, battery)) = last.as_ref()
-        && at.elapsed() < Duration::from_secs(30)
-    {
-        return battery.clone();
+    let mut last = BATTERY.lock().unwrap();
+    let Some((at, battery)) = last.as_ref() else {
+        // The first reading, when nothing started it earlier (`prime`): waited for.
+        let battery = read_battery();
+        *last = Some((Instant::now(), battery.clone()));
+        return battery;
+    };
+    if at.elapsed() >= Duration::from_secs(30) && !READING_BATTERY.swap(true, Ordering::AcqRel) {
+        std::thread::spawn(|| {
+            let battery = read_battery();
+            *BATTERY.lock().unwrap() = Some((Instant::now(), battery));
+            READING_BATTERY.store(false, Ordering::Release);
+        });
     }
-    let battery = read_battery();
-    *last = Some((std::time::Instant::now(), battery.clone()));
-    battery
+    battery.clone()
 }
 
 fn read_battery() -> Option<(f64, String)> {
@@ -594,6 +625,16 @@ mod tests {
         let (cpu, mem, swap) = (s.find("CPU use").unwrap(), s.find("Memory").unwrap(), s.find("Swap").unwrap());
         assert!(cpu < mem && mem < swap);
         assert!(s[swap..].contains(" GiB"));
+    }
+
+    #[test]
+    fn primed_screen_has_its_readings() {
+        prime_now();
+        // Both taken, so the screen built next waits for neither: no 100 ms CPU sample,
+        // no pmset (which may well find no battery, as on CI; the reading is still in).
+        assert!(BATTERY.lock().unwrap().is_some());
+        assert!(CPU.lock().unwrap().is_some());
+        assert!(screen(121, "gpu", "zsh").contains("CPU use"));
     }
 
     #[test]

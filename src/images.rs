@@ -321,6 +321,10 @@ fn load(keys: &Keys, payload: &[u8]) -> Result<Arc<Pic>, String> {
         f @ (24 | 32) => {
             let (w, h) = (keys.num('s').unwrap_or(0), keys.num('v').unwrap_or(0));
             let bpp = f as usize / 8;
+            // The sizes first: `s` and `v` come from the program, and their product can overflow.
+            if w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE {
+                return Err(format!("EINVAL:bad size {w}x{h}"));
+            }
             if data.len() != w as usize * h as usize * bpp {
                 return Err(format!("EINVAL:{} bytes for {w}x{h}", data.len()));
             }
@@ -568,6 +572,8 @@ mod tests {
         assert!(im.placed.is_empty() && im.kitty.is_empty());
         // Bad sizes and data are refused, quietly if asked.
         assert!(im.kitty(b"a=T,f=24,s=2,v=2,i=1;AAAA", 0).1.unwrap().contains("EINVAL"));
+        // A size whose byte count overflows is refused, not multiplied (which panicked in debug builds).
+        assert!(im.kitty(b"a=T,f=32,s=4294967295,v=4294967295,i=1;AAAA", 0).1.unwrap().contains("EINVAL:bad size"));
         assert!(im.kitty(b"a=T,f=24,s=2,v=2,i=1,q=2;AAAA", 0).1.is_none());
     }
 
