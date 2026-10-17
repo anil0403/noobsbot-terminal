@@ -12,35 +12,33 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::{Term, TermMode};
 use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
-/// Colons are the fur (dense enough to read on black); dashes the inner ears,
-/// stripes, eyes, whiskers, mouth, collar and toes.
-const CAT: &str = r"
-     ::                  ::
-    ::-::              ::-::
-    ::---::          ::---::
-    ::----:::-:--:-:::----::
-   :::::::::::-::-:::::::::::
-  ::::::::::::::::::::::::::::
-  :::::-----::::::::-----:::::
-  :::::- o -::::::::- o -:::::
-  :::::-----::::::::-----:::::
-  :::::::::::::vv:::::::::::::
----- ::::::::::--:::::::::: ----
- ----::::::::--::--::::::::----
----- ::::::---::::---:::::: ----
-       ::::::::::::::::::
-        -------::-------
-     ::::::::::::::::::::::
-    ---::::::::::::::::::---
-   ::::::::::::::::::::::::::
-  ---::::::::::::::::::::::---    :::
-  ::::::::::::::::::::::::::::   :--::
-  ---::::::::::::::::::::::---  :::::
-   ::::::::::::  :::::::::::: ::--:
-    ::-::-::-:    :-::-::-:: :::::
-     ----------------------::::
-";
-const CAT_W: usize = 38;
+/// `:` and `.` are the fur, `$` and `#` the outline and stripes, `-` and `=` the
+/// whiskers; `O` (the eyes) and `v` (the nose) are colored where it's drawn.
+const CAT: &str = r###"
+       ^-.             .-^
+      :/`'.           .'"\:
+      $ ##. ':::::::' ,## |
+      $.#~'.:::::::::."##.|
+    .#'::::::::::::::::::::.:
+    $;::::   :::.:::   ::::;$
+  --=:: :. (O) :.: (O) .: ::=--
+ -----=: :.   :.v :.    :=-----
+ --===--:.   \_/ \_/  .:--===--
+       /#:..         ..:#\
+      /#..###------##...$\
+     /$...###########:...$
+    /#...:############...#.
+   /##...:############...#.
+   $/.#....:=======...#..\$
+  //.###.......#:....###...\)   ##.
+  #..####......#..../###....$   ##|
+  #..#####.....#....####....$  ,##|
+  `..:#####....#.../###:....( /##'
+   $...####....#...###:.....?;#$:|
+   \#....####..:.####...:  :##:
+    `##::######..####:=#:::::::;
+"###;
+const CAT_W: usize = 35;
 /// Narrower than this, the cat is left out.
 const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
@@ -63,7 +61,7 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
         if !cat.is_empty() {
             let line = row.checked_sub(cat_top).and_then(|r| cat.get(r)).copied().unwrap_or("");
             out.push_str("\x1b[1;38;5;15m"); // bright white
-            out.push_str(line);
+            out.push_str(&paint(line));
             out.push_str(&" ".repeat(CAT_W + 3 - line.len()));
         } else {
             out.push(' ');
@@ -174,6 +172,11 @@ fn cpu_use() -> Option<f64> {
 fn busy_share(prev: (u64, u64), now: (u64, u64)) -> Option<f64> {
     let total = now.1.checked_sub(prev.1).filter(|&t| t > 0)?;
     Some(now.0.saturating_sub(prev.0) as f64 / total as f64)
+}
+
+/// A line of the cat, bright white with yellow eyes and a pink nose.
+fn paint(line: &str) -> String {
+    line.replace('O', "\x1b[38;5;11mO\x1b[38;5;15m").replace('v', "\x1b[38;5;13mv\x1b[38;5;15m")
 }
 
 /// Widens the blank gaps (middle ones first) so the text is as tall as the cat.
@@ -418,6 +421,9 @@ mod tests {
     fn cat_fits() {
         let lines: Vec<&str> = CAT.lines().skip(1).collect();
         assert_eq!(lines.iter().map(|l| l.len()).max(), Some(CAT_W));
+        // Two eyes and one nose, colored without changing the width.
+        assert_eq!((CAT.matches('O').count(), CAT.matches('v').count()), (2, 1));
+        assert!(paint(":O:v:").contains("38;5;11mO") && paint(":O:v:").contains("38;5;13mv"));
         // Nothing beside the cat may wrap in the narrowest window that shows it.
         assert!(TIP.len() <= MIN_COLS - CAT_W - 3);
     }
@@ -441,8 +447,8 @@ mod tests {
         assert_eq!(tidy("Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz"), "Intel Core i7-8550U");
         assert_eq!(tidy("AMD Ryzen 7 5800X 8-Core Processor"), "AMD Ryzen 7 5800X 8-Core");
         // Wide: every line starts with the cat's column. Narrow: no cat.
-        assert!(screen(120, "gpu", "zsh").contains("::-::"));
-        assert!(!screen(80, "gpu", "zsh").contains("::-::"));
+        assert!(screen(120, "gpu", "zsh").contains("$/.#....:======"));
+        assert!(!screen(80, "gpu", "zsh").contains("$/.#....:======"));
         // Text stretched to the cat's height through its middle gaps; never shrunk.
         let s = |v: &[&str]| v.iter().map(|l| l.to_string()).collect::<Vec<_>>();
         assert_eq!(stretch(s(&["a", "", "b", "", "c"]), 7), s(&["a", "", "", "b", "", "", "c"]));
