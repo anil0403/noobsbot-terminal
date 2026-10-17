@@ -161,8 +161,9 @@ impl Suggest {
     /// Folders for `cd`'s argument `arg` (unescaped), typed in `cwd`: subfolders
     /// whose name starts with what's after the last slash (case aside), then
     /// those that contain it, then folders `cd` went to before whose path
-    /// contains `arg`, latest first. Each as it would be typed, ending in /.
-    pub fn folders(&mut self, arg: &str, cwd: Option<&Path>) -> Vec<String> {
+    /// contains `arg`, latest first. Each as it would be typed, ending in /;
+    /// and how many of them are the folder's own.
+    pub fn folders(&mut self, arg: &str, cwd: Option<&Path>) -> (Vec<String>, usize) {
         const MOST: usize = 200;
         const PAST: usize = 30; // folders from history, each one a stat
         let rooted = arg.starts_with('/');
@@ -193,7 +194,7 @@ impl Suggest {
         let (home, lower) = (home(), arg.to_lowercase());
         let ran = self.ran.iter().rev().map(|(c, d)| (c.as_str(), Some(d.as_path())));
         let shell = self.shell.iter().rev().map(|c| (c.as_str(), None));
-        let mut past = 0;
+        let (own, mut past) = (out.len(), 0);
         for (cmd, ran_in) in ran.chain(shell) {
             if past == PAST || out.len() >= MOST {
                 break;
@@ -225,7 +226,7 @@ impl Suggest {
                 out.push(shown);
             }
         }
-        out
+        (out, own)
     }
 }
 

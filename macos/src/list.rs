@@ -17,6 +17,8 @@ pub struct List {
     /// Characters of `cd`'s argument as typed: the Backspaces filling one takes.
     arg_len: usize,
     pub entries: Vec<String>,
+    /// The first `own` entries are the folder's; the rest come from history.
+    pub own: usize,
     pub selected: Option<usize>,
     dismissed: bool,
 }
@@ -45,8 +47,8 @@ impl List {
     /// The list for `typed` at a prompt in `cwd`, if it's a `cd`.
     pub fn new(typed: &str, cwd: Option<&Path>, suggest: &mut Suggest) -> Option<Self> {
         let arg = suggest::cd_arg(typed)?;
-        let entries = suggest.folders(&suggest::unescape(arg), cwd);
-        Some(Self { typed: typed.to_owned(), cwd: cwd.map(Path::to_owned), arg_len: arg.chars().count(), entries, selected: None, dismissed: false })
+        let (entries, own) = suggest.folders(&suggest::unescape(arg), cwd);
+        Some(Self { typed: typed.to_owned(), cwd: cwd.map(Path::to_owned), arg_len: arg.chars().count(), entries, own, selected: None, dismissed: false })
     }
 
     /// Made for this line, so its selection still stands.
@@ -56,11 +58,6 @@ impl List {
 
     pub fn shown(&self) -> bool {
         !self.dismissed && !self.entries.is_empty()
-    }
-
-    /// The characters typed after `cd `.
-    pub fn arg_len(&self) -> usize {
-        self.arg_len
     }
 
     pub fn key(&mut self, key: ListKey) -> Done {
@@ -100,7 +97,15 @@ mod tests {
     use std::fs;
 
     fn list(entries: &[&str], arg_len: usize) -> List {
-        List { typed: String::new(), cwd: None, arg_len, entries: entries.iter().map(|e| e.to_string()).collect(), selected: None, dismissed: false }
+        List {
+            typed: String::new(),
+            cwd: None,
+            arg_len,
+            entries: entries.iter().map(|e| e.to_string()).collect(),
+            own: entries.len(),
+            selected: None,
+            dismissed: false,
+        }
     }
 
     #[test]
@@ -163,6 +168,7 @@ mod tests {
         s.ran("cd Downloads", &base);
         let here = Some(base.as_path());
         let mut get = |typed: &str| List::new(typed, here, &mut s).map(|l| l.entries);
+        assert_eq!(List::new("cd ", here, &mut Suggest::default()).unwrap().own, 4);
         // Starts with first (case aside), then contains; files and dot folders left out.
         let deep = format!("{}/", base.join("elsewhere/deep").display());
         // (The history folder's path is under the temp dir, which could hold "do" too.)

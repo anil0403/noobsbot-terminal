@@ -1950,13 +1950,13 @@ fn draw_suggestion(r: &mut Renderer, term: &Term, rect: Rect, s: &str, theme: &T
     r.text(x, y, &text, theme::to_f32(theme::blend(theme.fg, theme.bg, 0.55)));
 }
 
-/// The list under the prompt (over it when there's more room there), lined up
-/// with `cd`'s argument and cut to the pane; the selected row as a bar.
+/// The list under the prompt, like PowerShell's list view: plain rows across
+/// the pane on the lines below it (above when there's more room there), the
+/// selected one on a bar, each tagged with where it came from.
 fn draw_prompt_list(r: &mut Renderer, term: &Term, rect: Rect, list: &List, theme: &Theme) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
-    let at = term.grid().cursor.point;
     let (lines, cols) = (term.screen_lines(), term.columns());
-    let line = usize::try_from(at.line.0).unwrap_or(0);
+    let line = usize::try_from(term.grid().cursor.point.line.0).unwrap_or(0);
     let (below, above) = (lines.saturating_sub(line + 1), line);
     let want = list.entries.len().min(crate::list::ROWS);
     let (top, n) = if want <= below || below >= above { (line + 1, want.min(below)) } else { (line - want.min(above), want.min(above)) };
@@ -1965,20 +1965,22 @@ fn draw_prompt_list(r: &mut Renderer, term: &Term, rect: Rect, list: &List, them
     }
     // Scrolled so the selected row is in view.
     let first = list.selected.unwrap_or(0).saturating_sub(n - 1);
-    let rows = &list.entries[first..first + n];
-    let width = (rows.iter().map(|e| e.chars().count()).max().unwrap_or(0) + 2).clamp(12, cols);
-    let col = at.column.0.saturating_sub(list.arg_len()).min(cols - width);
-    let (x, y, w) = (rect.x + col as f32 * cw, rect.y + top as f32 * ch, width as f32 * cw);
-    panel(r, Rect { x, y, w, h: n as f32 * ch }, theme);
-    let (fg, ink, accent) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg), theme::to_f32(theme.cursor));
-    for (i, entry) in rows.iter().enumerate() {
-        let ry = y + i as f32 * ch;
-        let text: String = entry.chars().take(width - 2).collect();
-        if list.selected == Some(first + i) {
-            r.fill(Rect { x, y: ry, w, h: ch }, accent);
-            r.text(x + cw, ry, &text, ink);
-        } else {
-            r.text(x + cw, ry, &text, fg);
+    let (fg, muted) = (theme::to_f32(theme.fg), theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45)));
+    let w = cols as f32 * cw;
+    for (i, entry) in list.entries[first..first + n].iter().enumerate() {
+        let (at, y) = (first + i, rect.y + (top + i) as f32 * ch);
+        let tag = if at < list.own { "folder" } else { "history" };
+        // The tag only where it leaves room for the name.
+        let tagged = cols >= 40;
+        let room = cols - 2 - if tagged { tag.len() + 2 } else { 0 };
+        let text: String = entry.chars().take(room).collect();
+        if list.selected == Some(at) {
+            r.fill(Rect { x: rect.x, y, w, h: ch }, theme::to_f32(theme.selection));
+        }
+        r.text(rect.x, y, ">", muted);
+        r.text(rect.x + 2.0 * cw, y, &text, fg);
+        if tagged {
+            r.text(rect.x + (cols - tag.len() - 1) as f32 * cw, y, tag, muted);
         }
     }
 }
