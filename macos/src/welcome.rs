@@ -45,7 +45,7 @@ const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
 /// Where the latest release is looked up, and how often (the answer is cached).
 const RELEASES: &str = "https://api.github.com/repos/anil0403/noobsbot-terminal/releases/latest";
-const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 /// A release newer than this build, once the check has found one.
 static NEWER: Mutex<Option<String>> = Mutex::new(None);
 
