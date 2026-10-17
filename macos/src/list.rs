@@ -22,6 +22,8 @@ pub struct List {
     /// The argument up to its last slash (unescaped), and what's after it.
     dir: String,
     needle: String,
+    /// Just the command, no space after it yet.
+    bare: bool,
     /// The matching names, each with whether it's a folder.
     pub entries: Vec<(String, bool)>,
     dismissed: bool,
@@ -53,7 +55,16 @@ impl List {
         let plain = suggest::unescape(arg);
         let entries = suggest.entries(&plain, cwd, files);
         let (dir, needle) = plain.rsplit_once('/').map_or((String::new(), plain.clone()), |(d, n)| (format!("{d}/"), n.to_owned()));
-        Some(Self { typed: typed.to_owned(), cwd: cwd.map(Path::to_owned), arg_len: arg.chars().count(), dir, needle, entries, dismissed: false })
+        Some(Self {
+            typed: typed.to_owned(),
+            cwd: cwd.map(Path::to_owned),
+            arg_len: arg.chars().count(),
+            bare: !typed.trim_start().contains(' '),
+            dir,
+            needle,
+            entries,
+            dismissed: false,
+        })
     }
 
     /// Made for this line, so it's still the one to show.
@@ -74,6 +85,8 @@ impl List {
                 self.dismissed = true;
                 Done::Redraw
             }
+            // Just `cd`: the space after it (the shell would list commands).
+            ListKey::Tab if self.bare => Done::Write(b" ".to_vec()),
             // The only match: a folder with its slash (the grid then shows
             // what's in it), a file with a space.
             ListKey::Tab if self.entries.len() == 1 => {
@@ -123,7 +136,7 @@ mod tests {
     fn list(names: &[&str], typed_after: &str) -> List {
         let (dir, needle) = typed_after.rsplit_once('/').map_or((String::new(), typed_after.to_owned()), |(d, n)| (format!("{d}/"), n.to_owned()));
         let entries = names.iter().map(|e| (e.to_string(), !e.contains('.'))).collect();
-        List { typed: String::new(), cwd: None, arg_len: typed_after.chars().count(), dir, needle, entries, dismissed: false }
+        List { typed: String::new(), cwd: None, arg_len: typed_after.chars().count(), bare: false, dir, needle, entries, dismissed: false }
     }
 
     #[test]
@@ -143,6 +156,9 @@ mod tests {
         assert!(!l.shown());
         assert_eq!(l.key(ListKey::Tab), Done::Pass);
         assert_eq!(list(&[], "x").key(ListKey::Tab), Done::Pass);
+        // Just the command: Tab is the space after it, whatever's listed.
+        let mut bare = List { bare: true, ..list(&["src"], "") };
+        assert_eq!(bare.key(ListKey::Tab), Done::Write(b" ".to_vec()));
     }
 
     #[test]
@@ -168,8 +184,13 @@ mod tests {
         assert_eq!(arg("cd My\\ St"), Some(("My\\ St", false)));
         assert_eq!(arg("cd 'My St"), Some(("'My St", false)));
         assert_eq!(arg("cd a b"), None);
-        assert_eq!(arg("cd"), None);
+        // The command alone, before its space, lists too; a longer name doesn't.
+        assert_eq!(arg("cd"), Some(("", false)));
+        assert_eq!(arg("ls"), Some(("", true)));
+        assert_eq!(arg("  pushd"), Some(("", false)));
         assert_eq!(arg("cdx y"), None);
+        assert_eq!(arg("cdx"), None);
+        assert_eq!(arg("lsof"), None);
         assert_eq!(arg("cat Doc"), None);
         // ls lists files too; options before the argument are passed over.
         assert_eq!(arg("ls "), Some(("", true)));
@@ -201,6 +222,10 @@ mod tests {
         let mut get = |typed: &str| List::new(typed, here, &mut s).map(|l| l.entries.into_iter().map(|(n, _)| n).collect::<Vec<_>>());
         // cd: every folder; files and dot folders left out.
         assert_eq!(get("cd ").unwrap(), vec!["Documents", "Downloads", "elsewhere", "my docs"]);
+        assert_eq!(get("cd").unwrap(), get("cd ").unwrap());
+        assert!(get("cdx").is_none());
+        let bare = |typed: &str| List::new(typed, here, &mut Suggest::default()).unwrap().bare;
+        assert!(bare("cd") && bare(" ls") && !bare("cd ") && !bare("ls Doc"));
         // Starts with first (case aside), then contains.
         assert_eq!(get("cd do").unwrap(), vec!["Documents", "Downloads", "my docs"]);
         assert_eq!(get("cd .c").unwrap(), vec![".config"]);

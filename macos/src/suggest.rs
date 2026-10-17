@@ -194,10 +194,11 @@ fn place(dir: &str, rooted: bool, cwd: &Path) -> PathBuf {
 
 /// The argument being typed after `cd`, `pushd` or `ls` (escapes and quotes
 /// left in), past any options, and whether files count (`ls`). No argument
-/// yet is `""`; anything else, or a second argument, is None.
+/// yet, or just the command with no space after it, is `""`; anything else,
+/// or a second argument, is None.
 pub fn arg(typed: &str) -> Option<(&str, bool)> {
     let t = typed.trim_start();
-    let (mut arg, files) = match t.split_once(' ')? {
+    let (mut arg, files) = match t.split_once(' ').unwrap_or((t, "")) {
         ("cd" | "pushd", rest) => (rest, false),
         ("ls", rest) => (rest, true),
         _ => return None,
