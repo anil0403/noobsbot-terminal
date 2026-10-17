@@ -50,6 +50,7 @@ impl Blocks {
         }
     }
 
+    #[cfg(test)]
     pub fn get(&self, prompt: u64) -> Option<&Cmd> {
         self.cmds.get(&prompt)
     }

@@ -1734,7 +1734,6 @@ impl ApplicationHandler<UserEvent> for App {
                         pane.typing = None;
                     }
                     let vi = term.mode().contains(TermMode::VI);
-                    let gutter = gutter(&term, &pane.blocks, &theme);
                     let cursor_row = usize::try_from(term.grid().cursor.point.line.0 + term.grid().display_offset() as i32).ok();
                     drop(term);
                     let fade = |at: &mut Option<Instant>| {
@@ -1750,7 +1749,7 @@ impl ApplicationHandler<UserEvent> for App {
                         (None, Some(a)) => Some((theme.cursor, a)),
                         (None, None) => None,
                     };
-                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), gutter, flash, broadcast: tab.broadcast, cursor_row };
+                    let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), flash, broadcast: tab.broadcast, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
                     if let Some(h) = self.link_hints.as_ref().filter(|h| h.pane == id) {
                         draw_link_labels(renderer, &pane.term.lock(), pane.rect, h, &theme);
@@ -1813,23 +1812,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// Colored marks for the prompts on screen: (viewport line, color) for
-/// commands that ran or are running at that prompt.
-fn gutter(term: &Term, blocks: &Blocks, theme: &Theme) -> Vec<(usize, [f32; 4])> {
-    let offset = term.grid().display_offset() as i32;
-    (0..term.screen_lines())
-        .filter_map(|i| {
-            let cmd = blocks.get(blocks::prompt_at(term, Line(i as i32 - offset))?)?;
-            let color = match cmd.done {
-                None => theme.ansi[3],
-                Some((Some(0), _)) => theme.ansi[2],
-                Some(_) => theme.ansi[1],
-            };
-            Some((i, theme::to_f32(color)))
-        })
-        .collect()
-}
-
 /// The suggestion in grey after the cursor, cut at the end of the line.
 fn draw_suggestion(r: &mut Renderer, term: &Term, rect: Rect, s: &str, theme: &Theme) {
     let at = term.grid().cursor.point;
@@ -1877,7 +1859,6 @@ struct LinkHints {
 struct PaneUi<'a> {
     vi: bool,
     search: Option<&'a Search>,
-    gutter: Vec<(usize, [f32; 4])>,
     /// Failed-command or bell border: its color, fading from 1 to 0.
     flash: Option<(alacritty_terminal::vte::ansi::Rgb, f32)>,
     /// A yellow border while the tab broadcasts typing (under a flash).
@@ -1891,9 +1872,6 @@ struct PaneUi<'a> {
 fn draw_pane_ui(r: &mut Renderer, rect: Rect, theme: &Theme, ui: PaneUi) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let bar = (cw / 4.0).round().max(2.0);
-    for (line, color) in ui.gutter {
-        r.fill(Rect { x: rect.x, y: rect.y + line as f32 * ch, w: bar, h: ch }, color);
-    }
     let border = ui.flash.or(ui.broadcast.then_some((theme.ansi[3], 1.0)));
     if let Some((color, a)) = border {
         let [red, g, b, _] = theme::to_f32(color);

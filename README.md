@@ -24,7 +24,7 @@
   <a href="#themes">Themes</a>
 </p>
 
-![Split panes with command marks and an inline image](extra/screenshots/main.png)
+![Split panes and an inline image](extra/screenshots/main.png)
 
 <table>
   <tr>
@@ -107,7 +107,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
 | 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |
 | ⬇️ **Drop-down mode** | A quake-style terminal that slides in with F12. |
-| 🔔 **Command tracking** | Pass/fail marks per prompt, jump between commands, notifications when long ones finish. A visual bell flashes the pane's border. |
+| 🔔 **Command tracking** | A red flash when a command fails, jump between commands, notifications when long ones finish. A visual bell flashes the pane's border. |
 
 <a id="shortcuts"></a>
 
@@ -197,7 +197,7 @@ For a see-through background, set `opacity = 0.85` (0 to 1) under `[terminal]`. 
 
 bash and zsh start with a small script that tells the terminal where prompts, commands and output are, and which directory you're in. It doesn't edit your dotfiles, and your own rc files still load. Fish does this by itself. You get:
 
-- a mark left of each prompt: 🟢 the command worked, 🔴 it failed, 🟡 it's still running, plus a short red flash around the pane on failure
+- a short red flash around the pane when a command fails (the pretty prompt also shows ✗ and the exit code on the next prompt)
 - prompt jumps and copy-last-output (see the shortcuts)
 - a desktop notification when a command that ran 10 s or more ends while the window isn't focused
 
