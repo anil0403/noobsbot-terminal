@@ -195,11 +195,12 @@ mod tests {
     fn zsh_reports_the_directory_as_is() {
         // A backslash in a folder name reached the terminal as an escape (`\a` ended the
         // OSC early, with whatever followed taken as output), the way zsh's print reads it.
+        // `;` after source: its last line is false unless TERM=noobsbot (CI).
         let base = std::env::temp_dir().join(format!("noobsbot-zsh-{}", std::process::id()));
         let dir = base.join(r"a\nb\ac");
         std::fs::create_dir_all(&dir).unwrap();
         let script = concat!(env!("CARGO_MANIFEST_DIR"), "/shell/zsh/noobsbot.zsh");
-        let out = Command::new("zsh").args(["-f", "-c", r#"source "$1" && cd "$2" && __noobsbot_precmd"#, "-", script]).arg(&dir).output().unwrap();
+        let out = Command::new("zsh").args(["-f", "-c", r#"source "$1"; cd "$2" && __noobsbot_precmd"#, "-", script]).arg(&dir).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(text.contains("\x1b]7;file://") && text.contains(&format!("{}\x07", dir.display())), "{text:?}");
