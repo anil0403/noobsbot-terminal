@@ -1,8 +1,8 @@
 //! What the argument being typed can name, laid out under the prompt like
 //! `ls`, narrowing as it grows: the folders `cd` (or `pushd`) can go to, or
 //! everything in the folder for `ls`. Tab fills in the only match (or what all
-//! of them start with), Escape hides the grid until the line changes. Every
-//! other key is the shell's.
+//! of them start with) and is never the shell's while the grid shows; Escape
+//! hides the grid until the line changes. Every other key is the shell's.
 
 use std::path::{Path, PathBuf};
 
@@ -39,6 +39,9 @@ pub enum Done {
     Redraw,
     /// Bytes for the shell, filling a folder in.
     Write(Vec<u8>),
+    /// Taken, with nothing to do (Tab with nothing to fill in: the grid
+    /// already shows the choices, and the shell would list them again).
+    Swallow,
     /// Not the list's: the key goes to the shell as usual.
     Pass,
 }
@@ -80,7 +83,7 @@ impl List {
             // What they all start with, if that's more than what's typed.
             ListKey::Tab => match common_prefix(&self.entries.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()) {
                 p if p.chars().count() > self.needle.chars().count() => Done::Write(self.fill(p, "")),
-                _ => Done::Pass,
+                _ => Done::Swallow,
             },
         }
     }
@@ -130,10 +133,10 @@ mod tests {
         assert_eq!(list(&["src"], "a/s").key(ListKey::Tab), Done::Write(b"\x7f\x7f\x7fa/src/".to_vec()));
         // A file (from ls): with a space.
         assert_eq!(list(&["notes.txt"], "no").key(ListKey::Tab), Done::Write(b"\x7f\x7fnotes.txt ".to_vec()));
-        // Several: what they share, when that's longer than what's typed; else the shell's Tab.
+        // Several: what they share, when that's longer than what's typed; else nothing.
         assert_eq!(list(&["Documents", "Downloads"], "d").key(ListKey::Tab), Done::Write(b"\x7fDo".to_vec()));
-        assert_eq!(list(&["Documents", "Downloads"], "Do").key(ListKey::Tab), Done::Pass);
-        assert_eq!(list(&["Documents", "my docs"], "doc").key(ListKey::Tab), Done::Pass);
+        assert_eq!(list(&["Documents", "Downloads"], "Do").key(ListKey::Tab), Done::Swallow);
+        assert_eq!(list(&["Documents", "my docs"], "doc").key(ListKey::Tab), Done::Swallow);
         // Escape hides it; then every key is the shell's.
         let mut l = list(&["src", "target"], "");
         assert_eq!(l.key(ListKey::Escape), Done::Redraw);

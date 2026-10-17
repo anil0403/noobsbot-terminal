@@ -1534,6 +1534,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.dirty = true;
                             return;
                         }
+                        Done::Swallow => return,
                         Done::Write(bytes) => {
                             for id in self.typing_to() {
                                 self.panes.get_mut(&id).unwrap().pty.write(&bytes);
@@ -1952,16 +1953,23 @@ fn draw_prompt_list(r: &mut Renderer, term: &Term, rect: Rect, list: &List, them
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let (lines, cols) = (term.screen_lines(), term.columns());
     let line = usize::try_from(term.grid().cursor.point.line.0).unwrap_or(0);
-    let (below, above) = (lines.saturating_sub(line + 1), line);
+    // Above, it goes over the first line of input that wraps onto the cursor's.
+    let wrapped = |l: usize| term.grid()[Line(l as i32)][term.last_column()].flags.contains(alacritty_terminal::term::cell::Flags::WRAPLINE);
+    let start = (0..line).rev().take_while(|&l| wrapped(l)).last().unwrap_or(line);
+    let (below, above) = (lines.saturating_sub(line + 1), start);
     let (across, width) = grid(&list.entries, cols);
     let rows = list.entries.len().div_ceil(across);
     // A line for "…N more" when they don't all fit.
     let want = rows.min(ROWS) + usize::from(rows > ROWS);
-    let (top, room) = if want <= below || below >= above { (line + 1, below.min(want)) } else { (line - want.min(above), want.min(above)) };
+    let (top, room) = if want <= below || below >= above { (line + 1, below.min(want)) } else { (start - want.min(above), want.min(above)) };
     let shown = if room < rows { room.saturating_sub(1) } else { rows };
     if shown == 0 {
         return;
     }
+    // Solid, across the pane: whatever the terminal has on those lines (a shell's
+    // own listing) stays hidden until the grid goes, as it isn't written there.
+    let [red, g, b, _] = theme::to_f32(theme.bg);
+    r.fill(Rect { x: rect.x, y: rect.y + top as f32 * ch, w: rect.w, h: (shown + usize::from(shown < rows)) as f32 * ch }, [red, g, b, 1.0]);
     // Folders in the directory blue, as `ls` colors them.
     let (folder, file) = (theme::to_f32(theme.ansi[12]), theme::to_f32(theme.fg));
     let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
