@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::vte::ansi::{ClearMode, Handler};
 
@@ -45,6 +46,8 @@ pub struct Pane {
     pub welcome: bool,
     /// When the welcome screen started typing itself out, until it's all shown.
     pub typing: Option<Instant>,
+    /// Lines the welcome screen takes, for drawing it again in place.
+    pub welcome_rows: usize,
 }
 
 impl Pane {
@@ -52,6 +55,17 @@ impl Pane {
     /// ssh), else what /proc says.
     pub fn cwd(&self) -> Option<PathBuf> {
         self.cwd.clone().filter(|p| p.is_dir()).or_else(|| self.pty.shell_cwd())
+    }
+
+    /// Draws the welcome screen again where it is, so its clock and meters stay current.
+    /// True if it did (only once it's done typing, and while it's all still there).
+    pub fn refresh_welcome(&mut self, gpu: &str, shell: &str) -> bool {
+        if !self.welcome || self.typing.is_some() {
+            return false;
+        }
+        let mut term = self.term.lock();
+        let screen = crate::welcome::screen(term.columns(), gpu, shell);
+        crate::welcome::redraw(&mut term, &screen, self.welcome_rows)
     }
 
     /// Clears the welcome screen (and its scrollback) on the first key at the
