@@ -491,6 +491,9 @@ impl App {
             return None; // fish suggests by itself
         }
         let typed = self.typed()?;
+        if self.config.terminal.prompt_list && crate::list::owns_line(self.config.terminal.fast_cd, &typed) {
+            return None; // fast_cd: the list's line
+        }
         let cwd = self.panes[&self.focused()].cwd();
         self.suggest.set_shell(&self.shell_name);
         self.suggest.get(&typed, cwd.as_deref())
@@ -510,9 +513,14 @@ impl App {
         blocks::input(&term).filter(|t| !t.trim().is_empty())
     }
 
-    /// The list under the focused pane's prompt, if it shows: made again when
-    /// the line or the folder changes.
+    /// The list under the focused pane's prompt, if it shows.
     fn prompt_list(&mut self) -> Option<&mut List> {
+        self.line_list().filter(|l| l.shown())
+    }
+
+    /// The list for the line at the focused pane's prompt, if it's a `cd` or
+    /// `ls`, shown or not: made again when the line or the folder changes.
+    fn line_list(&mut self) -> Option<&mut List> {
         let id = self.focused();
         let Some(typed) = self.typed().filter(|_| self.config.terminal.prompt_list) else {
             self.prompt_list = None;
@@ -523,7 +531,7 @@ impl App {
             self.suggest.set_shell(&self.shell_name);
             self.prompt_list = List::new(&typed, cwd.as_deref(), &mut self.suggest).map(|l| (id, l));
         }
-        self.prompt_list.as_mut().map(|(_, l)| l).filter(|l| l.shown())
+        self.prompt_list.as_mut().map(|(_, l)| l)
     }
 
     /// Lay out every tab and fit each pane's grid and PTY to its rect.
@@ -1509,17 +1517,20 @@ impl ApplicationHandler<UserEvent> for App {
                     self.paste(false);
                     return;
                 }
-                // The grid under the prompt takes Tab and Escape while it shows.
+                // The grid under the prompt takes Tab and Escape while it shows;
+                // with fast_cd, Tab and Ctrl-D on a cd or ls line whatever it shows.
                 let list_key = match &event.logical_key {
+                    Key::Character(c) if self.mods == ModifiersState::CONTROL && c.as_str() == "d" => Some(ListKey::CtrlD),
                     _ if !self.mods.is_empty() => None,
                     Key::Named(NamedKey::Tab) => Some(ListKey::Tab),
                     Key::Named(NamedKey::Escape) => Some(ListKey::Escape),
                     _ => None,
                 };
+                let owned = self.config.terminal.fast_cd;
                 if let Some(key) = list_key
-                    && let Some(list) = self.prompt_list()
+                    && let Some(list) = self.line_list()
                 {
-                    match list.key(key) {
+                    match list.key(key, owned) {
                         Done::Pass => {}
                         Done::Redraw => {
                             self.dirty = true;

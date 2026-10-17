@@ -37,6 +37,10 @@ suggestions = true
 # folder. Tab fills in the only match (or what they all start with), Escape
 # hides them until the line changes.
 prompt_list = true
+# With prompt_list on: a cd, pushd or ls line belongs to that list alone. No
+# grey suggestion on it, and Tab and Ctrl-D never reach the shell, so it never
+# prints its own completion list there. Other lines are as usual.
+fast_cd = false
 # Background opacity, from 0 (see-through) to 1 (solid). Text, and colors
 # programs paint themselves (vim's background), stay solid. Ignored
 # while the CRT effect is on.

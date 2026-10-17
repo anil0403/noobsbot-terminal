@@ -32,6 +32,8 @@ pub struct List {
 pub enum ListKey {
     Tab,
     Escape,
+    /// zsh lists the choices for it at the end of a line.
+    CtrlD,
 }
 
 /// What a key did to the list.
@@ -76,11 +78,17 @@ impl List {
         !self.dismissed && !self.entries.is_empty()
     }
 
-    pub fn key(&mut self, key: ListKey) -> Done {
-        if !self.shown() {
-            return Done::Pass;
+    /// `owned`: the line is the list's alone (`fast_cd`), so Tab and Ctrl-D
+    /// never reach the shell, grid or not.
+    pub fn key(&mut self, key: ListKey, owned: bool) -> Done {
+        match key {
+            ListKey::CtrlD if owned => return Done::Swallow,
+            ListKey::Tab if owned => {}
+            _ if !self.shown() => return Done::Pass,
+            _ => {}
         }
         match key {
+            ListKey::CtrlD => Done::Pass,
             ListKey::Escape => {
                 self.dismissed = true;
                 Done::Redraw
@@ -93,7 +101,8 @@ impl List {
                 let (name, dir) = &self.entries[0];
                 Done::Write(self.fill(name, if *dir { "/" } else { " " }))
             }
-            // What they all start with, if that's more than what's typed.
+            // What they all start with, if that's more than what's typed (none
+            // match: nothing, which is nothing to fill in either).
             ListKey::Tab => match common_prefix(&self.entries.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()) {
                 p if p.chars().count() > self.needle.chars().count() => Done::Write(self.fill(p, "")),
                 _ => Done::Swallow,
@@ -108,6 +117,12 @@ impl List {
         bytes.extend(end.as_bytes());
         bytes
     }
+}
+
+/// With `fast_cd`, a `cd` or `ls` line is the list's alone: no grey suggestion
+/// on it, and Tab and Ctrl-D never reach the shell (which would list).
+pub fn owns_line(fast_cd: bool, typed: &str) -> bool {
+    fast_cd && suggest::arg(typed).is_some()
 }
 
 /// The longest start all `names` share.
@@ -142,23 +157,47 @@ mod tests {
     #[test]
     fn keys() {
         // One match: filled in with its slash.
-        assert_eq!(list(&["My Stuff"], "my").key(ListKey::Tab), Done::Write(b"\x7f\x7fMy\\ Stuff/".to_vec()));
-        assert_eq!(list(&["src"], "a/s").key(ListKey::Tab), Done::Write(b"\x7f\x7f\x7fa/src/".to_vec()));
+        assert_eq!(list(&["My Stuff"], "my").key(ListKey::Tab, false), Done::Write(b"\x7f\x7fMy\\ Stuff/".to_vec()));
+        assert_eq!(list(&["src"], "a/s").key(ListKey::Tab, false), Done::Write(b"\x7f\x7f\x7fa/src/".to_vec()));
         // A file (from ls): with a space.
-        assert_eq!(list(&["notes.txt"], "no").key(ListKey::Tab), Done::Write(b"\x7f\x7fnotes.txt ".to_vec()));
+        assert_eq!(list(&["notes.txt"], "no").key(ListKey::Tab, false), Done::Write(b"\x7f\x7fnotes.txt ".to_vec()));
         // Several: what they share, when that's longer than what's typed; else nothing.
-        assert_eq!(list(&["Documents", "Downloads"], "d").key(ListKey::Tab), Done::Write(b"\x7fDo".to_vec()));
-        assert_eq!(list(&["Documents", "Downloads"], "Do").key(ListKey::Tab), Done::Swallow);
-        assert_eq!(list(&["Documents", "my docs"], "doc").key(ListKey::Tab), Done::Swallow);
+        assert_eq!(list(&["Documents", "Downloads"], "d").key(ListKey::Tab, false), Done::Write(b"\x7fDo".to_vec()));
+        assert_eq!(list(&["Documents", "Downloads"], "Do").key(ListKey::Tab, false), Done::Swallow);
+        assert_eq!(list(&["Documents", "my docs"], "doc").key(ListKey::Tab, false), Done::Swallow);
         // Escape hides it; then every key is the shell's.
         let mut l = list(&["src", "target"], "");
-        assert_eq!(l.key(ListKey::Escape), Done::Redraw);
+        assert_eq!(l.key(ListKey::Escape, false), Done::Redraw);
         assert!(!l.shown());
-        assert_eq!(l.key(ListKey::Tab), Done::Pass);
-        assert_eq!(list(&[], "x").key(ListKey::Tab), Done::Pass);
+        assert_eq!(l.key(ListKey::Tab, false), Done::Pass);
+        assert_eq!(list(&[], "x").key(ListKey::Tab, false), Done::Pass);
         // Just the command: Tab is the space after it, whatever's listed.
         let mut bare = List { bare: true, ..list(&["src"], "") };
-        assert_eq!(bare.key(ListKey::Tab), Done::Write(b" ".to_vec()));
+        assert_eq!(bare.key(ListKey::Tab, false), Done::Write(b" ".to_vec()));
+    }
+
+    #[test]
+    fn fast_cd() {
+        // Only cd, pushd and ls lines, and only with it on.
+        for typed in ["cd", "cd ", "cd Doc", "pushd x", "ls", "ls -la Documents/"] {
+            assert!(owns_line(true, typed), "{typed}");
+            assert!(!owns_line(false, typed), "{typed}");
+        }
+        for typed in ["git status", "lsof", "cdx", "cat Doc", "cd a b"] {
+            assert!(!owns_line(true, typed), "{typed}");
+        }
+        // Owned: Tab is never the shell's, matches or not, hidden or not; nor Ctrl-D.
+        assert_eq!(list(&[], "nomatch").key(ListKey::Tab, true), Done::Swallow);
+        assert_eq!(list(&[], "nomatch").key(ListKey::CtrlD, true), Done::Swallow);
+        assert_eq!(List { bare: true, ..list(&[], "") }.key(ListKey::Tab, true), Done::Write(b" ".to_vec()));
+        let mut hidden = list(&["src"], "s");
+        hidden.key(ListKey::Escape, true);
+        assert_eq!(hidden.key(ListKey::Tab, true), Done::Write(b"\x7fsrc/".to_vec()));
+        assert_eq!(hidden.key(ListKey::Escape, true), Done::Pass);
+        // Not owned: as before.
+        assert_eq!(list(&[], "nomatch").key(ListKey::Tab, false), Done::Pass);
+        assert_eq!(list(&["src"], "s").key(ListKey::CtrlD, false), Done::Pass);
+        assert_eq!(hidden.key(ListKey::Tab, false), Done::Pass);
     }
 
     #[test]
