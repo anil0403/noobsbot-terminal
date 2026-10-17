@@ -66,6 +66,25 @@ __noobsbot_preexec() {
     print -n "\e]133;C\a"
 }
 
+# zsh lists completions under the line and leaves the list there until the
+# screen is redrawn, so it outlives a line that no longer matches it (noobsbot
+# shows its own list for cd and ls). Clear it once the line changes after one.
+__noobsbot_list_check() {
+    if [[ $LASTWIDGET == (*complete*|*list*|menu-*) ]]; then
+        __noobsbot_listed=$BUFFER
+    elif [[ -n ${__noobsbot_listed+x} && $BUFFER != $__noobsbot_listed ]]; then
+        unset __noobsbot_listed # first: the redisplay runs this hook again
+        zle -R -c
+    fi
+}
+__noobsbot_list_done() {
+    unset __noobsbot_listed
+}
+# (zle loads when the first prompt is read, after this; the hooks need it now.)
+zmodload zsh/zle 2>/dev/null && autoload -Uz add-zle-hook-widget \
+    && add-zle-hook-widget zle-line-pre-redraw __noobsbot_list_check \
+    && add-zle-hook-widget zle-line-finish __noobsbot_list_done
+
 typeset -ga precmd_functions
 precmd_functions=(__noobsbot_precmd $precmd_functions)
 preexec_functions+=(__noobsbot_preexec)
