@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, OnResize, WindowSize};
 use alacritty_terminal::sync::FairMutex;
@@ -17,6 +18,18 @@ use crate::term::{Listener, Term, UserEvent};
 
 /// Hyperlink id prefix (and URI) marking prompt cells; the id ends in the prompt's number.
 pub const PROMPT_TAG: &str = "noobsbot-prompt-"; // no `:`, it separates OSC 8 params
+
+/// How long the reader may wait for output before a synchronized update (DEC 2026)
+/// times out; `None` outside one. An app that begins one and dies before ending it
+/// would otherwise leave the pane frozen until its next output.
+fn sync_wait(parser: &Processor) -> Option<Duration> {
+    parser.sync_timeout().sync_timeout().map(|at| at.saturating_duration_since(Instant::now()))
+}
+
+/// The synchronized update is past its deadline: show what it buffered.
+fn sync_expired(parser: &Processor) -> bool {
+    parser.sync_timeout().sync_timeout().is_some_and(|at| at <= Instant::now())
+}
 
 pub struct Pty {
     // Dropping this hangs up the shell.
@@ -64,9 +77,20 @@ impl Pty {
                         libc::pollfd { fd: reader.as_raw_fd(), events: libc::POLLIN, revents: 0 },
                         libc::pollfd { fd: shell_exit, events: libc::POLLIN, revents: 0 },
                     ];
-                    unsafe { libc::poll(fds.as_mut_ptr(), if shell_exit < 0 { 1 } else { 2 }, -1) };
+                    // During a synchronized update, wait no longer than its deadline.
+                    let wait = sync_wait(&parser).map_or(-1, |d| d.as_micros().div_ceil(1000).min(i32::MAX as u128) as i32);
+                    unsafe { libc::poll(fds.as_mut_ptr(), if shell_exit < 0 { 1 } else { 2 }, wait) };
                     if fds[1].revents != 0 && fds[0].revents & libc::POLLIN == 0 {
                         break; // the shell is gone and so is its output
+                    }
+                    if fds[0].revents == 0 {
+                        if sync_expired(&parser) {
+                            parser.stop_sync(&mut *term.lock());
+                            if !woken_reader.swap(true, Ordering::AcqRel) {
+                                let _ = proxy.send_event(UserEvent::Term(pane, Event::Wakeup));
+                            }
+                        }
+                        continue; // interrupted, or the update timed out
                     }
                     let n = match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break, // EIO once the shell exits
@@ -164,5 +188,32 @@ impl Pty {
 
     pub fn resize(&mut self, size: WindowSize) {
         self.pty.on_resize(size);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alacritty_terminal::event::VoidListener;
+    use alacritty_terminal::index::{Column, Line};
+    use alacritty_terminal::term::Config;
+    use alacritty_terminal::term::test::TermSize;
+
+    #[test]
+    fn unfinished_sync_update_times_out() {
+        let mut term = alacritty_terminal::Term::new(Config::default(), &TermSize::new(20, 5), VoidListener);
+        let mut parser: Processor = Processor::new();
+        assert_eq!(sync_wait(&parser), None); // outside an update the reader may block
+        // An app begins an update, draws, and dies before ending it.
+        parser.advance(&mut term, b"\x1b[?2026hhi");
+        assert_eq!(term.grid()[Line(0)][Column(0)].c, ' ', "held back until the update ends");
+        let wait = sync_wait(&parser).expect("a deadline while the update is open");
+        assert!(wait <= Duration::from_millis(150));
+        assert!(!sync_expired(&parser));
+        std::thread::sleep(wait + Duration::from_millis(5));
+        assert!(sync_expired(&parser));
+        parser.stop_sync(&mut term);
+        assert_eq!(term.grid()[Line(0)][Column(0)].c, 'h');
+        assert_eq!(sync_wait(&parser), None);
     }
 }

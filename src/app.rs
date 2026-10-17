@@ -233,11 +233,16 @@ fn grid_point(term: &Term, (col, line): (usize, usize)) -> Point {
 }
 
 fn window_size(font: &Font, width: f32, height: f32) -> WindowSize {
+    grid_size(font.cell_w, font.cell_h, width, height)
+}
+
+fn grid_size(cell_w: f32, cell_h: f32, width: f32, height: f32) -> WindowSize {
     WindowSize {
-        num_cols: (width / font.cell_w).max(1.0) as u16,
-        num_lines: (height / font.cell_h).max(1.0) as u16,
-        cell_width: font.cell_w as u16,
-        cell_height: font.cell_h as u16,
+        // Two at least: a wide character needs two cells, and alacritty panics on one.
+        num_cols: (width / cell_w).max(2.0) as u16,
+        num_lines: (height / cell_h).max(1.0) as u16,
+        cell_width: cell_w as u16,
+        cell_height: cell_h as u16,
     }
 }
 
@@ -354,6 +359,7 @@ impl App {
             welcome,
             typing: welcome.then(Instant::now),
             welcome_rows,
+            held: None,
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -511,19 +517,30 @@ impl App {
                 pane.images.lock().unwrap().cell = (renderer.font.cell_w, renderer.font.cell_h);
                 let size = window_size(&renderer.font, rect.w, rect.h);
                 let (cols, lines) = (size.num_cols as usize, size.num_lines as usize);
-                let mut term = pane.term.lock();
+                let term = pane.term.clone();
+                let mut term = term.lock();
                 if (term.columns(), term.screen_lines()) != (cols, lines) {
-                    term.resize(TermSize::new(cols, lines));
+                    let held = pane.hold_resize(&term, size);
                     // A welcome screen still up is drawn again for the new width (reflowed,
-                    // it falls apart); the resize then has the shell redraw its prompt below.
+                    // it falls apart): taken out first, so only what the shell printed
+                    // reflows, then put back above it.
+                    let lifted = pane.welcome && crate::welcome::redraw(&mut term, "", &mut pane.welcome_rows);
+                    term.resize(TermSize::new(cols, lines));
                     if pane.welcome {
                         let welcome = crate::welcome::screen(cols, &renderer.gpu, &shell);
-                        pane.welcome_rows = crate::welcome::rows(&welcome);
-                        let screen = format!("\x1b[H\x1b[2J\x1b[3J{welcome}");
-                        alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *term, screen.as_bytes());
+                        // No room for it (or scrolled off already): start the screen over;
+                        // the resize then has the shell redraw its prompt below.
+                        if !(lifted && crate::welcome::redraw(&mut term, &welcome, &mut pane.welcome_rows)) {
+                            pane.welcome_rows = crate::welcome::rows(&welcome);
+                            let screen = format!("\x1b[H\x1b[2J\x1b[3J{welcome}");
+                            alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new()
+                                .advance(&mut *term, screen.as_bytes());
+                        }
                     }
                     drop(term);
-                    pane.pty.resize(size);
+                    if !held {
+                        pane.pty.resize(size);
+                    }
                 }
             }
         }
@@ -1313,6 +1330,10 @@ impl ApplicationHandler<UserEvent> for App {
         for id in due {
             self.check_context(id, false);
         }
+        for pane in self.panes.values_mut().filter(|p| p.held.as_ref().is_some_and(|h| now >= h.due)) {
+            pane.settle();
+            self.dirty = true;
+        }
         // Only matters while focused (unfocused, the cursor is a hollow block): no lock otherwise.
         let blinking = self.renderer.as_ref().is_some_and(|r| r.focused) && self.focused_pane().term.lock().cursor_style().blinking;
         let mut wake = self.fade_quake(now);
@@ -1357,7 +1378,7 @@ impl ApplicationHandler<UserEvent> for App {
                 wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
             }
         }
-        for due in self.panes.values().filter_map(|p| p.context_due) {
+        for due in self.panes.values().flat_map(|p| [p.context_due, p.held.as_ref().map(|h| h.due)]).flatten() {
             wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
         }
         event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
@@ -2217,6 +2238,23 @@ mod tests {
         assert_eq!(hit(1000.0 + 52.0 + 5.0), Some(BarHit::Button(Action::SplitRight)));
         // A lone tab isn't drawn, so it isn't hit either.
         assert_eq!(hit_at(10.0, 6.0, 2.0, 1000.0, 1, 200.0, 10.0), None);
+    }
+
+    #[test]
+    fn panes_are_two_columns_at_least() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::term::Config;
+        use alacritty_terminal::term::test::TermSize;
+        use alacritty_terminal::vte::ansi::Processor;
+
+        for width in [0.0, 5.0, 12.0, f32::NAN] {
+            let size = grid_size(10.0, 20.0, width, 100.0);
+            assert_eq!(size.num_cols, 2, "{width}");
+            // A wide character in the narrowest pane: alacritty panicked on one column.
+            let mut term = alacritty_terminal::Term::new(Config::default(), &TermSize::new(size.num_cols as usize, 5), VoidListener);
+            Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut term, "日本語 😀\r\n".as_bytes());
+        }
+        assert_eq!(grid_size(10.0, 20.0, 805.0, 410.0).num_cols, 80);
     }
 
     #[test]

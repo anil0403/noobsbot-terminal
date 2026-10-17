@@ -82,6 +82,25 @@ pub fn prompts<T>(term: &Term<T>) -> Vec<(Line, u64)> {
     out
 }
 
+/// First line of the prompt the cursor is on, or the nearest one above it.
+pub fn prompt_start<T>(term: &Term<T>) -> Option<Line> {
+    let top = term.topmost_line();
+    let mut line = term.grid().cursor.point.line;
+    let prompt = loop {
+        if let Some(p) = prompt_at(term, line) {
+            break p;
+        }
+        if line <= top {
+            return None;
+        }
+        line -= 1;
+    };
+    while line > top && prompt_at(term, line - 1) == Some(prompt) {
+        line -= 1;
+    }
+    Some(line)
+}
+
 /// The text of the command typed at `prompt` (searched for near the bottom).
 pub fn command_text<T>(term: &Term<T>, prompt: u64) -> Option<String> {
     let line = (term.topmost_line().0..=term.bottommost_line().0).rev().map(Line).find(|&l| prompt_at(term, l) == Some(prompt))?;

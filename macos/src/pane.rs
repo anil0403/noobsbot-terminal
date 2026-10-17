@@ -2,11 +2,14 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use alacritty_terminal::event::{EventListener, WindowSize};
 use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::vte::ansi::{ClearMode, Handler};
+use alacritty_terminal::term::TermMode;
+use alacritty_terminal::vte::ansi::{ClearMode, Handler, Processor, StdSyncHandler};
 
 use crate::blocks::Blocks;
 use crate::context::Context;
@@ -17,6 +20,22 @@ use crate::theme::Fade;
 
 /// Gap between split panes, in pixels.
 const DIVIDER: f32 = 2.0;
+/// A resize at the prompt reaches the shell once the window stopped changing this long.
+const SETTLE: Duration = Duration::from_millis(100);
+
+/// A resize the shell hasn't heard of yet. Shells redraw their prompt by moving the
+/// cursor up as many lines as it took at the old width, but the terminal has rewrapped
+/// it since: they land on the wrong line and leave copies of it behind. So while the
+/// window is dragged the shell isn't told; then the cursor is put back where the shell
+/// thinks it is, counted from the prompt's first line, and it redraws over the prompt.
+pub struct Held {
+    pub due: Instant,
+    size: WindowSize,
+    /// The size the shell knows.
+    shell: (usize, usize),
+    /// Lines below the prompt's first line, and column, of the shell's cursor.
+    cursor: Option<(i32, usize)>,
+}
 
 pub struct Pane {
     pub term: Arc<FairMutex<Term>>,
@@ -48,6 +67,8 @@ pub struct Pane {
     pub typing: Option<Instant>,
     /// Lines the welcome screen takes, for drawing it again in place.
     pub welcome_rows: usize,
+    /// A resize the shell hasn't been told of yet, while the window is dragged.
+    pub held: Option<Held>,
 }
 
 impl Pane {
@@ -65,7 +86,41 @@ impl Pane {
         }
         let mut term = self.term.lock();
         let screen = crate::welcome::screen(term.columns(), gpu, shell);
-        crate::welcome::redraw(&mut term, &screen, self.welcome_rows)
+        crate::welcome::redraw(&mut term, &screen, &mut self.welcome_rows)
+    }
+
+    /// Holds a resize back from the shell while it's at its prompt (see `Held`); false
+    /// if the shell should hear of it now. Called before the terminal is resized.
+    pub fn hold_resize(&mut self, term: &Term, size: WindowSize) -> bool {
+        if !self.at_prompt || term.mode().contains(TermMode::ALT_SCREEN) {
+            self.held = None;
+            return false;
+        }
+        let held = self.held.get_or_insert_with(|| {
+            let cursor = term.grid().cursor.point;
+            Held {
+                due: Instant::now(),
+                size,
+                shell: (term.columns(), term.screen_lines()),
+                cursor: crate::blocks::prompt_start(term).map(|start| (cursor.line.0 - start.0, cursor.column.0)),
+            }
+        });
+        (held.due, held.size) = (Instant::now() + SETTLE, size);
+        true
+    }
+
+    /// The held resize (see `Held`), once the window stopped changing.
+    pub fn settle(&mut self) {
+        let Some(held) = self.held.take() else { return };
+        let mut term = self.term.lock();
+        let same = (term.columns(), term.screen_lines()) == held.shell;
+        if let Some(cursor) = held.cursor.filter(|_| self.at_prompt) {
+            put_cursor(&mut term, cursor, same);
+        }
+        drop(term);
+        if !same {
+            self.pty.resize(held.size);
+        }
     }
 
     /// Clears the welcome screen (and its scrollback) on the first key at the
@@ -81,6 +136,19 @@ impl Pane {
         drop(term);
         self.pty.write(b"\x0c");
         true
+    }
+}
+
+/// Puts the cursor `lines` below the first line of the prompt it's at, scrolling up if
+/// that's past the bottom. At the shell's size it goes back to its column too (the shell
+/// won't redraw); otherwise to the start of the line, where the shell's redraw begins.
+fn put_cursor<T: EventListener>(term: &mut alacritty_terminal::Term<T>, (lines, column): (i32, usize), same: bool) {
+    let Some(start) = crate::blocks::prompt_start(term) else { return };
+    let (last, target) = (term.screen_lines() as i32 - 1, start.0 + lines);
+    let column = if same { column.min(term.columns() - 1) } else { 0 };
+    term.grid_mut().cursor.point = Point::new(Line(target.clamp(0, last)), Column(column));
+    if target > last {
+        Processor::<StdSyncHandler>::new().advance(term, "\n".repeat((target - last) as usize).as_bytes());
     }
 }
 
@@ -348,5 +416,64 @@ mod tests {
         assert_eq!(root.remove(3), Some(2));
         assert_eq!(root.remove(2), None);
         assert_eq!(root.leaves(), [2]);
+    }
+
+    #[test]
+    fn prompt_redrawn_over_itself_after_a_resize() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::term::Config;
+        use alacritty_terminal::term::test::TermSize;
+        let tag = crate::pty::PROMPT_TAG;
+        // A prompt as the shell draws it, tagged as the reader thread does.
+        let prompt = format!("\x1b]8;id={tag}1;{tag}1\x1b\\[user]-[folder]-[branch] $ \x1b]8;;\x1b\\ls");
+        let text = |term: &alacritty_terminal::Term<VoidListener>| {
+            let grid = term.grid();
+            (grid.topmost_line().0..grid.screen_lines() as i32)
+                .map(|l| (0..term.columns()).map(|c| grid[Line(l)][Column(c)].c).collect::<String>())
+                .collect::<String>()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let want = "output line [user]-[folder]-[branch] $ ls";
+        // Narrower: the prompt (one line) rewraps onto two; the shell then goes back to
+        // the start of the line it thinks the prompt is on and draws it again.
+        let mut term = alacritty_terminal::Term::new(Config::default(), &TermSize::new(40, 10), VoidListener);
+        let mut parser: Processor = Processor::new();
+        parser.advance(&mut term, format!("output line\r\n{prompt}").as_bytes());
+        let cursor = term.grid().cursor.point;
+        let start = crate::blocks::prompt_start(&term).unwrap();
+        assert_eq!(start, Line(1));
+        term.resize(TermSize::new(20, 10));
+        put_cursor(&mut term, (cursor.line.0 - start.0, cursor.column.0), false);
+        parser.advance(&mut term, format!("\r\x1b[J{prompt}").as_bytes());
+        assert_eq!(text(&term), want);
+        // Wider: two lines become one, and the shell goes up the one it drew.
+        let cursor = term.grid().cursor.point;
+        let start = crate::blocks::prompt_start(&term).unwrap();
+        assert_eq!(cursor.line.0 - start.0, 1);
+        term.resize(TermSize::new(40, 10));
+        put_cursor(&mut term, (cursor.line.0 - start.0, cursor.column.0), false);
+        parser.advance(&mut term, format!("\r\x1b[A\x1b[J{prompt}").as_bytes());
+        assert_eq!(text(&term), want);
+        // Back at the shell's size it won't redraw: the cursor goes back where it was.
+        let cursor = term.grid().cursor.point;
+        let start = crate::blocks::prompt_start(&term).unwrap();
+        term.resize(TermSize::new(15, 10));
+        term.resize(TermSize::new(40, 10));
+        put_cursor(&mut term, (cursor.line.0 - start.0, cursor.column.0), true);
+        let start = crate::blocks::prompt_start(&term).unwrap();
+        assert_eq!(term.grid().cursor.point, Point::new(start, cursor.column));
+        assert_eq!(text(&term), want);
+        // Past the bottom: the screen scrolls up to make room.
+        let mut term = alacritty_terminal::Term::new(Config::default(), &TermSize::new(20, 3), VoidListener);
+        parser.advance(&mut term, format!("a\r\nb\r\n{prompt}").as_bytes());
+        let cursor = term.grid().cursor.point;
+        let start = crate::blocks::prompt_start(&term).unwrap();
+        assert_eq!((start, cursor.line), (Line(1), Line(2)));
+        term.resize(TermSize::new(40, 3));
+        put_cursor(&mut term, (cursor.line.0 - start.0, cursor.column.0), false);
+        parser.advance(&mut term, format!("\r\x1b[A\x1b[J{prompt}").as_bytes());
+        assert_eq!(text(&term), "a b [user]-[folder]-[branch] $ ls");
     }
 }
