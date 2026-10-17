@@ -1521,11 +1521,19 @@ impl ApplicationHandler<UserEvent> for App {
                 // with fast_cd, Tab and Ctrl-D on a cd or ls line whatever it shows.
                 let list_key = match &event.logical_key {
                     Key::Character(c) if self.mods == ModifiersState::CONTROL && c.as_str() == "d" => Some(ListKey::CtrlD),
+                    Key::Named(NamedKey::Tab) if self.mods == ModifiersState::SHIFT => Some(ListKey::BackTab),
                     _ if !self.mods.is_empty() => None,
                     Key::Named(NamedKey::Tab) => Some(ListKey::Tab),
                     Key::Named(NamedKey::Escape) => Some(ListKey::Escape),
                     _ => None,
                 };
+                // Any other key ends going through them with Tab (modifiers alone don't).
+                if list_key.is_none()
+                    && !matches!(event.logical_key, Key::Named(NamedKey::Control | NamedKey::Shift | NamedKey::Alt | NamedKey::Super))
+                    && let Some((_, list)) = &mut self.prompt_list
+                {
+                    list.end_cycle();
+                }
                 let owned = self.config.terminal.fast_cd;
                 if let Some(key) = list_key
                     && let Some(list) = self.line_list()
@@ -1971,12 +1979,19 @@ fn draw_prompt_list(r: &mut Renderer, term: &Term, rect: Rect, list: &List, them
     // Folders in the directory blue, as `ls` colors them.
     let (folder, file) = (theme::to_f32(theme.ansi[12]), theme::to_f32(theme.fg));
     let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
-    for (i, (name, dir)) in list.entries.iter().take(shown * across).enumerate() {
-        let (row, col) = (i / across, (i % across) * width);
+    // Scrolled so the entry Tab filled in is in view.
+    let first = list.current().map_or(0, |i| (i / across).saturating_sub(shown - 1));
+    let selection = theme::to_f32(theme.selection);
+    for (i, (name, dir)) in list.entries.iter().enumerate().skip(first * across).take(shown * across) {
+        let (row, col) = (i / across - first, (i % across) * width);
         let name: String = name.chars().take(cols.saturating_sub(col)).collect();
-        r.text(rect.x + col as f32 * cw, rect.y + (top + row) as f32 * ch, &name, if *dir { folder } else { file });
+        let (x, y) = (rect.x + col as f32 * cw, rect.y + (top + row) as f32 * ch);
+        if list.current() == Some(i) {
+            r.fill(Rect { x, y, w: name.chars().count() as f32 * cw, h: ch }, selection);
+        }
+        r.text(x, y, &name, if *dir { folder } else { file });
     }
-    let more = list.entries.len().saturating_sub(shown * across);
+    let more = list.entries.len().saturating_sub((first + shown) * across);
     if more > 0 {
         let text: String = format!("\u{2026}{more} more").chars().take(cols).collect();
         r.text(rect.x, rect.y + (top + shown) as f32 * ch, &text, muted);

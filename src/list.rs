@@ -1,8 +1,10 @@
 //! What the argument being typed can name, laid out under the prompt like
 //! `ls`, narrowing as it grows: the folders `cd` (or `pushd`) can go to, or
-//! everything in the folder for `ls`. Tab fills in the only match (or what all
-//! of them start with) and is never the shell's while the grid shows; Escape
-//! hides the grid until the line changes. Every other key is the shell's.
+//! everything in the folder for `ls`. Tab fills in the only match, or what all
+//! of them start with, or else goes through them one by one (Shift-Tab back);
+//! it's never the shell's while the grid shows. Escape puts back what was
+//! typed, or hides the grid until the line changes. Every other key is the
+//! shell's (and ends going through them, keeping the one filled in).
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +18,9 @@ pub const GAP: usize = 2;
 pub struct List {
     /// What was typed at the prompt and where, when the list was made.
     typed: String,
+    /// The line before the argument (`cd `), and the argument as typed.
+    head: String,
+    arg: String,
     cwd: Option<PathBuf>,
     /// Characters of `cd`'s argument as typed: the Backspaces filling one takes.
     arg_len: usize,
@@ -27,10 +32,15 @@ pub struct List {
     /// The matching names, each with whether it's a folder.
     pub entries: Vec<(String, bool)>,
     dismissed: bool,
+    /// Going through the entries with Tab: the one filled in, and how many
+    /// characters it took on the line.
+    cycle: Option<(usize, usize)>,
 }
 
 pub enum ListKey {
     Tab,
+    /// Shift-Tab.
+    BackTab,
     Escape,
     /// zsh lists the choices for it at the end of a line.
     CtrlD,
@@ -59,6 +69,9 @@ impl List {
         let (dir, needle) = plain.rsplit_once('/').map_or((String::new(), plain.clone()), |(d, n)| (format!("{d}/"), n.to_owned()));
         Some(Self {
             typed: typed.to_owned(),
+            // The argument runs to the end of the line.
+            head: typed[..typed.len() - arg.len()].to_owned(),
+            arg: arg.to_owned(),
             cwd: cwd.map(Path::to_owned),
             arg_len: arg.chars().count(),
             bare: !typed.trim_start().contains(' '),
@@ -66,12 +79,26 @@ impl List {
             needle,
             entries,
             dismissed: false,
+            cycle: None,
         })
     }
 
-    /// Made for this line, so it's still the one to show.
+    /// Made for this line, so it's still the one to show. While Tab goes
+    /// through the entries, the line changes under it, but not before the argument.
     pub fn is_for(&self, typed: &str, cwd: Option<&Path>) -> bool {
-        self.typed == typed && self.cwd.as_deref() == cwd
+        let line = if self.cycle.is_some() { typed.starts_with(&self.head) } else { self.typed == typed };
+        line && self.cwd.as_deref() == cwd
+    }
+
+    /// The entry Tab filled in, while going through them.
+    pub fn current(&self) -> Option<usize> {
+        self.cycle.map(|(i, _)| i)
+    }
+
+    /// Another key: the entry filled in stays, and the list goes back to
+    /// following the line.
+    pub fn end_cycle(&mut self) {
+        self.cycle = None;
     }
 
     pub fn shown(&self) -> bool {
@@ -81,14 +108,32 @@ impl List {
     /// `owned`: the line is the list's alone (`fast_cd`), so Tab and Ctrl-D
     /// never reach the shell, grid or not.
     pub fn key(&mut self, key: ListKey, owned: bool) -> Done {
+        if let Some((_, filled)) = self.cycle {
+            match key {
+                ListKey::Tab => return self.step(true),
+                ListKey::BackTab => return self.step(false),
+                // What was typed, back.
+                ListKey::Escape => {
+                    self.cycle = None;
+                    let mut bytes = vec![0x7f; filled];
+                    bytes.extend(self.arg.as_bytes());
+                    return Done::Write(bytes);
+                }
+                ListKey::CtrlD => self.cycle = None,
+            }
+        }
         match key {
             ListKey::CtrlD if owned => return Done::Swallow,
-            ListKey::Tab if owned => {}
+            ListKey::Tab | ListKey::BackTab if owned => {}
             _ if !self.shown() => return Done::Pass,
             _ => {}
         }
         match key {
             ListKey::CtrlD => Done::Pass,
+            // From the last one back.
+            ListKey::BackTab if self.entries.len() > 1 && !self.bare => self.step(false),
+            ListKey::BackTab if owned => Done::Swallow,
+            ListKey::BackTab => Done::Pass,
             ListKey::Escape => {
                 self.dismissed = true;
                 Done::Redraw
@@ -101,13 +146,30 @@ impl List {
                 let (name, dir) = &self.entries[0];
                 Done::Write(self.fill(name, if *dir { "/" } else { " " }))
             }
-            // What they all start with, if that's more than what's typed (none
-            // match: nothing, which is nothing to fill in either).
+            // What they all start with, if that's more than what's typed; else
+            // one by one (none match: nothing to fill in).
             ListKey::Tab => match common_prefix(&self.entries.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>()) {
                 p if p.chars().count() > self.needle.chars().count() => Done::Write(self.fill(p, "")),
-                _ => Done::Swallow,
+                _ if self.entries.is_empty() => Done::Swallow,
+                _ => self.step(true),
             },
         }
+    }
+
+    /// The next entry (or the one before) in place of what's on the line:
+    /// its name alone, no slash or space while going through them.
+    fn step(&mut self, forward: bool) -> Done {
+        let n = self.entries.len();
+        let (erase, next) = match self.cycle {
+            Some((i, filled)) => (filled, if forward { (i + 1) % n } else { (i + n - 1) % n }),
+            None => (self.arg_len, if forward { 0 } else { n - 1 }),
+        };
+        let text = suggest::escape(&format!("{}{}", self.dir, self.entries[next].0));
+        self.cycle = Some((next, text.chars().count()));
+        self.dismissed = false;
+        let mut bytes = vec![0x7f; erase];
+        bytes.extend(text.into_bytes());
+        Done::Write(bytes)
     }
 
     /// Backspaces over the argument as typed, then `name` in its folder and `end`.
@@ -151,7 +213,20 @@ mod tests {
     fn list(names: &[&str], typed_after: &str) -> List {
         let (dir, needle) = typed_after.rsplit_once('/').map_or((String::new(), typed_after.to_owned()), |(d, n)| (format!("{d}/"), n.to_owned()));
         let entries = names.iter().map(|e| (e.to_string(), !e.contains('.'))).collect();
-        List { typed: String::new(), cwd: None, arg_len: typed_after.chars().count(), bare: false, dir, needle, entries, dismissed: false }
+        let (typed, arg) = (format!("cd {typed_after}"), typed_after.to_owned());
+        List {
+            head: "cd ".into(),
+            typed,
+            arg,
+            cwd: None,
+            arg_len: typed_after.chars().count(),
+            bare: false,
+            dir,
+            needle,
+            entries,
+            dismissed: false,
+            cycle: None,
+        }
     }
 
     #[test]
@@ -163,8 +238,8 @@ mod tests {
         assert_eq!(list(&["notes.txt"], "no").key(ListKey::Tab, false), Done::Write(b"\x7f\x7fnotes.txt ".to_vec()));
         // Several: what they share, when that's longer than what's typed; else nothing.
         assert_eq!(list(&["Documents", "Downloads"], "d").key(ListKey::Tab, false), Done::Write(b"\x7fDo".to_vec()));
-        assert_eq!(list(&["Documents", "Downloads"], "Do").key(ListKey::Tab, false), Done::Swallow);
-        assert_eq!(list(&["Documents", "my docs"], "doc").key(ListKey::Tab, false), Done::Swallow);
+        // Nothing longer to fill in: one by one (see `cycles`).
+        assert_eq!(list(&["Documents", "Downloads"], "Do").key(ListKey::Tab, false), Done::Write(b"\x7f\x7fDocuments".to_vec()));
         // Escape hides it; then every key is the shell's.
         let mut l = list(&["src", "target"], "");
         assert_eq!(l.key(ListKey::Escape, false), Done::Redraw);
@@ -198,6 +273,47 @@ mod tests {
         assert_eq!(list(&[], "nomatch").key(ListKey::Tab, false), Done::Pass);
         assert_eq!(list(&["src"], "s").key(ListKey::CtrlD, false), Done::Pass);
         assert_eq!(hidden.key(ListKey::Tab, false), Done::Pass);
+    }
+
+    #[test]
+    fn cycles() {
+        let bs = |n: usize, s: &str| [vec![0x7f; n], s.as_bytes().to_vec()].concat();
+        let mut l = list(&["..", "My Stuff", "notes.txt", "src"], "");
+        // Names alone, in order, each in place of the last, wrapping.
+        assert_eq!(l.key(ListKey::Tab, false), Done::Write(bs(0, "..")));
+        assert_eq!(l.current(), Some(0));
+        assert_eq!(l.key(ListKey::Tab, false), Done::Write(bs(2, "My\\ Stuff")));
+        assert_eq!(l.key(ListKey::Tab, false), Done::Write(bs(9, "notes.txt")));
+        assert_eq!(l.key(ListKey::Tab, false), Done::Write(bs(9, "src")));
+        assert_eq!(l.key(ListKey::Tab, false), Done::Write(bs(3, "..")));
+        assert_eq!(l.current(), Some(0));
+        // Shift-Tab back, wrapping.
+        assert_eq!(l.key(ListKey::BackTab, false), Done::Write(bs(2, "src")));
+        assert_eq!(l.key(ListKey::BackTab, false), Done::Write(bs(3, "notes.txt")));
+        // The line changes under it, before the argument it doesn't.
+        assert!(l.is_for("cd no", None) && l.is_for("cd notes.txt", None) && !l.is_for("ls x", None));
+        // Escape: what was typed, back; a second one hides the grid.
+        assert_eq!(l.key(ListKey::Escape, false), Done::Write(bs(9, "")));
+        assert_eq!(l.current(), None);
+        assert_eq!(l.key(ListKey::Escape, false), Done::Redraw);
+        assert!(!l.shown());
+        // Another key ends it, keeping what's filled in: the list follows the line again.
+        let mut l = list(&["Documents", "my docs"], "doc");
+        assert_eq!(l.key(ListKey::Tab, false), Done::Write(bs(3, "Documents")));
+        l.end_cycle();
+        assert!(!l.is_for("cd Documents", None));
+        // In a subfolder, with the path before it; Shift-Tab first starts at the end.
+        let mut l = list(&["Private", "projects"], "Documents/p");
+        assert_eq!(l.key(ListKey::BackTab, false), Done::Write(bs(11, "Documents/projects")));
+        assert_eq!(l.key(ListKey::BackTab, false), Done::Write(bs(18, "Documents/Private")));
+        // Escape puts back exactly what was typed.
+        assert_eq!(l.key(ListKey::Escape, false), Done::Write(bs(17, "Documents/p")));
+        // One match still goes in, with its slash.
+        assert_eq!(list(&["src"], "s").key(ListKey::Tab, false), Done::Write(bs(1, "src/")));
+        // A bare command: the space first; Shift-Tab isn't the list's there.
+        let mut bare = List { bare: true, ..list(&["a", "b"], "") };
+        assert_eq!(bare.key(ListKey::BackTab, false), Done::Pass);
+        assert_eq!(bare.key(ListKey::Tab, false), Done::Write(b" ".to_vec()));
     }
 
     #[test]
