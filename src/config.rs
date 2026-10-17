@@ -101,7 +101,7 @@ pub struct Terminal {
     pub update_check: bool,
     /// Grey suggestions after the cursor at the prompt (bash and zsh).
     pub suggestions: bool,
-    /// A list of matching folders under the prompt while `cd` is typed.
+    /// What `cd` (folders) or `ls` (everything) can name, in columns under the prompt.
     pub prompt_list: bool,
     /// Background opacity, 0 (see-through) to 1 (solid). Needs a compositor.
     pub opacity: f32,

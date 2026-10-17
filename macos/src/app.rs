@@ -163,7 +163,7 @@ pub struct App {
     /// CRT effect on (config, flipped from the palette).
     crt: bool,
     suggest: Suggest,
-    /// The list under the focused pane's prompt while `cd` is typed.
+    /// The grid under the focused pane's prompt while `cd` or `ls` is typed.
     prompt_list: Option<(PaneId, List)>,
 }
 
@@ -489,9 +489,6 @@ impl App {
     fn suggestion(&mut self) -> Option<String> {
         if !self.config.terminal.suggestions || self.shell_name == "fish" {
             return None; // fish suggests by itself
-        }
-        if self.prompt_list().is_some() {
-            return None; // the list shows instead
         }
         let typed = self.typed()?;
         let cwd = self.panes[&self.focused()].cwd();
@@ -1521,13 +1518,10 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     return;
                 }
-                // The list under the prompt takes these while it shows.
+                // The grid under the prompt takes Tab and Escape while it shows.
                 let list_key = match &event.logical_key {
                     _ if !self.mods.is_empty() => None,
-                    Key::Named(NamedKey::ArrowUp) => Some(ListKey::Up),
-                    Key::Named(NamedKey::ArrowDown) => Some(ListKey::Down),
-                    Key::Named(NamedKey::Tab | NamedKey::ArrowRight) => Some(ListKey::Take),
-                    Key::Named(NamedKey::Enter) => Some(ListKey::Enter),
+                    Key::Named(NamedKey::Tab) => Some(ListKey::Tab),
                     Key::Named(NamedKey::Escape) => Some(ListKey::Escape),
                     _ => None,
                 };
@@ -1950,38 +1944,36 @@ fn draw_suggestion(r: &mut Renderer, term: &Term, rect: Rect, s: &str, theme: &T
     r.text(x, y, &text, theme::to_f32(theme::blend(theme.fg, theme.bg, 0.55)));
 }
 
-/// The list under the prompt, like PowerShell's list view: plain rows across
-/// the pane on the lines below it (above when there's more room there), the
-/// selected one on a bar, each tagged with where it came from.
+/// What the argument can name, under the prompt in columns like `ls`: from the pane's left
+/// edge on the lines below it (above when there's more room there), cut to
+/// the pane, with how many more there are when they don't all fit.
 fn draw_prompt_list(r: &mut Renderer, term: &Term, rect: Rect, list: &List, theme: &Theme) {
+    use crate::list::{ROWS, grid};
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let (lines, cols) = (term.screen_lines(), term.columns());
     let line = usize::try_from(term.grid().cursor.point.line.0).unwrap_or(0);
     let (below, above) = (lines.saturating_sub(line + 1), line);
-    let want = list.entries.len().min(crate::list::ROWS);
-    let (top, n) = if want <= below || below >= above { (line + 1, want.min(below)) } else { (line - want.min(above), want.min(above)) };
-    if n == 0 || cols < 4 {
+    let (across, width) = grid(&list.entries, cols);
+    let rows = list.entries.len().div_ceil(across);
+    // A line for "…N more" when they don't all fit.
+    let want = rows.min(ROWS) + usize::from(rows > ROWS);
+    let (top, room) = if want <= below || below >= above { (line + 1, below.min(want)) } else { (line - want.min(above), want.min(above)) };
+    let shown = if room < rows { room.saturating_sub(1) } else { rows };
+    if shown == 0 {
         return;
     }
-    // Scrolled so the selected row is in view.
-    let first = list.selected.unwrap_or(0).saturating_sub(n - 1);
-    let (fg, muted) = (theme::to_f32(theme.fg), theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45)));
-    let w = cols as f32 * cw;
-    for (i, entry) in list.entries[first..first + n].iter().enumerate() {
-        let (at, y) = (first + i, rect.y + (top + i) as f32 * ch);
-        let tag = if at < list.own { "folder" } else { "history" };
-        // The tag only where it leaves room for the name.
-        let tagged = cols >= 40;
-        let room = cols - 2 - if tagged { tag.len() + 2 } else { 0 };
-        let text: String = entry.chars().take(room).collect();
-        if list.selected == Some(at) {
-            r.fill(Rect { x: rect.x, y, w, h: ch }, theme::to_f32(theme.selection));
-        }
-        r.text(rect.x, y, ">", muted);
-        r.text(rect.x + 2.0 * cw, y, &text, fg);
-        if tagged {
-            r.text(rect.x + (cols - tag.len() - 1) as f32 * cw, y, tag, muted);
-        }
+    // Folders in the directory blue, as `ls` colors them.
+    let (folder, file) = (theme::to_f32(theme.ansi[12]), theme::to_f32(theme.fg));
+    let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
+    for (i, (name, dir)) in list.entries.iter().take(shown * across).enumerate() {
+        let (row, col) = (i / across, (i % across) * width);
+        let name: String = name.chars().take(cols.saturating_sub(col)).collect();
+        r.text(rect.x + col as f32 * cw, rect.y + (top + row) as f32 * ch, &name, if *dir { folder } else { file });
+    }
+    let more = list.entries.len().saturating_sub(shown * across);
+    if more > 0 {
+        let text: String = format!("\u{2026}{more} more").chars().take(cols).collect();
+        r.text(rect.x, rect.y + (top + shown) as f32 * ch, &text, muted);
     }
 }
 

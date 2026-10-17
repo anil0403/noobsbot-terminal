@@ -158,75 +158,24 @@ impl Suggest {
         Some(&self.listing.as_ref()?.2)
     }
 
-    /// Folders for `cd`'s argument `arg` (unescaped), typed in `cwd`: subfolders
-    /// whose name starts with what's after the last slash (case aside), then
-    /// those that contain it, then folders `cd` went to before whose path
-    /// contains `arg`, latest first. Each as it would be typed, ending in /;
-    /// and how many of them are the folder's own.
-    pub fn folders(&mut self, arg: &str, cwd: Option<&Path>) -> (Vec<String>, usize) {
-        const MOST: usize = 200;
-        const PAST: usize = 30; // folders from history, each one a stat
+    /// What the argument `arg` (unescaped), typed in `cwd`, can name: the
+    /// entries of the folder before its last slash whose name starts with
+    /// what's after it (case aside), then those that contain it; folders only
+    /// unless `files`. Names, each with whether it's a folder.
+    pub fn entries(&mut self, arg: &str, cwd: Option<&Path>, files: bool) -> Vec<(String, bool)> {
         let rooted = arg.starts_with('/');
+        // A path from / or ~ needs no folder to start from.
+        let Some(cwd) = cwd.or((rooted || arg.starts_with('~')).then_some(Path::new("/"))) else { return Vec::new() };
         let (dir, needle) = arg.rsplit_once('/').map_or(("", arg), |(d, n)| (d, n));
         let needle = needle.to_lowercase();
-        let mut out = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        // A path from / or ~ needs no folder to start from.
-        if let Some(cwd) = cwd.or((rooted || arg.starts_with('~')).then_some(Path::new("/"))) {
-            let path = place(dir, rooted, cwd);
-            let prefix = if arg.contains('/') { format!("{dir}/") } else { String::new() };
-            let names: Vec<String> = self
-                .names(&path)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|n| n.strip_suffix('/'))
-                .filter(|n| needle.starts_with('.') || !n.starts_with('.'))
-                .map(str::to_owned)
-                .collect();
-            let (starts, inside): (Vec<_>, Vec<_>) =
-                names.into_iter().filter(|n| n.to_lowercase().contains(&needle)).partition(|n| n.to_lowercase().starts_with(&needle));
-            for name in starts.into_iter().chain(inside).take(MOST) {
-                seen.insert(tidy(&path.join(&name)));
-                out.push(format!("{prefix}{name}/"));
-            }
-        }
-        self.reload_shell();
-        let (home, lower) = (home(), arg.to_lowercase());
-        let ran = self.ran.iter().rev().map(|(c, d)| (c.as_str(), Some(d.as_path())));
-        let shell = self.shell.iter().rev().map(|c| (c.as_str(), None));
-        let (own, mut past) = (out.len(), 0);
-        for (cmd, ran_in) in ran.chain(shell) {
-            if past == PAST || out.len() >= MOST {
-                break;
-            }
-            let Some(target) = cd_arg(cmd).map(unescape).filter(|t| !t.is_empty() && t != "-") else { continue };
-            let path = match target.strip_prefix('~') {
-                Some("") => home.clone(),
-                Some(rest) if rest.starts_with('/') => home.join(&rest[1..]),
-                _ if target.starts_with('/') => PathBuf::from(&target),
-                // Relative to where it ran; the shell's history doesn't say.
-                _ => match ran_in {
-                    Some(d) if !target.starts_with('~') => d.join(&target),
-                    _ => continue,
-                },
-            };
-            let path = tidy(&path);
-            let shown = match path.strip_prefix(&home) {
-                Ok(rest) if !home.as_os_str().is_empty() && rest.as_os_str().is_empty() => "~/".to_owned(),
-                Ok(rest) if !home.as_os_str().is_empty() => format!("~/{}/", rest.display()),
-                _ if path == Path::new("/") => "/".to_owned(),
-                _ => format!("{}/", path.display()),
-            };
-            if !shown.to_lowercase().contains(&lower) || cwd == Some(path.as_path()) || seen.contains(&path) || secret(&shown) {
-                continue;
-            }
-            seen.insert(path.clone());
-            if path.is_dir() {
-                past += 1;
-                out.push(shown);
-            }
-        }
-        (out, own)
+        let names = self.names(&place(dir, rooted, cwd)).unwrap_or_default();
+        let entries = names
+            .iter()
+            .map(|n| n.strip_suffix('/').map_or((n.as_str(), false), |d| (d, true)))
+            .filter(|&(n, dir)| (dir || files) && (needle.starts_with('.') || !n.starts_with('.')));
+        let (starts, inside): (Vec<_>, Vec<_>) =
+            entries.filter(|(n, _)| n.to_lowercase().contains(&needle)).partition(|(n, _)| n.to_lowercase().starts_with(&needle));
+        starts.into_iter().chain(inside).map(|(n, dir)| (n.to_owned(), dir)).collect()
     }
 }
 
@@ -243,30 +192,23 @@ fn place(dir: &str, rooted: bool, cwd: &Path) -> PathBuf {
     }
 }
 
-/// `path` with `.` and `..` worked out, without touching the disk.
-fn tidy(path: &Path) -> PathBuf {
-    use std::path::Component;
-    let mut out = PathBuf::new();
-    for c in path.components() {
-        match c {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// The folder argument after `cd` or `pushd`, as typed (escapes and quotes
-/// left in). None for anything else: no argument yet is `Some("")`, an option
-/// or a second argument is None.
-pub fn cd_arg(typed: &str) -> Option<&str> {
+/// The argument being typed after `cd`, `pushd` or `ls` (escapes and quotes
+/// left in), past any options, and whether files count (`ls`). No argument
+/// yet is `""`; anything else, or a second argument, is None.
+pub fn arg(typed: &str) -> Option<(&str, bool)> {
     let t = typed.trim_start();
-    let arg = t.strip_prefix("cd ").or_else(|| t.strip_prefix("pushd "))?.trim_start();
-    if arg.starts_with('-') {
-        return None;
+    let (mut arg, files) = match t.split_once(' ')? {
+        ("cd" | "pushd", rest) => (rest, false),
+        ("ls", rest) => (rest, true),
+        _ => return None,
+    };
+    loop {
+        arg = arg.trim_start();
+        match arg.split_once(' ') {
+            Some((option, rest)) if option.starts_with('-') => arg = rest,
+            _ if arg.starts_with('-') => return None, // an option being typed
+            _ => break,
+        }
     }
     let (mut escaped, mut quote) = (false, None);
     for c in arg.chars() {
@@ -279,7 +221,7 @@ pub fn cd_arg(typed: &str) -> Option<&str> {
             _ => {}
         }
     }
-    Some(arg)
+    Some((arg, files))
 }
 
 /// A typed shell word without its backslashes and quotes.
