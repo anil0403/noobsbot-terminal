@@ -4,7 +4,8 @@
 __noobsbot_precmd() {
     local s=$?
     __noobsbot_last=$s
-    print -n "\e]133;D;$s\a\e]7;file://$HOST$PWD\a"
+    # printf, not print: print reads a backslash in the path as an escape.
+    printf '\e]133;D;%s\a\e]7;file://%s%s\a' "$s" "$HOST" "$PWD"
     # Run last, after whatever the user's hooks did to the prompt.
     local last=(__noobsbot_wrap)
     [[ ${NOOBSBOT_PROMPT-} == pretty ]] && last=(__noobsbot_pretty __noobsbot_wrap)
