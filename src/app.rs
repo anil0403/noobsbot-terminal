@@ -359,6 +359,7 @@ impl App {
             welcome,
             typing: welcome.then(Instant::now),
             welcome_rows,
+            held: None,
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -516,8 +517,10 @@ impl App {
                 pane.images.lock().unwrap().cell = (renderer.font.cell_w, renderer.font.cell_h);
                 let size = window_size(&renderer.font, rect.w, rect.h);
                 let (cols, lines) = (size.num_cols as usize, size.num_lines as usize);
-                let mut term = pane.term.lock();
+                let term = pane.term.clone();
+                let mut term = term.lock();
                 if (term.columns(), term.screen_lines()) != (cols, lines) {
+                    let held = pane.hold_resize(&term, size);
                     // A welcome screen still up is drawn again for the new width (reflowed,
                     // it falls apart): taken out first, so only what the shell printed
                     // reflows, then put back above it.
@@ -535,7 +538,9 @@ impl App {
                         }
                     }
                     drop(term);
-                    pane.pty.resize(size);
+                    if !held {
+                        pane.pty.resize(size);
+                    }
                 }
             }
         }
@@ -1325,6 +1330,10 @@ impl ApplicationHandler<UserEvent> for App {
         for id in due {
             self.check_context(id, false);
         }
+        for pane in self.panes.values_mut().filter(|p| p.held.as_ref().is_some_and(|h| now >= h.due)) {
+            pane.settle();
+            self.dirty = true;
+        }
         // Only matters while focused (unfocused, the cursor is a hollow block): no lock otherwise.
         let blinking = self.renderer.as_ref().is_some_and(|r| r.focused) && self.focused_pane().term.lock().cursor_style().blinking;
         let mut wake = self.fade_quake(now);
@@ -1369,7 +1378,7 @@ impl ApplicationHandler<UserEvent> for App {
                 wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
             }
         }
-        for due in self.panes.values().filter_map(|p| p.context_due) {
+        for due in self.panes.values().flat_map(|p| [p.context_due, p.held.as_ref().map(|h| h.due)]).flatten() {
             wake = Some(wake.map_or(due, |w: Instant| w.min(due)));
         }
         event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
