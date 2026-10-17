@@ -35,7 +35,8 @@ pub struct Pty {
     // Dropping this hangs up the shell.
     pty: tty::Pty,
     writer: Sender<Vec<u8>>,
-    /// A wakeup is on its way to the app: the reader sends no more until it's handled.
+    /// A wakeup is on its way to the app: the reader sends no more until the app lets
+    /// it, once a frame has passed (`about_to_wait`).
     pub woken: Arc<AtomicBool>,
 }
 
