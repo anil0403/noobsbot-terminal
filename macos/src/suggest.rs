@@ -132,18 +132,17 @@ impl Suggest {
             return None;
         }
         let (dir, prefix) = word.rsplit_once('/').map_or(("", word), |(d, p)| (d, p));
-        let dir = match dir {
-            "" if word.starts_with('/') => PathBuf::from("/"),
-            "" => cwd.to_owned(),
-            "~" => home(),
-            d => match d.strip_prefix("~/") {
-                Some(rest) => home().join(rest),
-                None => cwd.join(d),
-            },
-        };
-        let mtime = fs::metadata(&dir).and_then(|m| m.modified()).ok()?;
-        if !self.listing.as_ref().is_some_and(|(d, m, _)| *d == dir && *m == mtime) {
-            let mut names: Vec<String> = fs::read_dir(&dir)
+        let names = self.names(&place(dir, word.starts_with('/'), cwd))?;
+        let name = names.iter().find(|n| n.len() > prefix.len() && n.starts_with(prefix) && (prefix.starts_with('.') || !n.starts_with('.')))?;
+        Some(name[prefix.len()..].replace(' ', "\\ "))
+    }
+
+    /// The names in `dir`, folders ending in /, sorted. The last listing is kept
+    /// until the folder changes.
+    fn names(&mut self, dir: &Path) -> Option<&[String]> {
+        let mtime = fs::metadata(dir).and_then(|m| m.modified()).ok()?;
+        if !self.listing.as_ref().is_some_and(|(d, m, _)| d == dir && *m == mtime) {
+            let mut names: Vec<String> = fs::read_dir(dir)
                 .ok()?
                 .flatten()
                 .map(|e| {
@@ -154,12 +153,160 @@ impl Suggest {
                 })
                 .collect();
             names.sort();
-            self.listing = Some((dir, mtime, names));
+            self.listing = Some((dir.to_owned(), mtime, names));
         }
-        let names = &self.listing.as_ref()?.2;
-        let name = names.iter().find(|n| n.len() > prefix.len() && n.starts_with(prefix) && (prefix.starts_with('.') || !n.starts_with('.')))?;
-        Some(name[prefix.len()..].replace(' ', "\\ "))
+        Some(&self.listing.as_ref()?.2)
     }
+
+    /// Folders for `cd`'s argument `arg` (unescaped), typed in `cwd`: subfolders
+    /// whose name starts with what's after the last slash (case aside), then
+    /// those that contain it, then folders `cd` went to before whose path
+    /// contains `arg`, latest first. Each as it would be typed, ending in /.
+    pub fn folders(&mut self, arg: &str, cwd: Option<&Path>) -> Vec<String> {
+        const MOST: usize = 200;
+        const PAST: usize = 30; // folders from history, each one a stat
+        let rooted = arg.starts_with('/');
+        let (dir, needle) = arg.rsplit_once('/').map_or(("", arg), |(d, n)| (d, n));
+        let needle = needle.to_lowercase();
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        // A path from / or ~ needs no folder to start from.
+        if let Some(cwd) = cwd.or((rooted || arg.starts_with('~')).then_some(Path::new("/"))) {
+            let path = place(dir, rooted, cwd);
+            let prefix = if arg.contains('/') { format!("{dir}/") } else { String::new() };
+            let names: Vec<String> = self
+                .names(&path)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|n| n.strip_suffix('/'))
+                .filter(|n| needle.starts_with('.') || !n.starts_with('.'))
+                .map(str::to_owned)
+                .collect();
+            let (starts, inside): (Vec<_>, Vec<_>) =
+                names.into_iter().filter(|n| n.to_lowercase().contains(&needle)).partition(|n| n.to_lowercase().starts_with(&needle));
+            for name in starts.into_iter().chain(inside).take(MOST) {
+                seen.insert(tidy(&path.join(&name)));
+                out.push(format!("{prefix}{name}/"));
+            }
+        }
+        self.reload_shell();
+        let (home, lower) = (home(), arg.to_lowercase());
+        let ran = self.ran.iter().rev().map(|(c, d)| (c.as_str(), Some(d.as_path())));
+        let shell = self.shell.iter().rev().map(|c| (c.as_str(), None));
+        let mut past = 0;
+        for (cmd, ran_in) in ran.chain(shell) {
+            if past == PAST || out.len() >= MOST {
+                break;
+            }
+            let Some(target) = cd_arg(cmd).map(unescape).filter(|t| !t.is_empty() && t != "-") else { continue };
+            let path = match target.strip_prefix('~') {
+                Some("") => home.clone(),
+                Some(rest) if rest.starts_with('/') => home.join(&rest[1..]),
+                _ if target.starts_with('/') => PathBuf::from(&target),
+                // Relative to where it ran; the shell's history doesn't say.
+                _ => match ran_in {
+                    Some(d) if !target.starts_with('~') => d.join(&target),
+                    _ => continue,
+                },
+            };
+            let path = tidy(&path);
+            let shown = match path.strip_prefix(&home) {
+                Ok(rest) if !home.as_os_str().is_empty() && rest.as_os_str().is_empty() => "~/".to_owned(),
+                Ok(rest) if !home.as_os_str().is_empty() => format!("~/{}/", rest.display()),
+                _ if path == Path::new("/") => "/".to_owned(),
+                _ => format!("{}/", path.display()),
+            };
+            if !shown.to_lowercase().contains(&lower) || cwd == Some(path.as_path()) || seen.contains(&path) || secret(&shown) {
+                continue;
+            }
+            seen.insert(path.clone());
+            if path.is_dir() {
+                past += 1;
+                out.push(shown);
+            }
+        }
+        out
+    }
+}
+
+/// The folder a typed `dir` part names: `rooted` when the word starts with /.
+fn place(dir: &str, rooted: bool, cwd: &Path) -> PathBuf {
+    match dir {
+        "" if rooted => PathBuf::from("/"),
+        "" => cwd.to_owned(),
+        "~" => home(),
+        d => match d.strip_prefix("~/") {
+            Some(rest) => home().join(rest),
+            None => cwd.join(d),
+        },
+    }
+}
+
+/// `path` with `.` and `..` worked out, without touching the disk.
+fn tidy(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The folder argument after `cd` or `pushd`, as typed (escapes and quotes
+/// left in). None for anything else: no argument yet is `Some("")`, an option
+/// or a second argument is None.
+pub fn cd_arg(typed: &str) -> Option<&str> {
+    let t = typed.trim_start();
+    let arg = t.strip_prefix("cd ").or_else(|| t.strip_prefix("pushd "))?.trim_start();
+    if arg.starts_with('-') {
+        return None;
+    }
+    let (mut escaped, mut quote) = (false, None);
+    for c in arg.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if quote != Some('\'') => escaped = true,
+            '\'' | '"' if quote.is_none() => quote = Some(c),
+            c if quote == Some(c) => quote = None,
+            ' ' | '\t' if quote.is_none() => return None,
+            _ => {}
+        }
+    }
+    Some(arg)
+}
+
+/// A typed shell word without its backslashes and quotes.
+pub fn unescape(word: &str) -> String {
+    let mut out = String::new();
+    let mut chars = word.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            '\'' | '"' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A path as typed into the shell: special characters backslashed, a leading
+/// `~/` left as it is so the shell still expands it.
+pub fn escape(path: &str) -> String {
+    let (home, rest) = path.strip_prefix("~/").map_or(("", path), |r| ("~/", r));
+    let mut out = home.to_owned();
+    for c in rest.chars() {
+        if " \t'\"\\$`!&;|<>()*?[]{}#^~".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn home() -> PathBuf {

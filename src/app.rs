@@ -28,6 +28,7 @@ use crate::font::Font;
 use crate::images::Images;
 use crate::input::{self, Action, Vi, binding, key_bytes, mouse_report, paste_bytes, vi_binding};
 use crate::links::{self, Hints, Link, Target};
+use crate::list::{Done, List, ListKey};
 use crate::palette::{Item, Palette};
 use crate::pane::{self, Dir, Divider, Node, Pane, Rect, Tab};
 use crate::pty::Pty;
@@ -162,6 +163,8 @@ pub struct App {
     /// CRT effect on (config, flipped from the palette).
     crt: bool,
     suggest: Suggest,
+    /// The list under the focused pane's prompt while `cd` is typed.
+    prompt_list: Option<(PaneId, List)>,
 }
 
 impl App {
@@ -187,6 +190,7 @@ impl App {
             crt: config.crt.enabled,
             blinking: config.cursor.blink,
             suggest: Suggest::new(),
+            prompt_list: None,
             shell: config.terminal.shell.clone(),
             shell_name: shell_name(&config.terminal.shell),
             quake,
@@ -486,19 +490,43 @@ impl App {
         if !self.config.terminal.suggestions || self.shell_name == "fish" {
             return None; // fish suggests by itself
         }
+        if self.prompt_list().is_some() {
+            return None; // the list shows instead
+        }
+        let typed = self.typed()?;
+        let cwd = self.panes[&self.focused()].cwd();
+        self.suggest.set_shell(&self.shell_name);
+        self.suggest.get(&typed, cwd.as_deref())
+    }
+
+    /// What's typed at the focused pane's prompt, when it's the shell's line
+    /// editor on screen (not scrolled back, vi mode or the welcome screen).
+    fn typed(&self) -> Option<String> {
         let pane = &self.panes[&self.focused()];
         if !pane.at_prompt || pane.welcome {
             return None;
         }
         let term = pane.term.lock();
-        if term.grid().display_offset() != 0 || term.mode().contains(TermMode::VI) {
+        if term.grid().display_offset() != 0 || term.mode().intersects(TermMode::VI | TermMode::ALT_SCREEN) {
             return None;
         }
-        let typed = blocks::input(&term).filter(|t| !t.trim().is_empty())?;
-        drop(term);
-        let cwd = pane.cwd();
-        self.suggest.set_shell(&self.shell_name);
-        self.suggest.get(&typed, cwd.as_deref())
+        blocks::input(&term).filter(|t| !t.trim().is_empty())
+    }
+
+    /// The list under the focused pane's prompt, if it shows: made again when
+    /// the line or the folder changes.
+    fn prompt_list(&mut self) -> Option<&mut List> {
+        let id = self.focused();
+        let Some(typed) = self.typed().filter(|_| self.config.terminal.prompt_list) else {
+            self.prompt_list = None;
+            return None;
+        };
+        let cwd = self.panes[&id].cwd();
+        if !self.prompt_list.as_ref().is_some_and(|(p, l)| *p == id && l.is_for(&typed, cwd.as_deref())) {
+            self.suggest.set_shell(&self.shell_name);
+            self.prompt_list = List::new(&typed, cwd.as_deref(), &mut self.suggest).map(|l| (id, l));
+        }
+        self.prompt_list.as_mut().map(|(_, l)| l).filter(|l| l.shown())
     }
 
     /// Lay out every tab and fit each pane's grid and PTY to its rect.
@@ -1484,6 +1512,34 @@ impl ApplicationHandler<UserEvent> for App {
                     self.paste(false);
                     return;
                 }
+                // The list under the prompt takes these while it shows.
+                let list_key = match &event.logical_key {
+                    _ if !self.mods.is_empty() => None,
+                    Key::Named(NamedKey::ArrowUp) => Some(ListKey::Up),
+                    Key::Named(NamedKey::ArrowDown) => Some(ListKey::Down),
+                    Key::Named(NamedKey::Tab | NamedKey::ArrowRight) => Some(ListKey::Take),
+                    Key::Named(NamedKey::Enter) => Some(ListKey::Enter),
+                    Key::Named(NamedKey::Escape) => Some(ListKey::Escape),
+                    _ => None,
+                };
+                if let Some(key) = list_key
+                    && let Some(list) = self.prompt_list()
+                {
+                    match list.key(key) {
+                        Done::Pass => {}
+                        Done::Redraw => {
+                            self.dirty = true;
+                            return;
+                        }
+                        Done::Write(bytes) => {
+                            for id in self.typing_to() {
+                                self.panes.get_mut(&id).unwrap().pty.write(&bytes);
+                            }
+                            self.dirty = true;
+                            return;
+                        }
+                    }
+                }
                 // Right or End takes the suggestion, Ctrl+Right its next word.
                 let take = match &event.logical_key {
                     Key::Named(NamedKey::ArrowRight | NamedKey::End) if self.mods.is_empty() => Some(false),
@@ -1762,6 +1818,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.update_hover(); // the text under the pointer may have changed
                 let (bar_h, tab_w) = (self.bar_h(), self.tab_w());
                 let suggestion = self.suggestion();
+                let list_on = self.prompt_list().is_some();
                 let renderer = self.renderer.as_mut().unwrap();
                 // The CRT pass draws a solid frame.
                 renderer.opacity = if self.crt { 1.0 } else { self.config.terminal.opacity.clamp(0.0, 1.0) };
@@ -1813,6 +1870,9 @@ impl ApplicationHandler<UserEvent> for App {
                     if id == tab.focused {
                         if let Some(s) = &suggestion {
                             draw_suggestion(renderer, &pane.term.lock(), pane.rect, s, &theme);
+                        }
+                        if let Some((_, list)) = self.prompt_list.as_ref().filter(|_| list_on) {
+                            draw_prompt_list(renderer, &pane.term.lock(), pane.rect, list, &theme);
                         }
                         focused_theme = Some(theme);
                     }
@@ -1875,6 +1935,39 @@ fn draw_suggestion(r: &mut Renderer, term: &Term, rect: Rect, s: &str, theme: &T
     let (x, y) = (rect.x + at.column.0 as f32 * r.font.cell_w, rect.y + at.line.0 as f32 * r.font.cell_h);
     let text: String = s.chars().take(room).collect();
     r.text(x, y, &text, theme::to_f32(theme::blend(theme.fg, theme.bg, 0.55)));
+}
+
+/// The list under the prompt (over it when there's more room there), lined up
+/// with `cd`'s argument and cut to the pane; the selected row as a bar.
+fn draw_prompt_list(r: &mut Renderer, term: &Term, rect: Rect, list: &List, theme: &Theme) {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let at = term.grid().cursor.point;
+    let (lines, cols) = (term.screen_lines(), term.columns());
+    let line = usize::try_from(at.line.0).unwrap_or(0);
+    let (below, above) = (lines.saturating_sub(line + 1), line);
+    let want = list.entries.len().min(crate::list::ROWS);
+    let (top, n) = if want <= below || below >= above { (line + 1, want.min(below)) } else { (line - want.min(above), want.min(above)) };
+    if n == 0 || cols < 4 {
+        return;
+    }
+    // Scrolled so the selected row is in view.
+    let first = list.selected.unwrap_or(0).saturating_sub(n - 1);
+    let rows = &list.entries[first..first + n];
+    let width = (rows.iter().map(|e| e.chars().count()).max().unwrap_or(0) + 2).clamp(12, cols);
+    let col = at.column.0.saturating_sub(list.arg_len()).min(cols - width);
+    let (x, y, w) = (rect.x + col as f32 * cw, rect.y + top as f32 * ch, width as f32 * cw);
+    panel(r, Rect { x, y, w, h: n as f32 * ch }, theme);
+    let (fg, ink, accent) = (theme::to_f32(theme.fg), theme::to_f32(theme.bg), theme::to_f32(theme.cursor));
+    for (i, entry) in rows.iter().enumerate() {
+        let ry = y + i as f32 * ch;
+        let text: String = entry.chars().take(width - 2).collect();
+        if list.selected == Some(first + i) {
+            r.fill(Rect { x, y: ry, w, h: ch }, accent);
+            r.text(x + cw, ry, &text, ink);
+        } else {
+            r.text(x + cw, ry, &text, fg);
+        }
+    }
 }
 
 /// Labels on the first cell of each link still matching what's been typed.

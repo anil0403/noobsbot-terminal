@@ -32,6 +32,11 @@ update_check = true
 # own): commands that worked in this folder, then anywhere, then your shell's
 # history, then file names. Right arrow or End takes it, Ctrl+Right one word.
 suggestions = true
+# While you type `cd` (or `pushd`), a list under the prompt of the folders that
+# match, then folders you went to before. Up/Down picks one, Tab or Right fills
+# it in, Enter fills it in and goes there, Escape closes the list. The grey
+# suggestion steps aside while it shows; false keeps only that.
+prompt_list = true
 # Background opacity, from 0 (see-through) to 1 (solid). Text, and colors
 # programs paint themselves (vim's background), stay solid. Needs a
 # compositor; ignored while the CRT effect is on.
