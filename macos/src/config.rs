@@ -97,6 +97,8 @@ pub struct Terminal {
     pub pretty_prompt: bool,
     /// Greet each new window with the cat and the system summary.
     pub welcome: bool,
+    /// Say on the welcome screen when a newer release is out.
+    pub update_check: bool,
     /// Grey suggestions after the cursor at the prompt (bash and zsh).
     pub suggestions: bool,
     /// Background opacity, 0 (see-through) to 1 (solid).
@@ -143,6 +145,7 @@ impl Default for Terminal {
             clipboard: Clipboard::Copy,
             pretty_prompt: false,
             welcome: true,
+            update_check: true,
             suggestions: true,
             opacity: 1.0,
             restore_session: false,

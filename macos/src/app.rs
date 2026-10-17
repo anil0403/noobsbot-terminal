@@ -70,6 +70,8 @@ const FLASH: Duration = Duration::from_millis(400);
 const TYPE_RATE: f32 = 3000.0;
 /// Longest the welcome screen keeps redrawing to type (a pane out of view never finishes).
 const TYPING: Duration = Duration::from_secs(3);
+/// How often a welcome screen still up is drawn again (clock, uptime, meters).
+const WELCOME_REFRESH: Duration = Duration::from_secs(2);
 /// Quake window fade in/out.
 const FADE: Duration = Duration::from_millis(150);
 
@@ -125,6 +127,8 @@ pub struct App {
     divider_hover: Option<usize>,
     mods: ModifiersState,
     next_blink: Instant,
+    /// When welcome screens still up are next drawn again.
+    next_welcome: Instant,
     /// Something on screen changed since the last frame.
     dirty: bool,
     last_frame: Instant,
@@ -202,6 +206,7 @@ impl App {
             divider_hover: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
+            next_welcome: Instant::now(),
             dirty: false,
             last_frame: Instant::now(),
             frame_time: Duration::from_micros(16_667),
@@ -316,8 +321,13 @@ impl App {
         let what = format!("{shell:?}");
         // The first shell of a window opens under the welcome screen.
         let welcome = id == 0 && command_is_shell && self.config.terminal.welcome;
+        let mut welcome_rows = 0;
         if welcome {
+            if self.config.terminal.update_check {
+                crate::welcome::check_for_update();
+            }
             let screen = crate::welcome::screen(dims.columns(), &renderer.gpu, &self.shell_name);
+            welcome_rows = crate::welcome::rows(&screen);
             alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *term.lock(), screen.as_bytes());
         }
         let options = tty::Options { shell, working_directory: cwd, env, ..Default::default() };
@@ -343,6 +353,7 @@ impl App {
             running: None,
             welcome,
             typing: welcome.then(Instant::now),
+            welcome_rows,
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -506,7 +517,9 @@ impl App {
                     // A welcome screen still up is drawn again for the new width (reflowed,
                     // it falls apart); the resize then has the shell redraw its prompt below.
                     if pane.welcome {
-                        let screen = format!("\x1b[H\x1b[2J\x1b[3J{}", crate::welcome::screen(cols, &renderer.gpu, &shell));
+                        let welcome = crate::welcome::screen(cols, &renderer.gpu, &shell);
+                        pane.welcome_rows = crate::welcome::rows(&welcome);
+                        let screen = format!("\x1b[H\x1b[2J\x1b[3J{welcome}");
                         alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *term, screen.as_bytes());
                     }
                     drop(term);
@@ -1329,6 +1342,15 @@ impl ApplicationHandler<UserEvent> for App {
         } else if !renderer.cursor_on {
             renderer.cursor_on = true;
             self.dirty = true;
+        }
+        if self.panes.values().any(|p| p.welcome) {
+            if now >= self.next_welcome {
+                self.next_welcome = now + WELCOME_REFRESH;
+                for pane in self.panes.values_mut() {
+                    self.dirty |= pane.refresh_welcome(&renderer.gpu, &self.shell_name);
+                }
+            }
+            wake = Some(wake.map_or(self.next_welcome, |w: Instant| w.min(self.next_welcome)));
         }
         let flicker = self.crt && self.config.crt.flicker > 0.0;
         if flicker

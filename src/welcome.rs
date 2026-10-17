@@ -3,6 +3,14 @@
 //! Everything is read from /proc and /etc; nothing is spawned.
 
 use std::fs::read_to_string;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use alacritty_terminal::event::EventListener;
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::term::{Term, TermMode};
+use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
 /// Colons are the fur (dense enough to read on black); dashes the inner ears,
 /// stripes, eyes, whiskers, mouth, collar and toes.
@@ -36,6 +44,11 @@ const CAT_W: usize = 38;
 /// Narrower than this, the cat is left out.
 const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
+/// Where the latest release is looked up, and how often (the answer is cached).
+const RELEASES: &str = "https://api.github.com/repos/anil0403/noobsbot-terminal/releases/latest";
+const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// A release newer than this build, once the check has found one.
+static NEWER: Mutex<Option<String>> = Mutex::new(None);
 
 /// The screen as terminal output, for a pane `cols` wide. Colors are palette
 /// indexes, so themes recolor it.
@@ -61,6 +74,77 @@ pub fn screen(cols: usize, gpu: &str, shell: &str) -> String {
     }
     out.push_str("\r\n");
     out
+}
+
+/// Lines the screen takes: where the shell's prompt starts below it.
+pub fn rows(screen: &str) -> usize {
+    screen.matches("\r\n").count()
+}
+
+/// Draws `screen` again over the one drawn `rows` tall at the top, keeping the cursor
+/// (and what's below) where it is. Only while it's all still there: nothing scrolled
+/// off, no full-screen app, the prompt below it, and the same height. True if it did.
+pub fn redraw<T: EventListener>(term: &mut Term<T>, screen: &str, rows: usize) -> bool {
+    let grid = term.grid();
+    if self::rows(screen) != rows
+        || grid.history_size() > 0
+        || grid.display_offset() > 0
+        || term.mode().contains(TermMode::ALT_SCREEN)
+        || grid.cursor.point.line.0 < rows as i32
+    {
+        return false;
+    }
+    let (cursor, saved) = (grid.cursor.clone(), grid.saved_cursor.clone());
+    // Each line erased to its end: a value can get shorter.
+    let text = format!("\x1b[H{}", screen.replace("\r\n", "\x1b[K\r\n"));
+    Processor::<StdSyncHandler>::new().advance(term, text.as_bytes());
+    let grid = term.grid_mut();
+    (grid.cursor, grid.saved_cursor) = (cursor, saved);
+    true
+}
+
+/// Starts the update check: the cached answer now, and a fresh one from GitHub in
+/// the background once that's stale. The screen shows a newer release when drawn.
+pub fn check_for_update() {
+    let Some(cache) = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+        .map(|state| state.join("noobsbot/latest-release"))
+    else {
+        return;
+    };
+    let fresh = std::fs::metadata(&cache).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < CHECK_EVERY);
+    found(read_to_string(&cache).ok());
+    if fresh {
+        return;
+    }
+    std::thread::spawn(move || {
+        let Ok(out) = std::process::Command::new("curl").args(["-fsSL", "-m", "10", RELEASES]).stderr(std::process::Stdio::null()).output() else { return };
+        let Some(tag) = tag_name(&String::from_utf8_lossy(&out.stdout)) else { return };
+        if let Some(dir) = cache.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&cache, &tag);
+        found(Some(tag));
+    });
+}
+
+fn found(tag: Option<String>) {
+    *NEWER.lock().unwrap() = tag.map(|t| t.trim().to_owned()).filter(|t| newer(t, env!("CARGO_PKG_VERSION")));
+}
+
+/// `"tag_name": "v0.2.1"` in GitHub's answer → `v0.2.1`.
+fn tag_name(json: &str) -> Option<String> {
+    let rest = &json[json.find("\"tag_name\"")? + 10..];
+    let rest = &rest[rest.find(':')? + 1..];
+    let rest = &rest[rest.find('"')? + 1..];
+    Some(rest[..rest.find('"')?].to_owned()).filter(|t| !t.is_empty())
+}
+
+/// `tag` (`v0.2.1`) is a later version than `ours` (`0.2.0`).
+fn newer(tag: &str, ours: &str) -> bool {
+    let parts = |v: &str| v.trim_start_matches('v').split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    parts(tag) > parts(ours)
 }
 
 /// Widens the blank gaps (middle ones first) so the text is as tall as the cat.
@@ -134,6 +218,9 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
     }
     if let Some((level, status)) = battery() {
         meter("Battery", bar(level, true), status.to_lowercase());
+    }
+    if let Some(tag) = NEWER.lock().unwrap().as_deref() {
+        lines.push(format!("\x1b[1;38;5;10m{:<10}\x1b[0m{tag} is out \x1b[38;5;8m·\x1b[0m run \x1b[1mnoobsbot --update\x1b[0m", "Update"));
     }
     lines.push(String::new());
     lines.push(format!("\x1b[38;5;8m{TIP}"));
@@ -308,5 +395,44 @@ mod tests {
         assert_eq!(stretch(s(&["a", "", "b", "", "c"]), 7), s(&["a", "", "", "b", "", "", "c"]));
         assert_eq!(stretch(s(&["a", "b"]), 4), s(&["a", "b"]));
         assert_eq!((greeting(8), greeting(14), greeting(19), greeting(2)), ("Good morning", "Good afternoon", "Good evening", "Up late"));
+    }
+
+    #[test]
+    fn update_check() {
+        assert_eq!(tag_name(r#"{"url": "x", "tag_name": "v0.2.1", "name": "v0.2.1"}"#).as_deref(), Some("v0.2.1"));
+        assert_eq!(tag_name(r#"{"message": "API rate limit exceeded"}"#), None);
+        assert!(newer("v0.2.1", "0.2.0") && newer("v0.10.0", "0.9.5") && newer("1.0", "0.9.9"));
+        assert!(!newer("v0.2.0", "0.2.0") && !newer("v0.1.9", "0.2.0") && !newer("bogus", "0.2.0"));
+    }
+
+    #[test]
+    fn redraws_in_place() {
+        use alacritty_terminal::event::VoidListener;
+        use alacritty_terminal::index::{Column, Line, Point};
+        use alacritty_terminal::term::Config;
+        use alacritty_terminal::term::test::TermSize;
+        let text = |term: &Term<VoidListener>, line: i32| (0..20).map(|c| term.grid()[Line(line)][Column(c)].c).collect::<String>().trim_end().to_owned();
+        let mut term = Term::new(Config::default(), &TermSize::new(20, 8), VoidListener);
+        let mut parser: Processor = Processor::new();
+        let old = "\r\nup 5 min\r\nload 0.50\r\n\r\n";
+        parser.advance(&mut term, old.as_bytes());
+        parser.advance(&mut term, b"$ ls\x1b7");
+        let cursor = term.grid().cursor.point;
+        assert_eq!(cursor, Point::new(Line(4), Column(4)));
+        // Shorter values leave nothing behind; the prompt, cursor and saved cursor stay.
+        assert!(redraw(&mut term, "\r\nup 6 min\r\nload 1\r\n\r\n", rows(old)));
+        assert_eq!((text(&term, 1), text(&term, 2), text(&term, 4)), ("up 6 min".into(), "load 1".into(), "$ ls".into()));
+        assert_eq!(term.grid().cursor.point, cursor);
+        assert_eq!(term.grid().saved_cursor.point, cursor);
+        // A different height, or the prompt not below it, and it's left alone.
+        assert!(!redraw(&mut term, "\r\nup 7 min\r\n\r\n", rows(old)));
+        assert!(!redraw(&mut term, "\r\nx\r\ny\r\nz\r\nw\r\n", 5));
+        // Scrolled off the top, or under a full-screen app: left alone too.
+        parser.advance(&mut term, b"\x1b[?1049h");
+        assert!(!redraw(&mut term, old, rows(old)));
+        parser.advance(&mut term, b"\x1b[?1049l\r\n\n\n\n\n\n");
+        assert!(!redraw(&mut term, old, rows(old)));
+        // Three lines scrolled up: the prompt moved with them, nothing was drawn over it.
+        assert_eq!(text(&term, 1), "$ ls");
     }
 }
