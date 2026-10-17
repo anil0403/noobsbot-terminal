@@ -50,8 +50,8 @@ impl Pty {
     ) -> std::io::Result<Self> {
         let Listener { proxy, pane } = listener;
         let pty = tty::new(options, size, 0)?;
-        let mut file: File = pty.file().try_clone().expect("clone pty fd");
-        let mut reader = pty.file().try_clone().expect("clone pty fd");
+        let mut file: File = pty.file().try_clone()?;
+        let mut reader = pty.file().try_clone()?;
         // alacritty sets O_NONBLOCK for its mio loop; we use a plain blocking thread.
         // That makes writes blocking too (flags are per open file), so they get their own thread:
         // a big paste then never stalls the UI while the shell is busy.
