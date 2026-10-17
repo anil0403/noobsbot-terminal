@@ -132,18 +132,17 @@ impl Suggest {
             return None;
         }
         let (dir, prefix) = word.rsplit_once('/').map_or(("", word), |(d, p)| (d, p));
-        let dir = match dir {
-            "" if word.starts_with('/') => PathBuf::from("/"),
-            "" => cwd.to_owned(),
-            "~" => home(),
-            d => match d.strip_prefix("~/") {
-                Some(rest) => home().join(rest),
-                None => cwd.join(d),
-            },
-        };
-        let mtime = fs::metadata(&dir).and_then(|m| m.modified()).ok()?;
-        if !self.listing.as_ref().is_some_and(|(d, m, _)| *d == dir && *m == mtime) {
-            let mut names: Vec<String> = fs::read_dir(&dir)
+        let names = self.names(&place(dir, word.starts_with('/'), cwd))?;
+        let name = names.iter().find(|n| n.len() > prefix.len() && n.starts_with(prefix) && (prefix.starts_with('.') || !n.starts_with('.')))?;
+        Some(name[prefix.len()..].replace(' ', "\\ "))
+    }
+
+    /// The names in `dir`, folders ending in /, sorted. The last listing is kept
+    /// until the folder changes.
+    fn names(&mut self, dir: &Path) -> Option<&[String]> {
+        let mtime = fs::metadata(dir).and_then(|m| m.modified()).ok()?;
+        if !self.listing.as_ref().is_some_and(|(d, m, _)| d == dir && *m == mtime) {
+            let mut names: Vec<String> = fs::read_dir(dir)
                 .ok()?
                 .flatten()
                 .map(|e| {
@@ -154,12 +153,108 @@ impl Suggest {
                 })
                 .collect();
             names.sort();
-            self.listing = Some((dir, mtime, names));
+            self.listing = Some((dir.to_owned(), mtime, names));
         }
-        let names = &self.listing.as_ref()?.2;
-        let name = names.iter().find(|n| n.len() > prefix.len() && n.starts_with(prefix) && (prefix.starts_with('.') || !n.starts_with('.')))?;
-        Some(name[prefix.len()..].replace(' ', "\\ "))
+        Some(&self.listing.as_ref()?.2)
     }
+
+    /// What the argument `arg` (unescaped), typed in `cwd`, can name: the
+    /// entries of the folder before its last slash whose name starts with
+    /// what's after it (case aside), then those that contain it; folders only
+    /// unless `files`, and then `..` first while it matches (not at /).
+    /// Names, each with whether it's a folder.
+    pub fn entries(&mut self, arg: &str, cwd: Option<&Path>, files: bool) -> Vec<(String, bool)> {
+        let rooted = arg.starts_with('/');
+        // A path from / or ~ needs no folder to start from.
+        let Some(cwd) = cwd.or((rooted || arg.starts_with('~')).then_some(Path::new("/"))) else { return Vec::new() };
+        let (dir, needle) = arg.rsplit_once('/').map_or(("", arg), |(d, n)| (d, n));
+        let needle = needle.to_lowercase();
+        let path = place(dir, rooted, cwd);
+        // Back up a level: cd only (ls lists what's there).
+        let up = !files && "..".starts_with(&needle) && fs::canonicalize(&path).is_ok_and(|p| p.parent().is_some());
+        let names = self.names(&path).unwrap_or_default();
+        let entries = names
+            .iter()
+            .map(|n| n.strip_suffix('/').map_or((n.as_str(), false), |d| (d, true)))
+            .filter(|&(n, dir)| (dir || files) && (needle.starts_with('.') || !n.starts_with('.')));
+        let (starts, inside): (Vec<_>, Vec<_>) =
+            entries.filter(|(n, _)| n.to_lowercase().contains(&needle)).partition(|(n, _)| n.to_lowercase().starts_with(&needle));
+        up.then(|| ("..".to_owned(), true)).into_iter().chain(starts.into_iter().chain(inside).map(|(n, dir)| (n.to_owned(), dir))).collect()
+    }
+}
+
+/// The folder a typed `dir` part names: `rooted` when the word starts with /.
+fn place(dir: &str, rooted: bool, cwd: &Path) -> PathBuf {
+    match dir {
+        "" if rooted => PathBuf::from("/"),
+        "" => cwd.to_owned(),
+        "~" => home(),
+        d => match d.strip_prefix("~/") {
+            Some(rest) => home().join(rest),
+            None => cwd.join(d),
+        },
+    }
+}
+
+/// The argument being typed after `cd`, `pushd` or `ls` (escapes and quotes
+/// left in), past any options, and whether files count (`ls`). No argument
+/// yet, or just the command with no space after it, is `""`; anything else,
+/// or a second argument, is None.
+pub fn arg(typed: &str) -> Option<(&str, bool)> {
+    let t = typed.trim_start();
+    let (mut arg, files) = match t.split_once(' ').unwrap_or((t, "")) {
+        ("cd" | "pushd", rest) => (rest, false),
+        ("ls", rest) => (rest, true),
+        _ => return None,
+    };
+    loop {
+        arg = arg.trim_start();
+        match arg.split_once(' ') {
+            Some((option, rest)) if option.starts_with('-') => arg = rest,
+            _ if arg.starts_with('-') => return None, // an option being typed
+            _ => break,
+        }
+    }
+    let (mut escaped, mut quote) = (false, None);
+    for c in arg.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if quote != Some('\'') => escaped = true,
+            '\'' | '"' if quote.is_none() => quote = Some(c),
+            c if quote == Some(c) => quote = None,
+            ' ' | '\t' if quote.is_none() => return None,
+            _ => {}
+        }
+    }
+    Some((arg, files))
+}
+
+/// A typed shell word without its backslashes and quotes.
+pub fn unescape(word: &str) -> String {
+    let mut out = String::new();
+    let mut chars = word.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            '\'' | '"' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A path as typed into the shell: special characters backslashed, a leading
+/// `~/` left as it is so the shell still expands it.
+pub fn escape(path: &str) -> String {
+    let (home, rest) = path.strip_prefix("~/").map_or(("", path), |r| ("~/", r));
+    let mut out = home.to_owned();
+    for c in rest.chars() {
+        if " \t'\"\\$`!&;|<>()*?[]{}#^~".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn home() -> PathBuf {

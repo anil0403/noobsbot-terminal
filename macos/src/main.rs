@@ -7,6 +7,7 @@ mod font;
 mod images;
 mod input;
 mod links;
+mod list;
 mod palette;
 mod pane;
 mod pty;

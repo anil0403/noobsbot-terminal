@@ -101,6 +101,10 @@ pub struct Terminal {
     pub update_check: bool,
     /// Grey suggestions after the cursor at the prompt (bash and zsh).
     pub suggestions: bool,
+    /// What `cd` (folders) or `ls` (everything) can name, in columns under the prompt.
+    pub prompt_list: bool,
+    /// With prompt_list: a cd or ls line is the list's alone (no grey suggestion, no shell listing).
+    pub fast_cd: bool,
     /// Background opacity, 0 (see-through) to 1 (solid).
     pub opacity: f32,
     /// Save tabs, splits and folders when the window closes; the next window reopens them.
@@ -147,6 +151,8 @@ impl Default for Terminal {
             welcome: true,
             update_check: true,
             suggestions: true,
+            prompt_list: true,
+            fast_cd: false,
             opacity: 1.0,
             restore_session: false,
         }
