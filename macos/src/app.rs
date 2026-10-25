@@ -1350,6 +1350,7 @@ impl ApplicationHandler<UserEvent> for App {
             event_loop.exit(); // no shell to run
         }
         if self.quake.is_none() {
+            crate::dock::install();
             // Focus it: left unfocused on top, clicks on the window behind wouldn't raise that.
             crate::quake::activate(self.window.as_ref().unwrap());
         }

@@ -3,6 +3,7 @@ mod blocks;
 mod clipboard;
 mod config;
 mod context;
+mod dock;
 mod font;
 mod images;
 mod input;
