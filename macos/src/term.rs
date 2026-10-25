@@ -14,6 +14,10 @@ pub enum UserEvent {
     ConfigChanged,
     /// Show or hide the quake window (hotkey or a second launch).
     ToggleQuake,
+    /// The Dock menu's "New Tab".
+    NewTab,
+    /// The Dock menu's "Check for Updates": a new tab runs `noobsbot --update`.
+    Update,
 }
 
 /// Forwards terminal events (title, bell, PTY replies, wakeups) to the winit loop.

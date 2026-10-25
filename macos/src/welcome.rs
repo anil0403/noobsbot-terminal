@@ -168,14 +168,19 @@ pub fn check_for_update() {
         return;
     }
     std::thread::spawn(move || {
-        let Ok(out) = std::process::Command::new("curl").args(["-fsSL", "-m", "10", RELEASES]).stderr(std::process::Stdio::null()).output() else { return };
-        let Some(tag) = tag_name(&String::from_utf8_lossy(&out.stdout)) else { return };
+        let Some(tag) = latest_release() else { return };
         if let Some(dir) = cache.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(&cache, &tag);
         found(Some(tag));
     });
+}
+
+/// The latest release's tag (`v0.2.1`), asked from GitHub now (up to 10 s); None when offline.
+pub fn latest_release() -> Option<String> {
+    let out = std::process::Command::new("curl").args(["-fsSL", "-m", "10", RELEASES]).stderr(std::process::Stdio::null()).output().ok()?;
+    tag_name(&String::from_utf8_lossy(&out.stdout))
 }
 
 fn found(tag: Option<String>) {
@@ -191,7 +196,7 @@ fn tag_name(json: &str) -> Option<String> {
 }
 
 /// `tag` (`v0.2.1`) is a later version than `ours` (`0.2.0`).
-fn newer(tag: &str, ours: &str) -> bool {
+pub fn newer(tag: &str, ours: &str) -> bool {
     let parts = |v: &str| v.trim_start_matches('v').split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
     parts(tag) > parts(ours)
 }

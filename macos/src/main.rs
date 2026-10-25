@@ -13,6 +13,7 @@ mod palette;
 mod pane;
 mod pty;
 mod quake;
+mod recent;
 mod render;
 mod restart;
 mod rules;

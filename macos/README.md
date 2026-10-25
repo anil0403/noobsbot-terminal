@@ -70,6 +70,8 @@ The left <kbd>Option</kbd> key is Alt (Meta) for the shell and programs; the rig
 
 Links: click to open, <kbd>c</kbd> while hovering copies, <kbd>Cmd</kbd>+click opens files like `src/main.rs:12` in your editor.
 
+Right-click the Dock icon for recent folders (each opens a new window there), New Window, New Tab, Open Config File and Check for Updates.
+
 Drag files from Finder onto the terminal to type their paths, quoted when they have spaces.
 
 When a program rings the bell, the pane's border flashes in the theme's cursor color, and the Dock icon bounces once if the window isn't focused.

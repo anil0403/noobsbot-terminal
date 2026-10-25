@@ -380,6 +380,17 @@ impl App {
         Some(id)
     }
 
+    /// A new tab from the Dock menu, with the window brought up; `typed` goes to its shell.
+    fn dock_new_tab(&mut self, typed: Option<String>) {
+        let Some(window) = self.window.clone() else { return };
+        window.set_minimized(false);
+        crate::quake::activate(&window);
+        self.new_tab();
+        if let Some(text) = typed {
+            self.focused_pane().pty.write(text.as_bytes());
+        }
+    }
+
     /// New panes start where the focused shell is.
     fn new_cwd(&self) -> Option<PathBuf> {
         let tab = self.tabs.get(self.active)?;
@@ -830,12 +841,12 @@ impl App {
                 self.dirty = true;
             }
             Action::NewWindow => {
-                if let Err(e) = crate::restart::launch(&[], None) {
+                if let Err(e) = crate::restart::new_window(None) {
                     notify("noobsbot can't open a window".into(), e.to_string());
                 }
             }
             Action::OpenConfig => {
-                if let Err(e) = std::process::Command::new("/usr/bin/open").arg("-t").arg(config::path()).status() {
+                if let Err(e) = config::open_in_editor() {
                     notify("noobsbot can't open the config".into(), e.to_string());
                 }
             }
@@ -868,7 +879,12 @@ impl App {
         let Some(pane) = self.panes.get_mut(&id) else { return };
         self.dirty = true;
         match mark {
-            Mark::Cwd(path) => return pane.cwd = Some(path),
+            Mark::Cwd(path) => {
+                if pane.cwd.as_ref() != Some(&path) {
+                    crate::recent::add(&path);
+                }
+                return pane.cwd = Some(path);
+            }
             Mark::CommandEnd(code) => {
                 pane.at_prompt = true; // sent before every prompt
                 if let (Some(0), Some((cmd, dir))) = (code, pane.running.take()) {
@@ -1350,7 +1366,7 @@ impl ApplicationHandler<UserEvent> for App {
             event_loop.exit(); // no shell to run
         }
         if self.quake.is_none() {
-            crate::dock::install();
+            crate::dock::install(self.proxy.clone());
             // Focus it: left unfocused on top, clicks on the window behind wouldn't raise that.
             crate::quake::activate(self.window.as_ref().unwrap());
         }
@@ -1361,6 +1377,12 @@ impl ApplicationHandler<UserEvent> for App {
         let (id, event) = match event {
             UserEvent::ConfigChanged => return self.reload_config(),
             UserEvent::ToggleQuake => return self.toggle_quake(),
+            UserEvent::NewTab => return self.dock_new_tab(None),
+            UserEvent::Update => {
+                // Quoted for the shell; the installer replaces the app this runs from.
+                let exe = std::env::current_exe().unwrap_or_else(|_| "noobsbot".into()).to_string_lossy().replace('\'', "'\\''");
+                return self.dock_new_tab(Some(format!("'{exe}' --update\n")));
+            }
             UserEvent::Shell(id, prompt, mark) => return self.shell_mark(id, prompt, mark),
             UserEvent::Term(id, event) => (id, event),
         };
