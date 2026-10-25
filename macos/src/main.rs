@@ -45,6 +45,7 @@ fn main() {
             std::process::exit(2);
         }
     };
+    in_app_bundle();
     if quake && quake::toggle_running() {
         return; // the running one shows/hides itself
     }
@@ -106,6 +107,22 @@ fn parse(args: &[String]) -> Result<Cli, String> {
             })
         }
     }
+}
+
+/// Started through a link to the app (like the `noobsbot` command in
+/// /opt/homebrew/bin): start again from the real file inside Noobsbot.app. A
+/// link hides the bundle from macOS, which then names the app "noobsbot" in the
+/// menu bar and the Dock instead of reading its Info.plist.
+fn in_app_bundle() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(real) = std::fs::canonicalize(&exe) else { return };
+    if real == exe || !real.to_string_lossy().contains(".app/Contents/MacOS/") {
+        return;
+    }
+    use std::os::unix::process::CommandExt;
+    // exec only returns on failure; then this start goes on as it is.
+    let e = std::process::Command::new(&real).args(std::env::args_os().skip(1)).exec();
+    log::warn!("can't start from {}: {e}", real.display());
 }
 
 /// `noobsbot --update`: rerun the installer, which fetches the latest version.
