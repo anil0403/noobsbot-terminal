@@ -814,6 +814,31 @@ impl App {
                     self.clipboard.set(false, text);
                 }
             }
+            Action::Clear => {
+                if !self.focused_pane().clear() {
+                    return false;
+                }
+                self.dirty = true;
+            }
+            Action::SelectAll => {
+                let mut term = self.focused_pane().term.lock();
+                let (top, bottom) = (term.topmost_line(), term.bottommost_line());
+                let mut sel = Selection::new(SelectionType::Lines, Point::new(top, Column(0)), Side::Left);
+                sel.update(Point::new(bottom, Column(0)), Side::Right);
+                term.selection = Some(sel);
+                drop(term);
+                self.dirty = true;
+            }
+            Action::NewWindow => {
+                if let Err(e) = crate::restart::launch(&[], None) {
+                    notify("noobsbot can't open a window".into(), e.to_string());
+                }
+            }
+            Action::OpenConfig => {
+                if let Err(e) = std::process::Command::new("xdg-open").arg(config::path()).status() {
+                    notify("noobsbot can't open the config".into(), e.to_string());
+                }
+            }
             Action::Resize(dir) => {
                 let delta = if matches!(dir, Dir::Left | Dir::Up) { -RESIZE_STEP } else { RESIZE_STEP };
                 let id = self.focused();

@@ -48,6 +48,14 @@ pub enum Action {
     LinkHints,
     /// Typing goes to every pane in the tab, or back to just the focused one.
     Broadcast,
+    /// Empty the screen and the scrollback; at a prompt the shell draws its prompt again.
+    Clear,
+    /// Select all the text, the scrollback too.
+    SelectAll,
+    /// Another noobsbot window.
+    NewWindow,
+    /// The config file in the text editor.
+    OpenConfig,
 }
 
 /// Keys while vi mode is on.
@@ -180,12 +188,15 @@ pub fn actions() -> &'static [Entry] {
             (A::Copy, "Copy", "Ctrl+Shift+C"),
             (A::Paste, "Paste", "Ctrl+Shift+V or Shift+Insert"),
             (A::CopyOutput, "Copy last command's output", "Ctrl+Shift+G"),
+            (A::Clear, "Clear screen", "Ctrl+Shift+K"),
+            (A::SelectAll, "Select all", "Ctrl+Shift+A"),
             (A::Search, "Search", "Ctrl+Shift+F"),
             (A::ViMode, "Vi mode", "Ctrl+Shift+Space"),
             (A::LinkHints, "Link hints", "Ctrl+Shift+L"),
             (A::PrevPrompt, "Previous prompt", "Ctrl+Shift+Z"),
             (A::NextPrompt, "Next prompt", "Ctrl+Shift+X"),
             (A::NewTab, "New tab", "Ctrl+Shift+T"),
+            (A::NewWindow, "New window", "Ctrl+Shift+N"),
             (A::SplitRight, "Split right", "Ctrl+Shift+E"),
             (A::SplitDown, "Split down", "Ctrl+Shift+O"),
             (A::SplitLeft, "Split left", ""),
@@ -204,6 +215,7 @@ pub fn actions() -> &'static [Entry] {
             (A::ZoomReset, "Reset font size", "Ctrl+0"),
             (A::ToggleCrt, "Toggle CRT effect", ""),
             (A::Restart, "Restart noobsbot", ""),
+            (A::OpenConfig, "Open config file", ""),
         ]
         .into_iter()
         .map(|(a, n, k)| (a, n.to_owned(), k.to_owned()))
@@ -434,6 +446,10 @@ mod tests {
         let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
         assert_eq!(binding(&ch("3"), alt), Some(Action::GoToTab(2)));
         assert_eq!(binding(&ch("0"), alt), None);
+        assert_eq!(binding(&ch("K"), ctrl_shift), Some(Action::Clear));
+        assert_eq!(binding(&ch("A"), ctrl_shift), Some(Action::SelectAll));
+        assert_eq!(binding(&ch("N"), ctrl_shift), Some(Action::NewWindow));
+        assert_eq!(binding(&ch("k"), ModifiersState::CONTROL), None); // Ctrl+K stays the shell's
         assert_eq!(binding(&ch("E"), ctrl_shift), Some(Action::SplitRight));
         assert_eq!(binding(&Key::Named(NamedKey::Tab), ctrl_shift), Some(Action::PrevTab));
         assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), alt), Some(Action::Focus(Dir::Up)));
