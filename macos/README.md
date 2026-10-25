@@ -25,7 +25,7 @@ That command:
 - installs the **JetBrainsMono Nerd Font** for the prompt's icons
 - updates noobsbot when you run it again, or when you run `noobsbot --update`; `noobsbot --restart` (or "Restart noobsbot" in Cmd+Shift+P) then swaps the window for a fresh one
 
-The app is signed ad hoc, not by Apple: the installer clears the download quarantine so Gatekeeper doesn't call it damaged. To remove noobsbot, delete `Noobsbot.app` and the `noobsbot` link.
+The app is signed with our own "Noobsbot Terminal" certificate, not by Apple: the installer clears the download quarantine so Gatekeeper doesn't call it damaged. The certificate stays the same in every release, so permissions you give the app (Screen Recording, Accessibility, Full Disk Access) stay after `noobsbot -u`. To remove noobsbot, delete `Noobsbot.app` and the `noobsbot` link.
 
 <details>
 <summary><b>Build by hand</b></summary>

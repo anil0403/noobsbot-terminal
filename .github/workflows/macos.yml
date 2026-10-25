@@ -35,7 +35,30 @@ jobs:
           tic -x -o "$RUNNER_TEMP/ti" extra/noobsbot.terminfo
       - run: cargo build --release --locked --target aarch64-apple-darwin
       - run: cargo build --release --locked --target x86_64-apple-darwin
+      # The "Noobsbot Terminal" certificate (repo secrets), so permissions stay after
+      # an update (see package.sh). Without the secrets the app is signed ad hoc,
+      # except for a release, which then fails.
+      - name: Signing certificate
+        env:
+          P12: ${{ secrets.MACOS_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          [[ $GITHUB_REF == refs/tags/* ]] && echo "REQUIRE_SIGNING=1" >> "$GITHUB_ENV"
+          if [[ -z $P12 ]]; then echo "no certificate: ad-hoc signature"; exit 0; fi
+          kc=$RUNNER_TEMP/signing.keychain-db
+          pw=$(openssl rand -hex 16)
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" > /dev/null
+          # codesign only finds the key in a keychain on the search list.
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "SIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
       - run: ./package.sh
+      - run: codesign -dr - target/Noobsbot.app
       - name: Smoke test
         continue-on-error: true # a VM may have no usable GPU
         run: |
