@@ -1,0 +1,73 @@
+name: Bug report
+description: Something is broken or looks wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report. Please fill in what you can.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: noobsbot version
+      description: Run `noobsbot -v`.
+      placeholder: noobsbot 0.5.3
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: "macOS version, or Linux distro + desktop + X11 or Wayland."
+      placeholder: "macOS 15.5 / Ubuntu 24.04, GNOME, Wayland"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shell
+    attributes:
+      label: Shell
+      options:
+        - zsh
+        - bash
+        - fish
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead. Screenshots help.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a new tab
+        2. Run ...
+        3. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Config changes
+      description: Any lines you changed in `~/.config/noobsbot/config.toml`. Leave empty if none.
+      render: toml
