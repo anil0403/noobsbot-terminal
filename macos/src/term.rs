@@ -16,6 +16,8 @@ pub enum UserEvent {
     ToggleQuake,
     /// The Dock menu's "New Tab".
     NewTab,
+    /// An action picked in the menu bar.
+    Menu(crate::input::Action),
     /// The Dock menu's "Check for Updates": a new tab runs `noobsbot --update`.
     Update,
 }

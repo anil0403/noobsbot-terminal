@@ -9,6 +9,7 @@ mod images;
 mod input;
 mod links;
 mod list;
+mod menu;
 mod palette;
 mod pane;
 mod pty;
