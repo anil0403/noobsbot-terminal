@@ -15,6 +15,20 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create "${bins[@]}" -output "$app/Contents/MacOS/noobsbot"
 sed "s/@VERSION@/$ver/" extra/Info.plist > "$app/Contents/Info.plist"
 cp extra/noobsbot.icns extra/noobsbot.terminfo extra/config.example.toml "$app/Contents/Resources/"
-# Ad-hoc signature: Apple Silicon runs nothing unsigned. Not notarized.
-codesign --force --sign - "$app"
-echo "$app ($(lipo -archs "$app/Contents/MacOS/noobsbot"), $ver)"
+# Signed with the "Noobsbot Terminal" certificate when it is in the keychain
+# (CI loads it into $SIGN_KEYCHAIN). macOS then knows the app by its id and that
+# certificate, so permissions like Screen Recording stay after an update. With
+# an ad-hoc signature it knows only this build's hash, and every update loses
+# them. Not notarized either way.
+id="Noobsbot Terminal"
+if security find-identity -p codesigning ${SIGN_KEYCHAIN:+"$SIGN_KEYCHAIN"} 2>/dev/null | grep -q "\"$id\""; then
+    codesign --force --sign "$id" ${SIGN_KEYCHAIN:+--keychain "$SIGN_KEYCHAIN"} "$app"
+    signed=$id
+elif [[ -n ${REQUIRE_SIGNING:-} ]]; then
+    echo "no \"$id\" certificate to sign with" >&2
+    exit 1
+else
+    codesign --force --sign - "$app"   # Apple Silicon runs nothing unsigned
+    signed=ad-hoc
+fi
+echo "$app ($(lipo -archs "$app/Contents/MacOS/noobsbot"), $ver, $signed)"
