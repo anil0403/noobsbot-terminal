@@ -1245,6 +1245,9 @@ impl App {
         };
         log::info!("config reloaded");
         input::set_keys(&config.keys);
+        if self.quake.is_none() {
+            crate::menu::install(); // the menus show the new keys
+        }
         let font_changed = config.font != self.config.font;
         if config.crt.enabled != self.config.crt.enabled {
             self.crt = config.crt.enabled;
@@ -1367,6 +1370,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         if self.quake.is_none() {
             crate::dock::install(self.proxy.clone());
+            crate::menu::install();
             // Focus it: left unfocused on top, clicks on the window behind wouldn't raise that.
             crate::quake::activate(self.window.as_ref().unwrap());
         }
@@ -1378,6 +1382,10 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::ConfigChanged => return self.reload_config(),
             UserEvent::ToggleQuake => return self.toggle_quake(),
             UserEvent::NewTab => return self.dock_new_tab(None),
+            UserEvent::Menu(action) => {
+                self.run(event_loop, action);
+                return;
+            }
             UserEvent::Update => {
                 // Quoted for the shell; the installer replaces the app this runs from.
                 let exe = std::env::current_exe().unwrap_or_else(|_| "noobsbot".into()).to_string_lossy().replace('\'', "'\\''");

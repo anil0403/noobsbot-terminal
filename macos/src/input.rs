@@ -262,7 +262,7 @@ fn binding_in(user: &HashMap<String, String>, key: &Key, mods: ModifiersState) -
 
 /// A key spec like "Cmd+Shift+T" as modifiers and key; None if it isn't one
 /// (or is empty: palette only).
-fn parse(spec: &str) -> Option<(ModifiersState, Key)> {
+pub fn parse(spec: &str) -> Option<(ModifiersState, Key)> {
     let (prefix, name) = match spec.strip_suffix("++") {
         Some(prefix) => (prefix, "+"),
         None => spec.rsplit_once('+').unwrap_or(("", spec)),

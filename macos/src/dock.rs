@@ -49,13 +49,13 @@ pub fn install(proxy: EventLoopProxy<UserEvent>) {
 }
 
 /// An autoreleased NSString.
-unsafe fn ns_string(text: &str) -> *mut AnyObject {
+pub unsafe fn ns_string(text: &str) -> *mut AnyObject {
     let text = CString::new(text).unwrap_or_default();
     unsafe { msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()] }
 }
 
 /// Adds an item that sends `action` to `target`.
-unsafe fn add_item(menu: *mut AnyObject, title: &str, action: Sel, target: *mut AnyObject) -> *mut AnyObject {
+pub unsafe fn add_item(menu: *mut AnyObject, title: &str, action: Sel, target: *mut AnyObject) -> *mut AnyObject {
     unsafe {
         let item: *mut AnyObject = msg_send![menu, addItemWithTitle: ns_string(title), action: action, keyEquivalent: ns_string("")];
         let _: () = msg_send![item, setTarget: target];
@@ -133,11 +133,11 @@ extern "C-unwind" fn update(_: *mut AnyObject, _: Sel, _sender: *mut AnyObject) 
         let latest = crate::welcome::latest_release();
         let offer = latest.as_deref().is_some_and(|t| crate::welcome::newer(t, ours));
         let (text, buttons) = match &latest {
-            None => ("noobsbot can't reach GitHub to check for updates. Try again later.".to_owned(), r#"{"OK"}"#),
-            Some(_) if !offer => (format!("noobsbot {ours} is the latest version."), r#"{"OK"}"#),
-            Some(tag) => (format!("noobsbot {tag} is out. You have {ours}.\n\nUpdate now?"), r#"{"Later", "Update"}"#),
+            None => ("Noobsbot Terminal can't reach GitHub to check for updates. Try again later.".to_owned(), r#"{"OK"}"#),
+            Some(_) if !offer => (format!("Noobsbot Terminal {ours} is the latest version."), r#"{"OK"}"#),
+            Some(tag) => (format!("Noobsbot Terminal {tag} is out. You have {ours}.\n\nUpdate now?"), r#"{"Later", "Update"}"#),
         };
-        let script = format!(r#"display dialog "{text}" buttons {buttons} default button {} with title "noobsbot""#, if offer { "\"Update\"" } else { "1" });
+        let script = format!(r#"display dialog "{text}" buttons {buttons} default button {} with title "Noobsbot Terminal""#, if offer { "\"Update\"" } else { "1" });
         let Ok(out) = std::process::Command::new("/usr/bin/osascript").args(["-e", &script]).output() else { return };
         if offer && String::from_utf8_lossy(&out.stdout).contains("button returned:Update") {
             send(UserEvent::Update);
@@ -145,7 +145,7 @@ extern "C-unwind" fn update(_: *mut AnyObject, _: Sel, _sender: *mut AnyObject) 
     });
 }
 
-fn send(event: UserEvent) {
+pub fn send(event: UserEvent) {
     if let Some(proxy) = PROXY.lock().unwrap().as_ref() {
         let _ = proxy.send_event(event);
     }
