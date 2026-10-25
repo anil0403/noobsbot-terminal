@@ -53,6 +53,8 @@ jobs:
           security unlock-keychain -p "$pw" "$kc"
           security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" > /dev/null
+          # codesign only finds the key in a keychain on the search list.
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/cert.p12"
           echo "SIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
       - run: ./package.sh
