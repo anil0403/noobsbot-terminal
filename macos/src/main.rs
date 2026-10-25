@@ -52,17 +52,25 @@ fn main() {
     event_loop.run_app(&mut app).expect("run event loop");
 }
 
-const HELP: &str = "\
-Usage: noobsbot [OPTION]
+const HELP: &str = concat!(
+    "noobsbot ",
+    env!("CARGO_PKG_VERSION"),
+    "\n\nUsage: noobsbot [OPTION]
 
 With no option, opens a new window.
 
-  --quake      the drop-down terminal; run it again to show or hide it
-  --update     install the latest version
-  --restart    swap running noobsbot windows for fresh ones (after --update)
-  --version    print the version
-  --help       print this list
-";
+Options:
+  --quake          the drop-down terminal; run it again to show or hide it
+  -u, --update     install the latest version
+  -r, --restart    swap running noobsbot windows for fresh ones (after --update)
+  -v, --version    print the version
+  -h, --help       print this list
+
+Settings:   ~/.config/noobsbot/config.toml (made on first run)
+Shortcuts:  Cmd+Shift+P lists every action
+More help:  https://github.com/anil0403/noobsbot-terminal
+"
+);
 
 /// What the command line asks for: one option at most.
 #[derive(Debug, PartialEq)]
@@ -78,10 +86,10 @@ enum Cli {
 fn parse(args: &[String]) -> Result<Cli, String> {
     let cli = |arg: &str| match arg {
         "--quake" => Ok(Cli::Quake),
-        "--update" => Ok(Cli::Update),
-        "--restart" => Ok(Cli::Restart),
+        "-u" | "--update" => Ok(Cli::Update),
+        "-r" | "--restart" => Ok(Cli::Restart),
         "-h" | "--help" => Ok(Cli::Help),
-        "-V" | "--version" => Ok(Cli::Version),
+        "-v" | "-V" | "--version" => Ok(Cli::Version),
         _ => Err(format!("unknown argument '{arg}'")),
     };
     match args {
@@ -122,18 +130,21 @@ mod tests {
         let parse = |args: &[&str]| parse(&args.iter().map(|a| a.to_string()).collect::<Vec<_>>());
         assert_eq!(parse(&[]), Ok(Cli::Window));
         assert_eq!(parse(&["--quake"]), Ok(Cli::Quake));
-        assert_eq!(parse(&["--update"]), Ok(Cli::Update));
-        assert_eq!(parse(&["--restart"]), Ok(Cli::Restart));
+        assert_eq!((parse(&["-u"]), parse(&["--update"])), (Ok(Cli::Update), Ok(Cli::Update)));
+        assert_eq!((parse(&["-r"]), parse(&["--restart"])), (Ok(Cli::Restart), Ok(Cli::Restart)));
         assert_eq!((parse(&["-h"]), parse(&["--help"])), (Ok(Cli::Help), Ok(Cli::Help)));
-        assert_eq!((parse(&["-V"]), parse(&["--version"])), (Ok(Cli::Version), Ok(Cli::Version)));
+        for arg in ["-v", "-V", "--version"] {
+            assert_eq!(parse(&[arg]), Ok(Cli::Version), "{arg}");
+        }
         assert_eq!(parse(&["--gsdsdgs"]), Err("unknown argument '--gsdsdgs'".into()));
         assert_eq!(parse(&["file.txt"]), Err("unknown argument 'file.txt'".into()));
         assert_eq!(parse(&["--quake", "--nope"]), Err("unknown argument '--nope'".into()));
         assert_eq!(parse(&["--nope", "--quake"]), Err("unknown argument '--nope'".into()));
         assert_eq!(parse(&["--quake", "--update"]), Err("one option at a time".into()));
         // Every option in the help works.
-        for opt in HELP.lines().filter_map(|l| l.trim_start().strip_prefix("--")).map(|l| format!("--{}", l.split(' ').next().unwrap())) {
-            assert!(parse(&[&opt]).is_ok(), "{opt}");
+        let opts = HELP.lines().filter(|l| l.starts_with("  -")).flat_map(|l| l.split_whitespace().take_while(|w| w.starts_with('-')));
+        for opt in opts.map(|w| w.trim_end_matches(',')) {
+            assert!(parse(&[opt]).is_ok(), "{opt}");
         }
     }
 }
