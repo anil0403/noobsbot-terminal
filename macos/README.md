@@ -47,8 +47,9 @@ cp -R target/Noobsbot.app /Applications/
 | Command palette (every action, theme and shell) | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> |
 | Copy · Paste | <kbd>Cmd</kbd>+<kbd>C</kbd> · <kbd>Cmd</kbd>+<kbd>V</kbd> |
 | Copy the last command's output | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> |
+| Clear the screen and the scrollback · Select all | <kbd>Cmd</kbd>+<kbd>K</kbd> · <kbd>Cmd</kbd>+<kbd>A</kbd> |
 | Search · Vi mode | <kbd>Cmd</kbd>+<kbd>F</kbd> · <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> |
-| New tab · Close pane | <kbd>Cmd</kbd>+<kbd>T</kbd> · <kbd>Cmd</kbd>+<kbd>W</kbd> |
+| New tab · New window · Close pane | <kbd>Cmd</kbd>+<kbd>T</kbd> · <kbd>Cmd</kbd>+<kbd>N</kbd> · <kbd>Cmd</kbd>+<kbd>W</kbd> |
 | Split right · Split down | <kbd>Cmd</kbd>+<kbd>D</kbd> · <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> |
 | Next · previous tab | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd> · <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> (or <kbd>Ctrl</kbd>+<kbd>Tab</kbd>) |
 | Go to tab 1–9 | <kbd>Cmd</kbd>+<kbd>1</kbd>…<kbd>9</kbd> |
@@ -58,13 +59,18 @@ cp -R target/Noobsbot.app /Applications/
 | Previous · next prompt | <kbd>Cmd</kbd>+<kbd>↑</kbd> · <kbd>Cmd</kbd>+<kbd>↓</kbd> |
 | Link hints: every link on screen gets a letter; type it to open, Shift + it to copy, Esc cancels | <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> |
 | Font size | <kbd>Cmd</kbd>+<kbd>=</kbd> · <kbd>Cmd</kbd>+<kbd>-</kbd> · <kbd>Cmd</kbd>+<kbd>0</kbd> |
-| Quit | <kbd>Cmd</kbd>+<kbd>Q</kbd> |
+| Open the config file | <kbd>Cmd</kbd>+<kbd>,</kbd> |
+| Minimize · Hide · Quit | <kbd>Cmd</kbd>+<kbd>M</kbd> · <kbd>Cmd</kbd>+<kbd>H</kbd> · <kbd>Cmd</kbd>+<kbd>Q</kbd> |
 
 At the prompt: <kbd>Cmd</kbd>+<kbd>←</kbd>/<kbd>→</kbd> jump to the line's start/end, <kbd>Cmd</kbd>+<kbd>Backspace</kbd> deletes to the start, <kbd>Option</kbd>+<kbd>←</kbd>/<kbd>→</kbd> move by word. A grey suggestion is taken with <kbd>→</kbd> (all of it) or <kbd>Option</kbd>+<kbd>→</kbd> (a word).
+
+On a Windows keyboard, the <kbd>Windows</kbd> key is <kbd>Cmd</kbd> and <kbd>Alt</kbd> is <kbd>Option</kbd>.
 
 The left <kbd>Option</kbd> key is Alt (Meta) for the shell and programs; the right one still types special characters (é, ©, @ on some layouts).
 
 Links: click to open, <kbd>c</kbd> while hovering copies, <kbd>Cmd</kbd>+click opens files like `src/main.rs:12` in your editor.
+
+Right-click the Dock icon for recent folders (each opens a new window there), New Window, New Tab, Open Config File and Check for Updates.
 
 Drag files from Finder onto the terminal to type their paths, quoted when they have spaces.
 

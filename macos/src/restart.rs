@@ -4,6 +4,7 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 /// Environment variables, as (KEY, value).
@@ -11,9 +12,21 @@ type Env = Vec<(OsString, OsString)>;
 
 /// Start noobsbot with `args`, detached from this terminal; `env` replaces ours if given.
 pub fn launch(args: &[OsString], env: Option<Env>) -> std::io::Result<()> {
+    spawn(args, env, None)
+}
+
+/// Another noobsbot window, its first shell in `dir` (else where this one started).
+pub fn new_window(dir: Option<&Path>) -> std::io::Result<()> {
+    spawn(&[], None, dir)
+}
+
+fn spawn(args: &[OsString], env: Option<Env>, dir: Option<&Path>) -> std::io::Result<()> {
     // After an update the bundle's binary is a new file at the same path.
     let mut cmd = Command::new(std::env::current_exe().unwrap_or_else(|_| "noobsbot".into()));
     cmd.args(args);
+    if let Some(dir) = dir {
+        cmd.current_dir(dir); // the first shell starts in noobsbot's own folder
+    }
     if let Some(env) = env {
         cmd.env_clear().envs(env);
     }

@@ -137,6 +137,24 @@ impl Pane {
         self.pty.write(b"\x0c");
         true
     }
+
+    /// Empties the screen and the scrollback (Clear screen). At the prompt, Ctrl+L
+    /// makes the shell draw it again at the top; a running command only loses
+    /// what it printed. False in full-screen programs (vim, htop), which keep theirs.
+    pub fn clear(&mut self) -> bool {
+        let mut term = self.term.lock();
+        if term.mode().contains(TermMode::ALT_SCREEN) {
+            return false;
+        }
+        term.clear_screen(ClearMode::All);
+        term.clear_screen(ClearMode::Saved);
+        drop(term);
+        (self.welcome, self.typing) = (false, None);
+        if self.at_prompt {
+            self.pty.write(b"\x0c");
+        }
+        true
+    }
 }
 
 /// Puts the cursor `lines` below the first line of the prompt it's at, scrolling up if

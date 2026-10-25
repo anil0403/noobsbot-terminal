@@ -48,6 +48,18 @@ pub enum Action {
     LinkHints,
     /// Typing goes to every pane in the tab, or back to just the focused one.
     Broadcast,
+    /// Empty the screen and the scrollback; at a prompt the shell draws its prompt again.
+    Clear,
+    /// Select all the text, the scrollback too.
+    SelectAll,
+    /// Another noobsbot window.
+    NewWindow,
+    /// The config file in the text editor.
+    OpenConfig,
+    /// Minimize the window to the Dock.
+    Minimize,
+    /// Hide noobsbot, like Cmd+H in any Mac app.
+    Hide,
 }
 
 /// Keys while vi mode is on.
@@ -180,12 +192,15 @@ pub fn actions() -> &'static [Entry] {
             (A::Copy, "Copy", "Cmd+C"),
             (A::Paste, "Paste", "Cmd+V or Shift+Insert"),
             (A::CopyOutput, "Copy last command's output", "Cmd+Shift+C"),
+            (A::Clear, "Clear screen", "Cmd+K"),
+            (A::SelectAll, "Select all", "Cmd+A"),
             (A::Search, "Search", "Cmd+F"),
             (A::ViMode, "Vi mode", "Cmd+Shift+Space"),
             (A::LinkHints, "Link hints", "Cmd+Shift+L"),
             (A::PrevPrompt, "Previous prompt", "Cmd+Up"),
             (A::NextPrompt, "Next prompt", "Cmd+Down"),
             (A::NewTab, "New tab", "Cmd+T"),
+            (A::NewWindow, "New window", "Cmd+N"),
             (A::SplitRight, "Split right", "Cmd+D"),
             (A::SplitDown, "Split down", "Cmd+Shift+D"),
             (A::SplitLeft, "Split left", ""),
@@ -205,6 +220,9 @@ pub fn actions() -> &'static [Entry] {
             (A::ZoomReset, "Reset font size", "Cmd+0"),
             (A::ToggleCrt, "Toggle CRT effect", ""),
             (A::Restart, "Restart noobsbot", ""),
+            (A::OpenConfig, "Open config file", "Cmd+,"),
+            (A::Minimize, "Minimize window", "Cmd+M"),
+            (A::Hide, "Hide noobsbot", "Cmd+H"),
         ]
         .into_iter()
         .map(|(a, n, k)| (a, n.to_owned(), k.to_owned()))
@@ -460,6 +478,13 @@ mod tests {
         assert_eq!(binding(&Key::Named(NamedKey::ArrowUp), ModifiersState::ALT), None);
         assert_eq!(binding(&ch("+"), cmd_shift), Some(Action::ZoomIn));
         assert_eq!(binding(&ch("="), cmd), Some(Action::ZoomIn));
+        assert_eq!(binding(&ch("k"), cmd), Some(Action::Clear));
+        assert_eq!(binding(&ch("a"), cmd), Some(Action::SelectAll));
+        assert_eq!(binding(&ch("n"), cmd), Some(Action::NewWindow));
+        assert_eq!(binding(&ch(","), cmd), Some(Action::OpenConfig));
+        assert_eq!(binding(&ch("m"), cmd), Some(Action::Minimize));
+        assert_eq!(binding(&ch("h"), cmd), Some(Action::Hide));
+        assert_eq!(binding(&ch("k"), ModifiersState::CONTROL), None); // Ctrl+K stays the shell's
         assert_eq!(binding(&ch("-"), cmd), Some(Action::ZoomOut));
         assert_eq!(binding(&ch("c"), cmd), Some(Action::Copy));
         assert_eq!(binding(&ch("v"), cmd), Some(Action::Paste));

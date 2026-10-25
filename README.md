@@ -126,6 +126,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | Mouse drag, double / triple click | Select text, word, line (copied to the clipboard and the mouse selection) |
 | Shift + mouse | Select even when an app (vim, tmux) captures the mouse |
 | Ctrl+Shift+G | Copy the last command's output |
+| Ctrl+Shift+A | Select all, the scrollback too |
 
 </details>
 
@@ -138,6 +139,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | Ctrl+Shift+E / Ctrl+Shift+O | Split right / split down (also the buttons at the right of the tab bar; up and left from the palette or right-click) |
 | Right-click | Menu: copy, paste, split right / down / left / up, new tab, close pane (Shift+right-click when a program uses the mouse) |
 | Ctrl+Shift+W | Close pane (the last pane closes its tab) |
+| Ctrl+Shift+N | New window |
 | **×** on a tab, middle-click | Close the tab with all its panes |
 | Ctrl+Tab / Ctrl+Shift+Tab, Alt+1…9, click | Next / previous / numbered tab |
 | Alt+Arrows, click | Move focus between split panes |
@@ -152,6 +154,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 
 | Keys | Action |
 |---|---|
+| Ctrl+Shift+K | Clear the screen and the history; at the prompt the shell draws it again at the top (Ctrl+L only clears the screen) |
 | Shift+PgUp / Shift+PgDn, wheel | Scroll through history |
 | Ctrl+Shift+Home / End | Jump to top / bottom of history |
 | Ctrl+Shift+Z / Ctrl+Shift+X | Scroll to the previous / next command's prompt |

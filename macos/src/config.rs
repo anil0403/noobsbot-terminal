@@ -218,6 +218,11 @@ pub fn path() -> PathBuf {
     base.join("noobsbot").join("config.toml")
 }
 
+/// Open the config file in the default text editor.
+pub fn open_in_editor() -> std::io::Result<()> {
+    std::process::Command::new("/usr/bin/open").arg("-t").arg(path()).status().map(drop)
+}
+
 /// Read the config. A missing file gets the documented example written in its place.
 pub fn load(path: &Path) -> Result<Config, String> {
     match std::fs::read_to_string(path) {
