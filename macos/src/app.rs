@@ -125,6 +125,9 @@ pub struct App {
     link_press: Option<Target>,
     /// Tab, close button or bar button under the pointer.
     bar_hover: Option<BarHit>,
+    /// Height of the macOS title bar, in pixels. The window draws under it,
+    /// so the tab bar starts below it. 0 in full screen and in quake mode.
+    title_h: f32,
     /// Split divider under the pointer (or being dragged).
     divider_hover: Option<usize>,
     mods: ModifiersState,
@@ -217,6 +220,7 @@ impl App {
             typed_since_move: false,
             link_press: None,
             bar_hover: None,
+            title_h: 0.0,
             divider_hover: None,
             mods: ModifiersState::empty(),
             next_blink: Instant::now(),
@@ -311,7 +315,7 @@ impl App {
     fn bar_h(&self) -> f32 {
         match &self.renderer {
             // Under the window border's top edge; a 1px line at the bottom.
-            Some(r) => r.font.cell_h + r.px(BORDER) + 2.0 * r.px(PAD) + r.px(1.0),
+            Some(r) => self.title_h + r.font.cell_h + r.px(BORDER) + 2.0 * r.px(PAD) + r.px(1.0),
             _ => 0.0,
         }
     }
@@ -637,7 +641,7 @@ impl App {
         let (x, y) = self.mouse_px;
         let divider = self.drag.or_else(|| self.divider_at(x, y));
         let bar = match &self.renderer {
-            Some(r) if y < self.bar_h() && self.menu.is_none() => bar_hit(r, self.tabs.len(), self.tab_w(), x),
+            Some(r) if y >= self.title_h && y < self.bar_h() && self.menu.is_none() => bar_hit(r, self.tabs.len(), self.tab_w(), x),
             _ => None,
         };
         if (divider, bar) != (self.divider_hover, self.bar_hover) {
@@ -1352,8 +1356,13 @@ impl ApplicationHandler<UserEvent> for App {
                 .with_position(m.position())
                 .with_visible(false);
         } else {
-            // Room for the welcome screen.
-            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1100.0, 720.0));
+            // Room for the welcome screen. The window draws under the title bar,
+            // so the strip takes the tab bar's color, not the desktop behind
+            // the (transparent) window.
+            attrs = attrs
+                .with_inner_size(winit::dpi::LogicalSize::new(1100.0, 720.0))
+                .with_titlebar_transparent(true)
+                .with_fullsize_content_view(true);
         }
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         if let Some(mhz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {
@@ -1361,6 +1370,9 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let font = Font::new(&self.config.font.family, self.font_px(&window), self.config.font.weight);
         self.renderer = Some(Renderer::new(window.clone(), font));
+        if self.quake.is_none() {
+            self.title_h = title_bar_h(&window);
+        }
         self.window = Some(window);
         if !self.restore_session() {
             self.new_tab();
@@ -1530,6 +1542,10 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(px) => {
+                if self.quake.is_none() {
+                    // Full screen hides the title bar.
+                    self.title_h = title_bar_h(self.window.as_ref().unwrap());
+                }
                 self.renderer.as_mut().unwrap().resize(px.width, px.height);
                 self.relayout();
             }
@@ -1810,7 +1826,10 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 if pressed && y < self.bar_h() {
-                    let hit = bar_hit(self.renderer.as_ref().unwrap(), self.tabs.len(), self.tab_w(), x);
+                    let hit = match y >= self.title_h {
+                        true => bar_hit(self.renderer.as_ref().unwrap(), self.tabs.len(), self.tab_w(), x),
+                        false => None, // the title bar strip
+                    };
                     match (button, hit) {
                         (MouseButton::Left, Some(BarHit::Button(action))) => _ = self.run(event_loop, action),
                         (MouseButton::Left, Some(BarHit::Tab(i))) => self.switch_tab(i),
@@ -2004,7 +2023,7 @@ impl ApplicationHandler<UserEvent> for App {
                     };
                     draw_link_hint(renderer, pane.rect, &link.range, offset, &text, &theme);
                 }
-                draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, bar_h, tab_w, self.bar_hover);
+                draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, self.title_h, bar_h, tab_w, self.bar_hover);
                 if let Some(p) = &self.palette {
                     draw_palette(renderer, p, &theme);
                 }
@@ -2368,6 +2387,41 @@ fn panel(r: &mut Renderer, rect: Rect, theme: &Theme) {
     r.fill(Rect { x: rect.x + t, y: rect.y + t, w: rect.w - 2.0 * t, h: rect.h - 2.0 * t }, theme::to_f32(surface(theme)));
 }
 
+/// Height of the title bar over the content, in pixels: the content view's
+/// height minus the part AppKit leaves free of the title bar.
+fn title_bar_h(window: &Window) -> f32 {
+    use objc2::encode::{Encode, Encoding};
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct NsRect {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    }
+    // SAFETY: same layout as CGRect, which is two structs of two doubles.
+    unsafe impl Encode for NsRect {
+        const ENCODING: Encoding = Encoding::Struct(
+            "CGRect",
+            &[Encoding::Struct("CGPoint", &[Encoding::Double, Encoding::Double]), Encoding::Struct("CGSize", &[Encoding::Double, Encoding::Double])],
+        );
+    }
+    let Ok(handle) = window.window_handle() else { return 0.0 };
+    let RawWindowHandle::AppKit(h) = handle.as_raw() else { return 0.0 };
+    // SAFETY: ns_view is this window's live content view, used on the main thread.
+    unsafe {
+        let view: &AnyObject = h.ns_view.cast().as_ref();
+        let ns_window: *mut AnyObject = msg_send![view, window];
+        let Some(ns_window) = ns_window.as_ref() else { return 0.0 };
+        let frame: NsRect = msg_send![view, frame];
+        let free: NsRect = msg_send![ns_window, contentLayoutRect];
+        ((frame.h - free.h).max(0.0) * window.scale_factor()) as f32
+    }
+}
+
 /// The right-click menu: action names with their keys in groups, the hovered
 /// row as a pill. Copy is dimmed with nothing selected.
 fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_copy: bool, theme: &Theme) {
@@ -2398,12 +2452,15 @@ fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_c
 
 /// One tab per slot, each tinted with its focused pane's situation theme, so a
 /// red production tab stays visible while you work in another one.
-fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32, hover: Option<BarHit>) {
+/// The bar fills from the window top, so it also colors the title bar strip
+/// (`top` high) above the tabs.
+#[allow(clippy::too_many_arguments)]
+fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, top: f32, bar_h: f32, tab_w: f32, hover: Option<BarHit>) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let backdrop = theme::dim(panes.get_mut(&tabs[active].focused).unwrap().theme.frame().bg);
     let [red, g, b, _] = theme::to_f32(backdrop);
     r.fill(Rect { x: 0.0, y: 0.0, w: r.size().0, h: bar_h }, [red, g, b, r.opacity]);
-    let y = r.px(BORDER) + r.px(PAD);
+    let y = top + r.px(BORDER) + r.px(PAD);
     let fit = tab_cells(cw, tab_w);
     let closable = fit >= CLOSE_MIN;
     // A lone tab isn't drawn: the bar is just for the buttons then.
