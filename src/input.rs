@@ -311,7 +311,8 @@ fn mod_param(mods: ModifiersState) -> u8 {
 }
 
 /// Encode a key press as the bytes a shell expects (xterm conventions).
-/// ponytail: no kitty keyboard protocol or keypad application mode yet.
+/// Programs that turn on the kitty keyboard protocol get `kitty::encode` instead.
+/// ponytail: no keypad application mode yet.
 pub fn key_bytes(key: &Key, text: Option<&str>, mods: ModifiersState, app_cursor: bool) -> Option<Vec<u8>> {
     let m = mod_param(mods);
     // Cursor-style keys: CSI <c>, SS3 <c> in app-cursor mode, CSI 1;m <c> with modifiers.
