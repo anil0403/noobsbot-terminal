@@ -4,7 +4,7 @@ Thanks for helping with noobsbot terminal. Bug reports, ideas and pull requests 
 
 ## Before you start
 
-- **Bugs and ideas:** open an [issue](https://github.com/anil0403/noobsbot-terminal/issues/new/choose). The forms ask for the details we need.
+- **Bugs and ideas:** open an [issue](https://github.com/noobsbot-team/noobsbot-terminal/issues/new/choose). The forms ask for the details we need.
 - **Bigger changes:** open an issue first, so we can agree on the idea before you spend time on it.
 - **Security problems:** do not open a public issue. See [SECURITY.md](SECURITY.md).
 

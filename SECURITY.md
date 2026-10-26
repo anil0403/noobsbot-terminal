@@ -8,7 +8,7 @@ Only the **latest release** gets security fixes. Run `noobsbot -u` to update, an
 
 Please **do not** open a public issue for a security problem.
 
-Report it here instead: [Report a vulnerability](https://github.com/anil0403/noobsbot-terminal/security/advisories/new). Only the maintainers can see it.
+Report it here instead: [Report a vulnerability](https://github.com/noobsbot-team/noobsbot-terminal/security/advisories/new). Only the maintainers can see it.
 
 Please include:
 
