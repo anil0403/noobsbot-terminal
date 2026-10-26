@@ -1,0 +1,26 @@
+name: Feature request
+description: An idea for something new, or a change to how something works.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do?
+      description: The task or problem, not only the solution. For example "I lose my place when ...".
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How it could work. If another terminal does it well, say which one.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - macOS
+        - Linux
