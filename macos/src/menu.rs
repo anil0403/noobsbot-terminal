@@ -103,10 +103,12 @@ pub fn install() {
         let cls = ffi::object_getClass(delegate).cast_mut();
         let picked: extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) = picked;
         let help_page: extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) = help_page;
+        let quit: extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) = quit;
         let no_keys: extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject, *mut AnyObject, *mut AnyObject) -> Bool = no_keys;
         // Already there after the first time: class_addMethod then leaves it.
         ffi::class_addMethod(cls, sel!(noobsbotMenu:), std::mem::transmute::<_, Imp>(picked), c"v@:@".as_ptr());
         ffi::class_addMethod(cls, sel!(noobsbotHelp:), std::mem::transmute::<_, Imp>(help_page), c"v@:@".as_ptr());
+        ffi::class_addMethod(cls, sel!(noobsbotQuit:), std::mem::transmute::<_, Imp>(quit), c"v@:@".as_ptr());
         ffi::class_addMethod(cls, sel!(menuHasKeyEquivalent:forEvent:target:action:), std::mem::transmute::<_, Imp>(no_keys), c"B@:@@^@^:".as_ptr());
 
         let bar: *mut AnyObject = msg_send![class!(NSMenu), new];
@@ -153,7 +155,8 @@ unsafe fn app_menu(delegate: *mut AnyObject) -> *mut AnyObject {
         add_std(menu, "Hide Others", sel!(hideOtherApplications:), "h", CMD | OPTION, std::ptr::null_mut());
         add_std(menu, "Show All", sel!(unhideAllApplications:), "", 0, std::ptr::null_mut());
         add_line(menu);
-        add_std(menu, "Quit Noobsbot Terminal", sel!(terminate:), "q", CMD, std::ptr::null_mut());
+        // Ours, not terminate:, so it can ask first while programs still run.
+        add_std(menu, "Quit Noobsbot Terminal", sel!(noobsbotQuit:), "q", CMD, delegate);
         menu
     }
 }
@@ -264,6 +267,11 @@ extern "C-unwind" fn picked(_: *mut AnyObject, _: Sel, sender: *mut AnyObject) {
     if let Some(entry) = input::actions().get(tag as usize) {
         crate::dock::send(UserEvent::Menu(entry.action));
     }
+}
+
+/// "Quit Noobsbot Terminal" (Cmd+Q): the window closes as from its close button.
+extern "C-unwind" fn quit(_: *mut AnyObject, _: Sel, _sender: *mut AnyObject) {
+    crate::dock::send(UserEvent::Quit);
 }
 
 extern "C-unwind" fn help_page(_: *mut AnyObject, _: Sel, _sender: *mut AnyObject) {

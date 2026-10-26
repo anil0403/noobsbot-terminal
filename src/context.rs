@@ -33,6 +33,17 @@ pub fn detect(pty_fd: RawFd, shell_pid: u32) -> Context {
     Context { process, user, ssh_host, cwd, git_branch, hour: crate::welcome::now().0 }
 }
 
+/// The program in the PTY's foreground when it isn't the shell itself (what
+/// closing the pane would end), by name.
+pub fn running(pty_fd: RawFd, shell_pid: u32) -> Option<String> {
+    let pgrp = unsafe { libc::tcgetpgrp(pty_fd) };
+    if pgrp <= 0 || pgrp as u32 == shell_pid {
+        return None;
+    }
+    let name = std::fs::read_to_string(format!("/proc/{pgrp}/comm")).unwrap_or_default().trim().to_owned();
+    Some(if name.is_empty() { "a program".into() } else { name })
+}
+
 fn effective_uid(status: &str) -> Option<u32> {
     // "Uid:\treal\teffective\tsaved\tfs"
     let line = status.lines().find(|l| l.starts_with("Uid:"))?;

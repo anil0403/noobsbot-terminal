@@ -41,6 +41,20 @@ use crate::tap::Mark;
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
 
+/// What a close asks about: a pane, the tab holding a pane, or the window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Closing {
+    Pane(PaneId),
+    Tab(PaneId),
+    Window,
+}
+
+/// "Close anyway?", while programs still run in what would close.
+struct Confirm {
+    close: Closing,
+    running: Vec<String>,
+}
+
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
 /// Minimum gap between situation checks while output is streaming.
@@ -114,6 +128,8 @@ pub struct App {
     session_saved: bool,
     /// The right-click menu: top-left corner, and the row under the pointer.
     menu: Option<((f32, f32), Option<usize>)>,
+    /// Asking before a close (see `request_close`).
+    confirm: Option<Confirm>,
     /// Link under the pointer: a URL, or any link while Cmd is held.
     hover: Option<(PaneId, Link)>,
     /// `c` copied the hovered link (it says so until the pointer leaves it).
@@ -213,6 +229,7 @@ impl App {
             hints: Hints::new(),
             palette: None,
             menu: None,
+            confirm: None,
             hover: None,
             link_copied: false,
             link_hints: None,
@@ -459,6 +476,60 @@ impl App {
         for id in tab.root.leaves() {
             self.close_pane(event_loop, id);
         }
+    }
+
+    /// Close a pane, a tab or the window, but ask first while a program (not just
+    /// the shell) still runs in it.
+    fn request_close(&mut self, event_loop: &ActiveEventLoop, close: Closing) {
+        let ids: Vec<PaneId> = match close {
+            Closing::Pane(id) => vec![id],
+            Closing::Tab(id) => self.tabs.iter().find(|t| t.root.contains(id)).map(|t| t.root.leaves()).unwrap_or_default(),
+            Closing::Window => self.tabs.iter().flat_map(|t| t.root.leaves()).collect(),
+        };
+        let mut running: Vec<String> = Vec::new();
+        if self.config.terminal.confirm_close {
+            for name in ids.iter().filter_map(|id| self.panes.get(id)).filter_map(|p| crate::context::running(p.pty.fd(), p.pty.shell_pid())) {
+                if !running.contains(&name) {
+                    running.push(name);
+                }
+            }
+        }
+        if running.is_empty() {
+            self.close_now(event_loop, close);
+        } else {
+            self.menu = None;
+            self.palette = None;
+            self.confirm = Some(Confirm { close, running });
+            self.dirty = true;
+        }
+    }
+
+    fn close_now(&mut self, event_loop: &ActiveEventLoop, close: Closing) {
+        match close {
+            Closing::Pane(id) => self.close_pane(event_loop, id),
+            Closing::Tab(id) => {
+                if let Some(i) = self.tabs.iter().position(|t| t.root.contains(id)) {
+                    self.close_tab(event_loop, i);
+                }
+            }
+            Closing::Window => event_loop.exit(),
+        }
+    }
+
+    /// A key while "Close anyway?" is up: Enter closes, Esc keeps it, others wait.
+    fn confirm_key(&mut self, event_loop: &ActiveEventLoop, key: &Key) -> bool {
+        let Some(confirm) = &self.confirm else { return false };
+        let close = confirm.close;
+        match key {
+            Key::Named(NamedKey::Enter) => {
+                self.confirm = None;
+                self.close_now(event_loop, close);
+            }
+            Key::Named(NamedKey::Escape) => self.confirm = None,
+            _ => {}
+        }
+        self.dirty = true;
+        true
     }
 
     fn focus(&mut self, id: PaneId) {
@@ -757,7 +828,7 @@ impl App {
             Action::ZoomOut => self.set_zoom(self.zoom - 1.0),
             Action::ZoomReset => self.set_zoom(0.0),
             Action::NewTab => self.new_tab(),
-            Action::ClosePane => self.close_pane(event_loop, self.focused()),
+            Action::ClosePane => self.request_close(event_loop, Closing::Pane(self.focused())),
             Action::NextTab => self.switch_tab((self.active + 1) % self.tabs.len()),
             Action::PrevTab => self.switch_tab((self.active + self.tabs.len() - 1) % self.tabs.len()),
             // With a single tab, Cmd+digit does nothing.
@@ -1403,6 +1474,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let exe = std::env::current_exe().unwrap_or_else(|_| "noobsbot".into()).to_string_lossy().replace('\'', "'\\''");
                 return self.dock_new_tab(Some(format!("'{exe}' --update\n")));
             }
+            UserEvent::Quit => return self.request_close(event_loop, Closing::Window),
             UserEvent::Shell(id, prompt, mark) => return self.shell_mark(id, prompt, mark),
             UserEvent::Term(id, event) => (id, event),
         };
@@ -1540,7 +1612,7 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => self.request_close(event_loop, Closing::Window),
             WindowEvent::Resized(px) => {
                 if self.quake.is_none() {
                     // Full screen hides the title bar.
@@ -1565,6 +1637,9 @@ impl ApplicationHandler<UserEvent> for App {
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if self.confirm_key(event_loop, &event.logical_key) {
+                    return;
+                }
                 // `c` on a hovered link copies it.
                 if self.mods.is_empty()
                     && event.logical_key == Key::Character("c".into())
@@ -1820,6 +1895,11 @@ impl ApplicationHandler<UserEvent> for App {
                 if !pressed && button == MouseButton::Left && self.drag.take().is_some() {
                     return;
                 }
+                // "Close anyway?" takes the next click: it keeps everything open.
+                if pressed && self.confirm.take().is_some() {
+                    self.dirty = true;
+                    return;
+                }
                 // An open menu takes the next click: an item runs, anywhere else closes it.
                 if let Some((at, _)) = self.menu.filter(|_| pressed) {
                     self.menu = None;
@@ -1842,7 +1922,7 @@ impl ApplicationHandler<UserEvent> for App {
                         (MouseButton::Left, Some(BarHit::Button(action))) => _ = self.run(event_loop, action),
                         (MouseButton::Left, Some(BarHit::Tab(i))) => self.switch_tab(i),
                         (MouseButton::Left, Some(BarHit::Close(i))) | (MouseButton::Middle, Some(BarHit::Tab(i) | BarHit::Close(i))) => {
-                            self.close_tab(event_loop, i)
+                            self.request_close(event_loop, Closing::Tab(self.tabs[i].focused))
                         }
                         _ => {}
                     }
@@ -2034,6 +2114,9 @@ impl ApplicationHandler<UserEvent> for App {
                 draw_tab_bar(renderer, &self.tabs, &mut self.panes, self.active, self.title_h, bar_h, tab_w, self.bar_hover);
                 if let Some(p) = &self.palette {
                     draw_palette(renderer, p, &theme);
+                }
+                if let Some(confirm) = &self.confirm {
+                    draw_confirm(renderer, confirm, &theme);
                 }
                 if let Some((at, hovered)) = self.menu {
                     let can_copy = self.panes[&tab.focused].term.lock().selection.as_ref().is_some_and(|s| !s.is_empty());
@@ -2432,6 +2515,25 @@ fn title_bar_h(window: &Window) -> f32 {
 
 /// The right-click menu: action names with their keys in groups, the hovered
 /// row as a pill. Copy is dimmed with nothing selected.
+/// "Close anyway?" in the middle of the window.
+fn draw_confirm(r: &mut Renderer, confirm: &Confirm, theme: &Theme) {
+    let (cw, ch) = (r.font.cell_w, r.font.cell_h);
+    let what = match confirm.close {
+        Closing::Pane(_) => "Close this pane?",
+        Closing::Tab(_) => "Close this tab?",
+        Closing::Window => "Close the window?",
+    };
+    let lines = [what.to_owned(), format!("Still running: {}", confirm.running.join(", ")), "Enter: close    Esc: keep it".to_owned()];
+    let cols = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0) as f32 + 4.0;
+    let (w, h) = (cols * cw, ch * 5.0);
+    let (x, y) = (((r.size().0 - w) / 2.0).round(), ((r.size().1 - h) / 2.0).round());
+    panel(r, Rect { x, y, w, h }, theme);
+    let muted = theme::to_f32(theme::blend(theme.fg, theme.bg, 0.45));
+    r.text(x + 2.0 * cw, y + ch, &lines[0], theme::to_f32(theme.fg));
+    r.text(x + 2.0 * cw, y + 2.0 * ch, &lines[1], theme::to_f32(theme.cursor));
+    r.text(x + 2.0 * cw, y + 3.0 * ch, &lines[2], muted);
+}
+
 fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_copy: bool, theme: &Theme) {
     let (cw, ch) = (r.font.cell_w, r.font.cell_h);
     let (cols, h) = menu_size(r);

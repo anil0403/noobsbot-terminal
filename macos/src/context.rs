@@ -32,6 +32,17 @@ pub fn detect(pty_fd: RawFd, shell_pid: u32) -> Context {
     Context { process, user, ssh_host, cwd, git_branch, hour: crate::welcome::now().0 }
 }
 
+/// The program in the PTY's foreground when it isn't the shell itself (what
+/// closing the pane would end), by name.
+pub fn running(pty_fd: RawFd, shell_pid: u32) -> Option<String> {
+    let pgrp = unsafe { libc::tcgetpgrp(pty_fd) };
+    if pgrp <= 0 || pgrp as u32 == shell_pid {
+        return None;
+    }
+    let name = bsd_info(pgrp).map(|i| c_text(&i.pbi_name)).filter(|n| !n.is_empty());
+    Some(name.unwrap_or_else(|| "a program".into()))
+}
+
 /// Text of a NUL-terminated C char array.
 fn c_text(chars: &[libc::c_char]) -> String {
     let bytes: Vec<u8> = chars.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();

@@ -193,6 +193,8 @@ To pick up where you left off, set `restore_session = true` under `[terminal]`. 
 
 For a see-through background, set `opacity = 0.85` (0 to 1) under `[terminal]`. Text and colors that programs paint themselves stay solid. It needs a compositor and is ignored while CRT mode is on.
 
+Closing a pane, a tab or the window while a program (not just the shell) still runs in it asks first: Enter closes, Esc keeps it. To close right away, set `confirm_close = false` under `[terminal]`.
+
 ## 🐚 Shell integration
 
 bash and zsh start with a small script that tells the terminal where prompts, commands and output are, and which directory you're in. It doesn't edit your dotfiles, and your own rc files still load. Fish does this by itself. You get:
