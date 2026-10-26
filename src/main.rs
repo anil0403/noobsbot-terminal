@@ -6,6 +6,7 @@ mod context;
 mod font;
 mod images;
 mod input;
+mod kitty;
 mod links;
 mod list;
 mod palette;

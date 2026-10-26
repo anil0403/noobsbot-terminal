@@ -195,6 +195,8 @@ impl Config {
                 Clipboard::Paste => Osc52::OnlyPaste,
                 Clipboard::CopyPaste => Osc52::CopyPaste,
             },
+            // Programs turn on the kitty keyboard protocol themselves (see kitty.rs).
+            kitty_keyboard: true,
             ..Default::default()
         }
     }

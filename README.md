@@ -101,6 +101,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. Or Ctrl+Shift+L and type a link's letter, no mouse needed. |
 | 📂 **Drag and drop** | Drop files from your file manager onto the terminal to type their paths, quoted when they have spaces. |
 | 🖼️ **Inline images** | kitty graphics protocol and sixel. |
+| ⌨️ **Every key counts** | Programs that ask for it (Claude Code, Neovim, Helix, fish) get the kitty keyboard protocol: Shift+Enter, Ctrl+I and Esc reach them as their own keys. |
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
 | 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |
 | ⬇️ **Drop-down mode** | A quake-style terminal that slides in with F12. |

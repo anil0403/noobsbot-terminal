@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,7 @@ use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::blocks::{self, Blocks};
@@ -27,6 +28,7 @@ use crate::context::{self, Context};
 use crate::font::Font;
 use crate::images::Images;
 use crate::input::{self, Action, Vi, binding, key_bytes, mouse_report, paste_bytes, vi_binding};
+use crate::kitty;
 use crate::links::{self, Hints, Link, Target};
 use crate::list::{Done, List, ListKey};
 use crate::palette::{Item, Palette};
@@ -121,6 +123,9 @@ pub struct App {
     /// A key was pressed since the pointer last moved: plain hovering is off,
     /// so typing `c` with the pointer resting on a URL types it.
     typed_since_move: bool,
+    /// Keys whose press went to a program as a kitty keyboard protocol event, so
+    /// their release goes there too (and not the release of our own shortcuts).
+    kitty_down: HashSet<winit::keyboard::PhysicalKey>,
     /// Pressed on a link without Ctrl: opens on release unless it became a selection.
     link_press: Option<Target>,
     /// Tab, close button or bar button under the pointer.
@@ -215,6 +220,7 @@ impl App {
             link_hints: None,
             session_saved: false,
             typed_since_move: false,
+            kitty_down: HashSet::new(),
             link_press: None,
             bar_hover: None,
             divider_hover: None,
@@ -1494,6 +1500,23 @@ impl ApplicationHandler<UserEvent> for App {
                 focus_report(self.focused_pane(), focused);
                 self.dirty = true;
             }
+            // Releases go to programs that asked for them (kitty keyboard protocol),
+            // for keys whose press they got.
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
+                if !self.kitty_down.remove(&event.physical_key) {
+                    return;
+                }
+                let base = event.key_without_modifiers();
+                let k =
+                    kitty::KeyIn { key: &event.logical_key, base: &base, text: None, location: event.location, mods: self.mods, kind: kitty::Kind::Release };
+                for id in self.typing_to() {
+                    let pane = self.panes.get_mut(&id).unwrap();
+                    let flags = *pane.term.lock().mode() & TermMode::KITTY_KEYBOARD_PROTOCOL;
+                    if let kitty::Out::Send(bytes) = kitty::encode(&k, flags) {
+                        pane.pty.write(&bytes);
+                    }
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 // `c` on a hovered link copies it.
                 if self.mods.is_empty()
@@ -1599,10 +1622,29 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 let mods = self.mods;
+                let base = event.key_without_modifiers();
+                let kind = if event.repeat { kitty::Kind::Repeat } else { kitty::Kind::Press };
+                let k = kitty::KeyIn { key: &event.logical_key, base: &base, text: event.text.as_deref(), location: event.location, mods, kind };
                 for id in self.typing_to() {
                     let pane = self.panes.get_mut(&id).unwrap();
-                    let app_cursor = pane.term.lock().mode().contains(TermMode::APP_CURSOR);
-                    let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor) else { return };
+                    let (app_cursor, flags) = {
+                        let term = pane.term.lock();
+                        (term.mode().contains(TermMode::APP_CURSOR), *term.mode() & TermMode::KITTY_KEYBOARD_PROTOCOL)
+                    };
+                    let legacy = || key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor);
+                    let bytes = if flags.is_empty() {
+                        legacy()
+                    } else {
+                        if flags.contains(TermMode::REPORT_EVENT_TYPES) {
+                            self.kitty_down.insert(event.physical_key);
+                        }
+                        match kitty::encode(&k, flags) {
+                            kitty::Out::Legacy => legacy(),
+                            kitty::Out::Send(bytes) => Some(bytes),
+                            kitty::Out::Nothing => None,
+                        }
+                    };
+                    let Some(bytes) = bytes else { continue };
                     if pane.clear_welcome() {
                         self.dirty = true;
                         // Enter only clears the welcome screen; any other key also types.
