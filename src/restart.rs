@@ -37,7 +37,13 @@ pub fn launch(args: &[OsString], env: Option<Vec<(OsString, OsString)>>) -> std:
 /// run elsewhere. Each comes back as it was started (arguments, environment).
 pub fn cli() -> i32 {
     let targets = match std::env::var("NOOBSBOT_PID").ok().and_then(|p| p.parse::<u32>().ok()) {
-        Some(pid) => vec![pid],
+        // Only if that pid is still one of your noobsbots: a shell (or tmux) can
+        // outlive its window, and the pid can be reused by another program.
+        Some(pid) if running().contains(&pid) => vec![pid],
+        Some(pid) => {
+            eprintln!("noobsbot {pid} is gone");
+            return 1;
+        }
         None => running(),
     };
     if targets.is_empty() {

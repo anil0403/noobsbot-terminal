@@ -791,7 +791,7 @@ impl App {
                     self.dirty = true;
                 }
             }
-            Action::Restart => match self.save_session().and(crate::restart::launch(&std::env::args_os().skip(1).collect::<Vec<_>>(), None)) {
+            Action::Restart => match self.save_session().and_then(|()| crate::restart::launch(&std::env::args_os().skip(1).collect::<Vec<_>>(), None)) {
                 Ok(()) => {
                     self.session_saved = true;
                     event_loop.exit();
@@ -835,9 +835,13 @@ impl App {
                 }
             }
             Action::OpenConfig => {
-                if let Err(e) = std::process::Command::new("xdg-open").arg(config::path()).status() {
-                    notify("noobsbot can't open the config".into(), e.to_string());
-                }
+                // In a thread: xdg-open can wait for the program it starts (a terminal editor).
+                let path = config::path();
+                std::thread::spawn(move || {
+                    if let Err(e) = std::process::Command::new("xdg-open").arg(&path).status() {
+                        notify("noobsbot can't open the config".into(), e.to_string());
+                    }
+                });
             }
             Action::Resize(dir) => {
                 let delta = if matches!(dir, Dir::Left | Dir::Up) { -RESIZE_STEP } else { RESIZE_STEP };
@@ -1693,7 +1697,15 @@ impl ApplicationHandler<UserEvent> for App {
                 } else {
                     match self.pane_at(x, y) {
                         Some(id) => id,
-                        None => return,
+                        None => {
+                            // Over a border or gap: no link under the pointer, so a click can't open one.
+                            if self.hover.take().is_some() {
+                                self.dirty = true;
+                                self.link_copied = false;
+                                self.update_icon();
+                            }
+                            return;
+                        }
                     }
                 };
                 let same_pane = self.mouse_pane == Some(id);

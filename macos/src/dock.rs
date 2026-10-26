@@ -137,8 +137,14 @@ extern "C-unwind" fn update(_: *mut AnyObject, _: Sel, _sender: *mut AnyObject) 
             Some(_) if !offer => (format!("Noobsbot Terminal {ours} is the latest version."), r#"{"OK"}"#),
             Some(tag) => (format!("Noobsbot Terminal {tag} is out. You have {ours}.\n\nUpdate now?"), r#"{"Later", "Update"}"#),
         };
-        let script = format!(r#"display dialog "{text}" buttons {buttons} default button {} with title "Noobsbot Terminal""#, if offer { "\"Update\"" } else { "1" });
-        let Ok(out) = std::process::Command::new("/usr/bin/osascript").args(["-e", &script]).output() else { return };
+        // The text goes in as an argument, not into the script: the tag comes from GitHub.
+        let script = format!(
+            r#"display dialog (item 1 of argv) buttons {buttons} default button {} with title "Noobsbot Terminal""#,
+            if offer { "\"Update\"" } else { "1" }
+        );
+        let Ok(out) = std::process::Command::new("/usr/bin/osascript").args(["-e", "on run argv", "-e", &script, "-e", "end run", &text]).output() else {
+            return;
+        };
         if offer && String::from_utf8_lossy(&out.stdout).contains("button returned:Update") {
             send(UserEvent::Update);
         }
