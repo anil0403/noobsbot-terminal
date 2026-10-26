@@ -39,10 +39,12 @@ use crate::search::Search;
 use crate::session;
 use crate::shell;
 use crate::suggest::{self, Suggest};
-use crate::tap::Mark;
+use crate::tap::{Mark, Progress};
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
 
+/// What a program's notification is titled when it gives no title.
+const WINDOW_NAME: &str = "Noobsbot Terminal";
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
 /// Minimum gap between situation checks while output is streaming.
@@ -70,6 +72,8 @@ const RESIZE_STEP: f32 = 0.05;
 const NOTIFY_AFTER: Duration = Duration::from_secs(10);
 /// Red border after a failed command.
 const FLASH: Duration = Duration::from_millis(400);
+/// Shortest gap between two notifications from one pane.
+const NOTIFY_GAP: Duration = Duration::from_secs(1);
 /// Welcome screen characters typed per second.
 const TYPE_RATE: f32 = 3000.0;
 /// Longest the welcome screen keeps redrawing to type (a pane out of view never finishes).
@@ -375,6 +379,8 @@ impl App {
             cwd: None,
             failed_at: None,
             bell_at: None,
+            progress: None,
+            notified_at: None,
             at_prompt: false,
             running: None,
             welcome,
@@ -866,12 +872,24 @@ impl App {
 impl App {
     fn shell_mark(&mut self, id: PaneId, prompt: u64, mark: Mark) {
         let window_focused = self.renderer.as_ref().is_some_and(|r| r.focused);
+        // You're looking at this pane: a notification from it would only repeat it.
+        let looking = window_focused && self.tabs.get(self.active).is_some_and(|t| t.focused == id);
         let Some(pane) = self.panes.get_mut(&id) else { return };
         self.dirty = true;
         match mark {
+            Mark::Notify { title, body } => {
+                if looking || pane.notified_at.is_some_and(|t| t.elapsed() < NOTIFY_GAP) {
+                    return;
+                }
+                pane.notified_at = Some(Instant::now());
+                let title = if title.is_empty() { WINDOW_NAME.to_owned() } else { title };
+                return notify(title, body);
+            }
+            Mark::Progress(progress) => return pane.progress = progress,
             Mark::Cwd(path) => return pane.cwd = Some(path),
             Mark::CommandEnd(code) => {
                 pane.at_prompt = true; // sent before every prompt
+                pane.progress = None; // its program is done, even if it never said so
                 if let (Some(0), Some((cmd, dir))) = (code, pane.running.take()) {
                     self.suggest.ran(&cmd, &dir);
                 }
@@ -1440,10 +1458,12 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let flicker = self.crt && self.config.crt.flicker > 0.0;
         if flicker
-            || self
-                .panes
-                .values()
-                .any(|p| p.theme.fading() || p.typing.is_some_and(|t| t.elapsed() < TYPING) || p.failed_at.or(p.bell_at).is_some_and(|t| t.elapsed() < FLASH))
+            || self.panes.values().any(|p| {
+                p.theme.fading()
+                    || p.typing.is_some_and(|t| t.elapsed() < TYPING)
+                    || p.failed_at.or(p.bell_at).is_some_and(|t| t.elapsed() < FLASH)
+                    || p.progress == Some(Progress::Busy)
+            })
         {
             self.dirty = true;
         }
@@ -1957,6 +1977,10 @@ impl ApplicationHandler<UserEvent> for App {
                     };
                     let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), flash, broadcast: tab.broadcast, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
+                    if let Some(progress) = pane.progress {
+                        let (r, h) = (pane.rect, renderer.px(3.0));
+                        draw_progress(renderer, Rect { x: r.x, y: r.y + r.h - h, w: r.w, h }, progress, theme.cursor, true, &theme);
+                    }
                     if let Some(h) = self.link_hints.as_ref().filter(|h| h.pane == id) {
                         draw_link_labels(renderer, &pane.term.lock(), pane.rect, h, &theme);
                     }
@@ -2395,6 +2419,26 @@ fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_c
     }
 }
 
+/// A program's progress (OSC 9;4) as a bar across `rect`: `ink`, red for an error,
+/// yellow when paused; busy is a piece that slides along. `track` draws the rest faintly.
+fn draw_progress(r: &mut Renderer, rect: Rect, progress: Progress, ink: Rgb, track: bool, theme: &Theme) {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let part = |p: Option<u8>| p.map_or(1.0, |p| p as f32 / 100.0);
+    let (color, from, to) = match progress {
+        Progress::Normal(p) => (ink, 0.0, part(Some(p))),
+        Progress::Error(p) => (theme.ansi[1], 0.0, part(p)),
+        Progress::Paused(p) => (theme.ansi[3], 0.0, part(p)),
+        Progress::Busy => {
+            let t = START.get_or_init(Instant::now).elapsed().as_secs_f32() % 1.5 / 1.5;
+            (ink, (t * 1.3 - 0.3).max(0.0), (t * 1.3).min(1.0))
+        }
+    };
+    if track {
+        r.fill(rect, theme::to_f32(theme::blend(theme.bg, theme.fg, 0.15)));
+    }
+    r.fill(Rect { x: rect.x + rect.w * from, y: rect.y, w: rect.w * (to - from), h: rect.h }, theme::to_f32(color));
+}
+
 /// One tab per slot, each tinted with its focused pane's situation theme, so a
 /// red production tab stays visible while you work in another one.
 fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32, hover: Option<BarHit>) {
@@ -2431,6 +2475,10 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
             (false, false) => (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.3)),
         };
         pill(r, x, y, &label, theme::to_f32(bg), theme::to_f32(fg));
+        if let Some(progress) = pane.progress {
+            // In the tab's text color, so it shows on the active (cursor-colored) tab too.
+            draw_progress(r, Rect { x: x + cw / 2.0, y: y + ch - r.px(2.0), w: fit as f32 * cw - cw, h: r.px(2.0) }, progress, fg, false, &theme);
+        }
         if closable && (i == active || hovered) {
             let cx = x + fit as f32 * cw;
             if hover == Some(BarHit::Close(i)) {
