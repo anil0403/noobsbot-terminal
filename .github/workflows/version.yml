@@ -1,8 +1,10 @@
 # Cuts a release once a day, or when started by hand, from the commits since the
-# last tag (none → no release).
-# The bump is read from commit subjects: "feat!:" / "BREAKING" → major, "feat:" → minor,
-# anything else → patch. Bumps both crates, tags, creates the GitHub release
-# (auto notes), then starts the Linux and macOS release builds for the tag.
+# last tag. No release when nothing changed but docs and GitHub files (unless a
+# bump is chosen by hand), or when the last CI run on main failed.
+# The bump is read from commit subjects only (bodies can quote other commits):
+# "type!:" or "BREAKING" → major, "feat:" → minor, anything else → patch.
+# Bumps both crates, tags, creates the GitHub release (auto notes), then starts
+# the Linux and macOS release builds for the tag.
 name: version
 
 on:
@@ -34,9 +36,15 @@ jobs:
       - run: |
           set -euo pipefail
           last=$(git describe --tags --abbrev=0)
-          log=$(git log --format='%s%n%b' "$last..HEAD")
+          log=$(git log --format='%s' "$last..HEAD")
           [[ -n $log ]] || { echo "nothing since $last"; exit 0; }
           bump=${{ inputs.bump || 'auto' }}
+          code=$(git diff --name-only "$last..HEAD" | grep -Ev '\.md$|^\.github/|^extra/screenshots/|^LICENSE$' || true)
+          if [[ -z $code && $bump == auto ]]; then echo "only docs changed since $last"; exit 0; fi
+          for wf in release.yml macos.yml; do
+            ok=$(gh run list --workflow "$wf" --branch main --event push --status completed --limit 1 --json conclusion -q '.[0].conclusion // "success"')
+            [[ $ok == success ]] || { echo "::error::the last $wf run on main ended with \"$ok\"; fix main first"; exit 1; }
+          done
           if [[ $bump == auto ]]; then
             if grep -Eq '^[a-z]+(\(.+\))?!:|BREAKING' <<<"$log"; then bump=major
             elif grep -Eq '^feat(\(.+\))?:' <<<"$log"; then bump=minor

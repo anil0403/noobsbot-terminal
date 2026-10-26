@@ -44,9 +44,9 @@ open target/Noobsbot.app
 
 Without our signing certificate, `package.sh` signs the app ad hoc. That is fine for testing, but macOS asks for permissions again for each new build.
 
-## CI does not run on pull requests
+## CI
 
-CI only runs after a merge into `main`. So **please build and test your change by hand** on the platform it touches, and say what you tested in the pull request.
+CI builds and tests every pull request, for the platform it touches. CI can't check how the terminal looks and feels, so **please also use your change by hand**, and say what you tested in the pull request.
 
 ## Style
 
@@ -56,15 +56,13 @@ CI only runs after a merge into `main`. So **please build and test your change b
 
 ## Commit messages
 
-Releases are made automatically once a day from the commits since the last release. The first word of the commit subject sets the new version:
+Pull requests are squash-merged, and the **pull request title** becomes the commit subject. So please give the title the right prefix: it sets the next version.
 
-| Subject starts with | Version change | Example |
-|---|---|---|
-| `feat!:` or contains `BREAKING` | major (1.0.0 → 2.0.0) | `feat!: new config format` |
-| `feat:` | minor (0.5.3 → 0.6.0) | `feat: drop-down mode on macOS` |
-| anything else | patch (0.5.3 → 0.5.4) | `fix(macos): clean app icon at small sizes` |
+- `feat: drop-down mode on macOS` → new minor version
+- `fix(macos): clean app icon at small sizes` → new patch version
+- `feat!: new config format` (a `!` after the type) → new major version
 
-Pull requests are squash-merged, so the **pull request title** becomes the commit subject. Please give it the right prefix.
+A release is made once a day, if code changed since the last one. Docs-only changes do not make a release. The exact rules are at the top of [`.github/workflows/version.yml`](.github/workflows/version.yml).
 
 ## License
 

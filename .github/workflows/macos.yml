@@ -1,12 +1,15 @@
 # The macOS port (macos/): tests on Apple Silicon, builds a universal
 # Noobsbot.app, opens it once to check it starts and draws. A pushed v* tag
-# also attaches the app to that GitHub release.
+# also attaches the app to that GitHub release. Pull requests are tested too,
+# but their app is never signed with our certificate.
 name: macos
 
 on:
   push:
     tags: ["v*"]
     branches: [main]
+    paths: ["macos/**", ".github/workflows/macos.yml"]
+  pull_request:
     paths: ["macos/**", ".github/workflows/macos.yml"]
   workflow_dispatch:
 
@@ -39,6 +42,7 @@ jobs:
       # an update (see package.sh). Without the secrets the app is signed ad hoc,
       # except for a release, which then fails.
       - name: Signing certificate
+        if: github.event_name != 'pull_request'
         env:
           P12: ${{ secrets.MACOS_CERT_P12 }}
           P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}

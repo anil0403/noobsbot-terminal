@@ -2,12 +2,15 @@
 # glibc 2.35 or newer. A pushed v* tag also attaches it to that GitHub release.
 # Pushes to main test it and keep the compiled dependencies cached there, which
 # release runs (tags) reuse: a tag can only read main's cache, not another tag's.
+# Pull requests are tested too.
 name: release
 
 on:
   push:
     tags: ["v*"]
     branches: [main]
+    paths-ignore: ["macos/**", "**.md", "extra/screenshots/**"]
+  pull_request:
     paths-ignore: ["macos/**", "**.md", "extra/screenshots/**"]
   workflow_dispatch:
 
