@@ -21,7 +21,7 @@ body:
     attributes:
       label: noobsbot version
       description: Run `noobsbot -v`.
-      placeholder: noobsbot 0.5.3
+      placeholder: noobsbot x.y.z
     validations:
       required: true
 

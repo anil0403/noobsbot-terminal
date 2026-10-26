@@ -4,7 +4,7 @@
 
 ## Tested
 
-CI does not run on pull requests, so please test by hand.
+CI builds and tests this pull request. Please also use your change by hand.
 
 - [ ] Built and used it on macOS (`cd macos && cargo test && cargo build --release && ./package.sh`)
 - [ ] Built and used it on Linux (`cargo test && cargo build --release`)

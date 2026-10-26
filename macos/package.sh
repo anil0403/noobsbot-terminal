@@ -5,10 +5,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ver=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 bins=()
+plain=target/release/noobsbot
+newest_plain=1
 for t in aarch64-apple-darwin x86_64-apple-darwin; do
-    [[ -f target/$t/release/noobsbot ]] && bins+=("target/$t/release/noobsbot")
+    b=target/$t/release/noobsbot
+    [[ -f $b ]] || continue
+    bins+=("$b")
+    [[ $plain -nt $b ]] || newest_plain=0
 done
-(( ${#bins[@]} )) || bins=(target/release/noobsbot)
+# A plain `cargo build --release` that is newer than every per-target build
+# wins, so an old --target build is never packaged by mistake.
+if [[ -f $plain ]] && (( newest_plain )); then bins=("$plain"); fi
+(( ${#bins[@]} )) || { echo "no build found: run cargo build --release" >&2; exit 1; }
 app=target/Noobsbot.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
