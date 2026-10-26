@@ -73,6 +73,8 @@ pub struct Pane {
     pub welcome_rows: usize,
     /// A resize the shell hasn't been told of yet, while the window is dragged.
     pub held: Option<Held>,
+    /// When its shell (or program) started.
+    pub started: Instant,
 }
 
 impl Pane {

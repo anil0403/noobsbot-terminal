@@ -390,6 +390,7 @@ impl App {
             typing: welcome.then(Instant::now),
             welcome_rows,
             held: None,
+            started: Instant::now(),
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -451,6 +452,22 @@ impl App {
         }
         self.relayout();
         self.focus_changed(Some(old));
+    }
+
+    /// A `-e` program that failed within a second keeps its window open with its
+    /// exit code, so its error can be read. True if held.
+    fn hold(&mut self, id: PaneId, status: std::process::ExitStatus) -> bool {
+        use std::os::unix::process::ExitStatusExt;
+        let Some(pane) = self.panes.get_mut(&id) else { return false };
+        // Pane 0 is the program: a `-e` window has no session to restore first.
+        if self.exec.is_none() || id != 0 || status.success() || pane.started.elapsed() >= Duration::from_secs(1) {
+            return false;
+        }
+        let code = status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+        let line = format!("\r\n[process exited with code {code}]");
+        alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *pane.term.lock(), line.as_bytes());
+        self.dirty = true;
+        true
     }
 
     /// Close every pane in tab `i`.
@@ -1375,6 +1392,11 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Shell(id, prompt, mark) => return self.shell_mark(id, prompt, mark),
             UserEvent::Term(id, event) => (id, event),
         };
+        if let Event::ChildExit(status) = event
+            && self.hold(id, status)
+        {
+            return;
+        }
         if matches!(event, Event::Exit | Event::ChildExit(_)) {
             return self.close_pane(event_loop, id);
         }
