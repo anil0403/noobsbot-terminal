@@ -7,6 +7,7 @@ Thanks for helping with noobsbot terminal. Bug reports, ideas and pull requests 
 - **Bugs and ideas:** open an [issue](https://github.com/noobsbot-team/noobsbot-terminal/issues/new/choose). The forms ask for the details we need.
 - **Bigger changes:** open an issue first, so we can agree on the idea before you spend time on it.
 - **Security problems:** do not open a public issue. See [SECURITY.md](SECURITY.md).
+- **Be kind:** everyone here follows our [code of conduct](CODE_OF_CONDUCT.md).
 
 ## How the code is laid out
 
