@@ -4,7 +4,7 @@
 
 use std::fs::read_to_string;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -276,13 +276,13 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
             lines.push(format!("\x1b[1;38;5;12m{label:<10}\x1b[0m{value}"));
         }
     };
-    row("OS", format!("{} {}", os_name(), std::env::consts::ARCH));
+    row("OS", format!("{} {}", fixed().os, std::env::consts::ARCH));
     row("Kernel", kernel());
     row("Uptime", uptime());
-    row("Desktop", ["Aqua".to_owned(), packages()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "));
+    row("Desktop", ["Aqua".to_owned(), fixed().packages.clone()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "));
     row("Shell", shell.to_owned());
     row("Terminal", format!("noobsbot {}", env!("CARGO_PKG_VERSION")));
-    row("CPU", cpu());
+    row("CPU", fixed().cpu.clone());
     row("GPU", tidy(gpu));
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get()) as f64;
     let mem = memory();
@@ -320,6 +320,19 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
     lines.push(String::new());
     lines.push("\x1b[38;5;11m\u{e0b6}\x1b[1;48;5;11;38;5;0m Designed & Developed by Noobsbot Team \x1b[0;38;5;11m\u{e0b4}\x1b[0m".into());
     lines
+}
+
+/// What doesn't change while noobsbot runs, read once: the welcome screen is
+/// redrawn every 2 s, and the package count lists a whole folder.
+struct Fixed {
+    os: String,
+    cpu: String,
+    packages: String,
+}
+
+fn fixed() -> &'static Fixed {
+    static FIXED: OnceLock<Fixed> = OnceLock::new();
+    FIXED.get_or_init(|| Fixed { os: os_name(), cpu: cpu(), packages: packages() })
 }
 
 /// A meter for `level` (0..=1): green, yellow from 60 %, red from 85 %.

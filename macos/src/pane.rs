@@ -84,9 +84,11 @@ impl Pane {
         if !self.welcome || self.typing.is_some() {
             return false;
         }
-        let mut term = self.term.lock();
-        let screen = crate::welcome::screen(term.columns(), gpu, shell);
-        crate::welcome::redraw(&mut term, &screen, &mut self.welcome_rows)
+        let cols = self.term.lock().columns();
+        // Built without the lock held: it reads system files, and the shell's
+        // output waits for the lock.
+        let screen = crate::welcome::screen(cols, gpu, shell);
+        crate::welcome::redraw(&mut self.term.lock(), &screen, &mut self.welcome_rows)
     }
 
     /// Holds a resize back from the shell while it's at its prompt (see `Held`); false

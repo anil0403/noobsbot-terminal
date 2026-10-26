@@ -13,6 +13,7 @@ __noobsbot_status() {
 __noobsbot_wrap() {
     local s=$?
     [[ ${PS1-} == *'133;A'* ]] || PS1='\[\e]133;A\a\]'${PS1-}'\[\e]133;B\a\]'
+    __noobsbot_armed=1
     return $s
 }
 
@@ -59,10 +60,25 @@ __noobsbot_pretty() {
     return $s
 }
 
-# Array form needs bash 5.1+.
-PROMPT_COMMAND=(__noobsbot_status "${PROMPT_COMMAND[@]}" __noobsbot_wrap)
-[[ ${NOOBSBOT_PROMPT-} == pretty ]] && PROMPT_COMMAND=("${PROMPT_COMMAND[@]:0:${#PROMPT_COMMAND[@]}-1}" __noobsbot_pretty __noobsbot_wrap)
-PS0=${PS0-}'\e]133;C\a'
+# The array form of PROMPT_COMMAND needs bash 5.1+, PS0 needs 4.4+.
+__noobsbot_last_cmd=__noobsbot_wrap
+[[ ${NOOBSBOT_PROMPT-} == pretty ]] && __noobsbot_last_cmd='__noobsbot_pretty; __noobsbot_wrap'
+if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+    PROMPT_COMMAND=(__noobsbot_status "${PROMPT_COMMAND[@]}" "$__noobsbot_last_cmd")
+else
+    # Joined with newlines, not "; ": a PROMPT_COMMAND ending in ';' would make ';;'.
+    __noobsbot_nl=$'\n'
+    PROMPT_COMMAND="__noobsbot_status$__noobsbot_nl${PROMPT_COMMAND:+$PROMPT_COMMAND$__noobsbot_nl}$__noobsbot_last_cmd"
+fi
+unset __noobsbot_last_cmd __noobsbot_nl
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+    PS0=${PS0-}'\e]133;C\a'
+elif [[ -z $(trap -p DEBUG) ]]; then
+    # No PS0 before bash 4.4: mark the command's start from the DEBUG trap, once
+    # per prompt (__noobsbot_wrap arms it as the prompt's last step; functions
+    # don't trip the trap). An empty line goes straight to __noobsbot_status: no mark.
+    trap '[[ -n ${__noobsbot_armed-} ]] && { __noobsbot_armed=; [[ $BASH_COMMAND == __noobsbot_status* ]] || printf "\e]133;C\a"; }' DEBUG
+fi
 
 # Other machines won't know TERM=noobsbot. An `if`, not `&&`: this is the
 # rcfile's last line, and its status would show on the first prompt.

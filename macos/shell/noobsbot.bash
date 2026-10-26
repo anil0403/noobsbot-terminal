@@ -72,9 +72,11 @@ __noobsbot_last_cmd=__noobsbot_wrap
 if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
     PROMPT_COMMAND=(__noobsbot_status "${PROMPT_COMMAND[@]}" "$__noobsbot_last_cmd")
 else
-    PROMPT_COMMAND="__noobsbot_status; ${PROMPT_COMMAND:+$PROMPT_COMMAND; }$__noobsbot_last_cmd"
+    # Joined with newlines, not "; ": a PROMPT_COMMAND ending in ';' would make ';;'.
+    __noobsbot_nl=$'\n'
+    PROMPT_COMMAND="__noobsbot_status$__noobsbot_nl${PROMPT_COMMAND:+$PROMPT_COMMAND$__noobsbot_nl}$__noobsbot_last_cmd"
 fi
-unset __noobsbot_last_cmd
+unset __noobsbot_last_cmd __noobsbot_nl
 if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
     PS0=${PS0-}'\e]133;C\a'
 elif [[ -z $(trap -p DEBUG) ]]; then
