@@ -28,12 +28,7 @@
 
 <p align="center"><sub>Screenshots from the macOS app. On Linux it looks the same, without the title bar.</sub></p>
 
-<table>
-  <tr>
-    <td align="center"><img src="extra/screenshots/palette.png" alt="Command palette"><br><sub><b>Command palette</b> (Ctrl+Shift+P, on macOS Cmd+Shift+P)</sub></td>
-    <td align="center"><img src="extra/screenshots/crt.png" alt="CRT mode"><br><sub><b>CRT mode</b></sub></td>
-  </tr>
-</table>
+<p align="center"><img src="extra/screenshots/palette.png" alt="Command palette"><br><sub><b>Command palette</b> (Ctrl+Shift+P, on macOS Cmd+Shift+P)</sub></p>
 
 <a id="install"></a>
 
