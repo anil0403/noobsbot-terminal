@@ -29,6 +29,10 @@ if [[ -z ${NOOBSBOT_FROM_SOURCE:-} ]]; then
     if [[ -n $url ]]; then
         say "Downloading $(basename "$url")"
         curl -fsSL "$url" -o "$TMP/noobsbot.zip"
+        # Checked before it's unpacked: its quarantine flag is removed below.
+        sum=$(curl -fsSL "$url.sha256" | cut -d' ' -f1)
+        [[ -n $sum ]] || die "can't get the download's checksum."
+        echo "$sum  $TMP/noobsbot.zip" | shasum -a 256 -c --status || die "the download doesn't match its checksum."
         ditto -x -k "$TMP/noobsbot.zip" "$TMP"
         app=$TMP/Noobsbot.app
         [[ -d $app ]] || die "the download has no Noobsbot.app"

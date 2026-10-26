@@ -121,7 +121,7 @@ impl Suggest {
             return;
         }
         self.shell_mtime = mtime;
-        self.shell = parse_history(&fs::read(file).unwrap_or_default());
+        self.shell = parse_history(&fs::read(file).unwrap_or_default(), self.shell_name == "zsh");
     }
 
     /// The rest of a file or folder name for the last word, if it's an argument
@@ -280,13 +280,14 @@ pub fn word(s: &str) -> &str {
 }
 
 /// Commands from a bash or zsh history file, oldest first.
-fn parse_history(bytes: &[u8]) -> Vec<String> {
+fn parse_history(bytes: &[u8], zsh: bool) -> Vec<String> {
     // zsh "metafies" some bytes (0x83..=0x9d among them): 0x83, then the byte xor 0x20.
+    // Only zsh: in bash's plain UTF-8, 0x83 is part of a character (у, ă, テ).
     let mut plain = Vec::with_capacity(bytes.len());
     let mut it = bytes.iter();
     while let Some(&b) = it.next() {
         match b {
-            0x83 => plain.extend(it.next().map(|n| n ^ 0x20)),
+            0x83 if zsh => plain.extend(it.next().map(|n| n ^ 0x20)),
             b => plain.push(b),
         }
     }
@@ -352,7 +353,10 @@ mod tests {
         assert_eq!(word(" --short"), " --short");
         assert_eq!(word("rc/main.rs"), "rc/");
 
-        let h = parse_history(b": 1700000000:0;ls -la\n: 1700000001:0;echo a\\\nb\n#1700000002\ngit push\ncaf\xc3\xa9 \xe2\x80\x83\xb4\n");
+        let h = parse_history(b": 1700000000:0;ls -la\n: 1700000001:0;echo a\\\nb\n#1700000002\ngit push\ncaf\xc3\xa9 \xe2\x80\x83\xb4\n", true);
         assert_eq!(h, vec!["ls -la", "git push", "caf\u{e9} \u{2014}"]);
+        // bash: no metafied bytes, so 0x83 inside a character stays.
+        let h = parse_history("echo \u{443} \u{103} \u{30c6}\n".as_bytes(), false);
+        assert_eq!(h, vec!["echo \u{443} \u{103} \u{30c6}"]);
     }
 }

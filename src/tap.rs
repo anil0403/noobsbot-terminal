@@ -133,6 +133,7 @@ impl Tap {
         let s = std::mem::take(&mut self.osc);
         let mark = match self.kind {
             _ if s.len() > MAX_IMAGE => None,
+            Kind::Osc if s.len() > MAX => None, // cut short, so not what it says
             Kind::Osc => parse(&s),
             Kind::Apc => s.strip_prefix(b"G").map(|g| Mark::Graphics(g.to_vec())),
             // `ESC P 0;1;0 q data`: digits and `;`, then `q`.

@@ -3,8 +3,9 @@
 # bump is chosen by hand), or when the last CI run on main failed.
 # The bump is read from commit subjects only (bodies can quote other commits):
 # "type!:" or "BREAKING" → major, "feat:" → minor, anything else → patch.
-# Bumps both crates, tags, creates the GitHub release (auto notes), then starts
-# the Linux and macOS release builds for the tag.
+# Bumps both crates, tags, creates the GitHub release (auto notes) as a draft,
+# then starts the Linux and macOS release builds for the tag. The last of the
+# two to upload its file publishes the release, so "latest" never lacks them.
 name: version
 
 on:
@@ -62,7 +63,7 @@ jobs:
           git commit -am "v$v"
           git tag -a "v$v" -m "v$v"
           git push --follow-tags
-          gh release create "v$v" --generate-notes
+          gh release create "v$v" --generate-notes --draft
           gh workflow run release.yml --ref "v$v"
           gh workflow run macos.yml --ref "v$v"
         env:

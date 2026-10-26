@@ -103,7 +103,8 @@ fn hyperlink<T>(term: &Term<T>, point: Point) -> Option<Link> {
 }
 
 /// What a URL may open. Web, ftp and mail links go to `open`; a local
-/// `file://` file opens like a file link, a folder in Finder.
+/// `file://` file opens like a file link, a folder in Finder (an app or other
+/// bundle is only shown there, see `os_open`).
 /// Anything else isn't a link: a program's hyperlink could otherwise have
 /// `open` start any handler (apps, custom schemes).
 fn checked(url: &str) -> Option<Target> {
@@ -160,13 +161,44 @@ fn resolve(path: &str, cwd: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf>
 }
 
 /// Open a URL or file with its default app (macOS `open`), without waiting.
+/// A local path that `open` would run (an app or other bundle, a script, an
+/// executable), or anything inside a bundle, is shown in Finder instead: a
+/// program's link must not start a program.
 pub fn os_open(what: &str) {
+    let local = match what.get(..7) {
+        Some(s) if s.eq_ignore_ascii_case("file://") => what[7..].find('/').map(|i| PathBuf::from(crate::tap::percent_decode(&what[7 + i..]))),
+        _ => what.starts_with('/').then(|| PathBuf::from(what)),
+    };
+    let reveal = local.as_deref().is_some_and(|p| p.ancestors().any(runs));
     let what = what.to_owned();
     std::thread::spawn(move || {
-        if let Err(e) = std::process::Command::new("/usr/bin/open").arg(&what).status() {
+        let mut open = std::process::Command::new("/usr/bin/open");
+        match (reveal, local) {
+            (true, Some(path)) => open.arg("-R").arg(path),
+            _ => open.arg(&what),
+        };
+        if let Err(e) = open.status() {
             log::warn!("open {what}: {e}");
         }
     });
+}
+
+/// Whether `open` would run this rather than show it: a folder with an
+/// extension (a bundle: .app, .workflow, ...), an executable file, or a file
+/// type that runs or opens a link.
+fn runs(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_dir() => ext.is_some(),
+        Ok(m) if m.is_file() => {
+            m.permissions().mode() & 0o111 != 0
+                || ext.is_some_and(|e| {
+                    matches!(e.as_str(), "command" | "tool" | "terminal" | "scpt" | "applescript" | "jar" | "inetloc" | "webloc" | "fileloc" | "url")
+                })
+        }
+        _ => false,
+    }
 }
 
 /// `$VISUAL`/`$EDITOR` with `+line path`, if one is set.
@@ -187,6 +219,26 @@ mod tests {
     use super::*;
     use alacritty_terminal::index::{Column, Line};
     use alacritty_terminal::term::test::mock_term;
+
+    #[test]
+    fn bundles_and_scripts_are_only_shown() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("noobsbot-runs-{}", std::process::id()));
+        let app = dir.join("Evil.app/Contents");
+        std::fs::create_dir_all(&app).unwrap();
+        for f in ["notes.txt", "x.command", "tool"] {
+            std::fs::write(dir.join(f), "").unwrap();
+        }
+        std::fs::set_permissions(dir.join("tool"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let shown = |p: &Path| p.ancestors().any(runs);
+        assert!(!shown(&dir));
+        assert!(!shown(&dir.join("notes.txt")));
+        assert!(shown(&dir.join("Evil.app")));
+        assert!(shown(&app));
+        assert!(shown(&dir.join("x.command")));
+        assert!(shown(&dir.join("tool")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn at(text: &str, col: usize, cwd: Option<&Path>) -> Option<(usize, usize, Target)> {
         let term = mock_term(text);
