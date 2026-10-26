@@ -104,7 +104,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
 | 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |
 | ⬇️ **Drop-down mode** | A quake-style terminal that slides in with F12. |
-| 🔔 **Command tracking** | A red flash when a command fails, jump between commands, notifications when long ones finish. A visual bell flashes the pane's border. |
+| 🔔 **Command tracking** | A red flash when a command fails, jump between commands, notifications when long ones finish. A visual bell flashes the pane's border. Programs can send their own notifications (OSC 9, 777, 99) and show progress (OSC 9;4) as a bar on the pane and its tab. |
 
 <a id="shortcuts"></a>
 
