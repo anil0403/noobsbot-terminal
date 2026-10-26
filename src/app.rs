@@ -169,6 +169,8 @@ pub struct App {
     zoom: f32,
     /// Running as the drop-down terminal (`--quake`).
     quake: Option<Quake>,
+    /// `noobsbot -e`: the program the window runs instead of the shell.
+    exec: Option<Vec<String>>,
     /// CRT effect on (config, flipped from the palette).
     crt: bool,
     suggest: Suggest,
@@ -177,7 +179,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<UserEvent>, quake: bool) -> Self {
+    pub fn new(proxy: EventLoopProxy<UserEvent>, quake: bool, exec: Option<Vec<String>>) -> Self {
         let path = config::path();
         let config = config::load(&path).unwrap_or_else(|e| {
             log::error!("config error, using defaults: {e}");
@@ -203,6 +205,7 @@ impl App {
             shell: config.terminal.shell.clone(),
             shell_name: shell_name(&config.terminal.shell),
             quake,
+            exec,
             _config_watcher: config::watch(&path, proxy.clone()),
             config,
             proxy,
@@ -398,9 +401,9 @@ impl App {
         self.panes.get(&tab.focused)?.cwd()
     }
 
-    fn new_tab(&mut self) {
+    fn new_tab(&mut self, command: Option<Vec<String>>) {
         let cwd = self.new_cwd();
-        let Some(id) = self.spawn_pane(cwd, None) else { return };
+        let Some(id) = self.spawn_pane(cwd, command) else { return };
         let old = self.tabs.get(self.active).map(|t| t.focused);
         self.tabs.push(Tab { root: Node::Leaf(id), focused: id, zoomed: false, broadcast: false });
         self.active = self.tabs.len() - 1;
@@ -753,7 +756,7 @@ impl App {
             Action::ZoomIn => self.set_zoom(self.zoom + 1.0),
             Action::ZoomOut => self.set_zoom(self.zoom - 1.0),
             Action::ZoomReset => self.set_zoom(0.0),
-            Action::NewTab => self.new_tab(),
+            Action::NewTab => self.new_tab(None),
             Action::ClosePane => self.close_pane(event_loop, self.focused()),
             Action::NextTab => self.switch_tab((self.active + 1) % self.tabs.len()),
             Action::PrevTab => self.switch_tab((self.active + self.tabs.len() - 1) % self.tabs.len()),
@@ -1004,7 +1007,7 @@ impl App {
                     Some(Item::Shell(path)) => {
                         self.shell_name = shell_name(&path);
                         self.shell = path;
-                        self.new_tab();
+                        self.new_tab(None);
                     }
                     None => {}
                 }
@@ -1260,8 +1263,9 @@ impl App {
 
 // Session restore.
 impl App {
+    /// Not for `-e` windows: closing one would forget the session.
     fn session_on(&self) -> bool {
-        self.quake.is_none() && self.config.terminal.restore_session
+        self.quake.is_none() && self.exec.is_none() && self.config.terminal.restore_session
     }
 
     /// Save the tabs for the next window; with none left (the last shell exited),
@@ -1348,8 +1352,11 @@ impl ApplicationHandler<UserEvent> for App {
         let font = Font::new(&self.config.font.family, self.font_px(&window), self.config.font.weight);
         self.renderer = Some(Renderer::new(window.clone(), font));
         self.window = Some(window);
-        if !self.restore_session() {
-            self.new_tab();
+        // `-e`: the program, in this process's directory (no tab yet to take one from).
+        if let Some(cmd) = self.exec.clone() {
+            self.new_tab(Some(cmd));
+        } else if !self.restore_session() {
+            self.new_tab(None);
         }
         if self.tabs.is_empty() {
             event_loop.exit(); // no shell to run
