@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f2ad36?style=flat-square" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/platform-Linux-4e92e8?style=flat-square&logo=linux&logoColor=white" alt="Linux">
+  <img src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS-4e92e8?style=flat-square" alt="Linux and macOS">
   <img src="https://img.shields.io/badge/written%20in-Rust-ff8700?style=flat-square&logo=rust&logoColor=white" alt="Rust">
   <img src="https://img.shields.io/badge/shells-zsh%20·%20bash%20·%20fish-5bc8a6?style=flat-square" alt="zsh, bash, fish">
 </p>
@@ -26,12 +26,9 @@
 
 ![Split panes and an inline image](extra/screenshots/main.png)
 
-<table>
-  <tr>
-    <td align="center"><img src="extra/screenshots/palette.png" alt="Command palette"><br><sub><b>Command palette</b> (Ctrl+Shift+P)</sub></td>
-    <td align="center"><img src="extra/screenshots/crt.png" alt="CRT mode"><br><sub><b>CRT mode</b></sub></td>
-  </tr>
-</table>
+<p align="center"><sub>Screenshots from the macOS app. On Linux it looks the same, without the title bar.</sub></p>
+
+<p align="center"><img src="extra/screenshots/palette.png" alt="Command palette"><br><sub><b>Command palette</b> (Ctrl+Shift+P, on macOS Cmd+Shift+P)</sub></p>
 
 <a id="install"></a>
 
