@@ -48,6 +48,8 @@ That command:
 - makes **nano your default editor** for git, gh and the rest, unless you've already picked one
 - updates noobsbot when you run it again, or when you run `noobsbot --update` (`noobsbot --version` shows what you have); `noobsbot --restart` (or "Restart noobsbot" in Ctrl+Shift+P) then swaps the window for a fresh one
 
+`noobsbot -e PROGRAM [ARGS...]` (or `noobsbot -- PROGRAM ...`) opens a window running that program instead of your shell; apps marked `Terminal=true` open in noobsbot this way through `xdg-terminal-exec`.
+
 On Arch it installs the `noobsbot-bin` package, or `noobsbot-git` when it builds from source (`sudo pacman -R noobsbot-bin` removes it). Elsewhere noobsbot goes to `/usr/local/bin`. A source build gets Rust from rustup if your distro's is too old; `NOOBSBOT_FROM_SOURCE=1` always builds.
 
 **On a Mac?** The macOS port has its own installer; see [macos/](macos/README.md):
