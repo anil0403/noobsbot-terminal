@@ -20,6 +20,8 @@ pub enum UserEvent {
     Menu(crate::input::Action),
     /// The Dock menu's "Check for Updates": a new tab runs `noobsbot --update`.
     Update,
+    /// Quit from the app menu (Cmd+Q): asks first while programs still run.
+    Quit,
 }
 
 /// Forwards terminal events (title, bell, PTY replies, wakeups) to the winit loop.

@@ -109,6 +109,8 @@ pub struct Terminal {
     pub opacity: f32,
     /// Save tabs, splits and folders when the window closes; the next window reopens them.
     pub restore_session: bool,
+    /// Ask before closing a pane, tab or the window while a program still runs in it.
+    pub confirm_close: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
@@ -143,7 +145,7 @@ impl Default for Font {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: true, welcome: true, update_check: true, suggestions: true, prompt_list: true, fast_cd: false, opacity: 1.0, restore_session: false }
+        Self { scrollback: 10_000, shell: String::new(), clipboard: Clipboard::Copy, pretty_prompt: true, welcome: true, update_check: true, suggestions: true, prompt_list: true, fast_cd: false, opacity: 1.0, restore_session: false, confirm_close: true }
     }
 }
 

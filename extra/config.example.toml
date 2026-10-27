@@ -49,6 +49,9 @@ opacity = 1.0
 # window opens them again (the drop-down terminal doesn't). Programs that were
 # running aren't restarted. Closing the last shell yourself (`exit`) forgets them.
 restore_session = false
+# Before closing a pane, a tab or the window while a program (not just the
+# shell) still runs in it, ask first: Enter closes, Esc keeps it.
+confirm_close = true
 
 [cursor]
 # "block", "beam" or "underline". Programs like vim may override it.
