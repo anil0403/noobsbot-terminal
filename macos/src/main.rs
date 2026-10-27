@@ -7,6 +7,7 @@ mod dock;
 mod font;
 mod images;
 mod input;
+mod kitty;
 mod links;
 mod list;
 mod menu;

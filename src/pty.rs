@@ -1,7 +1,9 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
+use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -29,6 +31,23 @@ fn sync_wait(parser: &Processor) -> Option<Duration> {
 /// The synchronized update is past its deadline: show what it buffered.
 fn sync_expired(parser: &Processor) -> bool {
     parser.sync_timeout().sync_timeout().is_some_and(|at| at <= Instant::now())
+}
+
+/// How the shell (or `-e` program) exited, once its output is done: it may take a
+/// moment longer to be gone (up to 100 ms, given its pidfd). Left for `Pty`'s drop to reap.
+fn exit_status(pid: u32, pidfd: i32) -> Option<ExitStatus> {
+    if pidfd >= 0 {
+        let mut fd = libc::pollfd { fd: pidfd, events: libc::POLLIN, revents: 0 };
+        unsafe { libc::poll(&mut fd, 1, 100) };
+    }
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let found = unsafe { libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) } == 0;
+    if !found || unsafe { info.si_pid() } == 0 {
+        return None;
+    }
+    // Back to a wait status: the code in the second byte, or the signal in the first.
+    let status = unsafe { info.si_status() };
+    Some(ExitStatus::from_raw(if info.si_code == libc::CLD_EXITED { (status & 0xff) << 8 } else { status & 0x7f }))
 }
 
 pub struct Pty {
@@ -62,7 +81,8 @@ impl Pty {
 
         // The shell's exit, seen even while a background job it started keeps
         // the terminal open (`sleep 600 &`, then `exit`). -1 on kernels before 5.3.
-        let shell_exit = unsafe { libc::syscall(libc::SYS_pidfd_open, pty.child().id(), 0) } as i32;
+        let pid = pty.child().id();
+        let shell_exit = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as i32;
         let woken = Arc::new(AtomicBool::new(false));
         let woken_reader = woken.clone();
         std::thread::Builder::new()
@@ -147,10 +167,11 @@ impl Pty {
                         let _ = proxy.send_event(UserEvent::Term(pane, Event::Wakeup));
                     }
                 }
+                let status = exit_status(pid, shell_exit);
                 if shell_exit >= 0 {
                     unsafe { libc::close(shell_exit) };
                 }
-                let _ = proxy.send_event(UserEvent::Term(pane, Event::Exit));
+                let _ = proxy.send_event(UserEvent::Term(pane, status.map_or(Event::Exit, Event::ChildExit)));
             })
             .expect("spawn reader thread");
 
@@ -199,6 +220,23 @@ mod tests {
     use alacritty_terminal::index::{Column, Line};
     use alacritty_terminal::term::Config;
     use alacritty_terminal::term::test::TermSize;
+
+    #[test]
+    fn exit_status_is_read_and_left_to_reap() {
+        let child = |script: &str| std::process::Command::new("sh").args(["-c", script]).spawn().unwrap();
+        for (script, code, signal) in [("exit 3", Some(3), None), ("true", Some(0), None), ("kill -9 $$", None, Some(9))] {
+            let mut c = child(script);
+            let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, c.id(), 0) } as i32;
+            let status = exit_status(c.id(), pidfd).expect(script);
+            assert_eq!((status.code(), status.signal()), (code, signal), "{script}");
+            assert_eq!(c.wait().unwrap(), status, "still there to reap");
+            unsafe { libc::close(pidfd) };
+        }
+        let mut sleeping = child("sleep 5");
+        assert_eq!(exit_status(sleeping.id(), -1), None);
+        sleeping.kill().unwrap();
+        sleeping.wait().unwrap();
+    }
 
     #[test]
     fn unfinished_sync_update_times_out() {

@@ -1,5 +1,6 @@
 //! Watches the PTY byte stream for escape codes alacritty_terminal ignores:
 //! OSC 133 (prompt and command marks from shell integration), OSC 7 (cwd),
+//! notifications (OSC 9, 777, 99) and progress (OSC 9;4),
 //! images: kitty graphics (APC `G`) and sixel (DCS `q`); and XTVERSION (CSI `> q`).
 
 use std::path::PathBuf;
@@ -17,7 +18,35 @@ pub enum Mark {
     Sixel(Vec<u8>),
     /// XTVERSION (`CSI > q`): the app asks which terminal this is.
     XtVersion,
+    /// A desktop notification a program asks for (OSC 9, 777, 99).
+    Notify {
+        title: String,
+        body: String,
+    },
+    /// Progress a program reports (OSC 9;4); `None` takes it away.
+    Progress(Option<Progress>),
 }
+
+/// OSC 9;4 states, with the percent where there is one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Progress {
+    Normal(u8),
+    Error(Option<u8>),
+    /// Working, no percent.
+    Busy,
+    Paused(Option<u8>),
+}
+
+/// A kitty notification (OSC 99) arriving in pieces, until the one marked done.
+#[derive(Default)]
+struct Note {
+    id: String,
+    title: String,
+    body: String,
+}
+
+/// Longest notification text we keep.
+const MAX_NOTE: usize = 500;
 
 /// Longest OSC we bother to collect; longer ones aren't ours.
 const MAX: usize = 4096;
@@ -33,6 +62,7 @@ pub struct Tap {
     osc: Vec<u8>,
     /// A CSI's parameter and intermediate bytes so far.
     csi: Vec<u8>,
+    note: Option<Note>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -129,11 +159,49 @@ impl Tap {
         }
     }
 
+    /// OSC 99 `metadata;payload`: `i` id, `d=0` more to come, `p` title or body,
+    /// `e=1` base64. Pieces with the same id add up until one is done.
+    fn kitty_note(&mut self, osc: &[u8]) -> Option<Mark> {
+        use base64::Engine;
+        let osc = std::str::from_utf8(osc).ok()?;
+        let (meta, payload) = osc.split_once(';')?;
+        let (mut id, mut done, mut part, mut b64) = ("", true, "title", false);
+        for kv in meta.split(':') {
+            match kv.split_once('=') {
+                Some(("i", v)) => id = v,
+                Some(("d", v)) => done = v != "0",
+                Some(("p", v)) => part = v,
+                Some(("e", v)) => b64 = v == "1",
+                _ => {}
+            }
+        }
+        let text = match b64 {
+            true => String::from_utf8_lossy(&base64::engine::general_purpose::STANDARD.decode(payload).ok()?).into_owned(),
+            false => payload.to_owned(),
+        };
+        if self.note.as_ref().is_none_or(|n| n.id != id) {
+            self.note = Some(Note { id: id.to_owned(), ..Default::default() });
+        }
+        let note = self.note.as_mut()?;
+        match part {
+            "title" if note.title.len() < MAX_NOTE => note.title.push_str(&text),
+            "body" if note.body.len() < MAX_NOTE => note.body.push_str(&text),
+            _ => {}
+        }
+        if !done {
+            return None;
+        }
+        let note = self.note.take()?;
+        let (title, body) = (clean(&note.title), clean(&note.body));
+        (!title.is_empty() || !body.is_empty()).then_some(Mark::Notify { title, body })
+    }
+
     fn finish(&mut self, end: usize, out: &mut Vec<(usize, Mark)>) {
         let s = std::mem::take(&mut self.osc);
         let mark = match self.kind {
             _ if s.len() > MAX_IMAGE => None,
             Kind::Osc if s.len() > MAX => None, // cut short, so not what it says
+            Kind::Osc if s.starts_with(b"99;") => self.kitty_note(&s[3..]),
             Kind::Osc => parse(&s),
             Kind::Apc => s.strip_prefix(b"G").map(|g| Mark::Graphics(g.to_vec())),
             // `ESC P 0;1;0 q data`: digits and `;`, then `q`.
@@ -150,6 +218,24 @@ impl Tap {
 
 fn parse(osc: &[u8]) -> Option<Mark> {
     let osc = std::str::from_utf8(osc).ok()?;
+    // urxvt / VTE: `777;notify;title;body`.
+    if let Some(rest) = osc.strip_prefix("777;notify;") {
+        let (title, body) = rest.split_once(';').unwrap_or((rest, ""));
+        return Some(Mark::Notify { title: clean(title), body: clean(body) });
+    }
+    if let Some(rest) = osc.strip_prefix("9;") {
+        // ConEmu: `9;4;state;percent` is progress; its other `9;<n>;` commands aren't ours.
+        if let Some(progress) = rest.strip_prefix("4;") {
+            return Some(Mark::Progress(parse_progress(progress)));
+        }
+        let (n, _) = rest.split_once(';').unwrap_or((rest, ""));
+        if rest.contains(';') && matches!(n, "1" | "2" | "3" | "5" | "6" | "7" | "8" | "9" | "10" | "11" | "12") {
+            return None;
+        }
+        // iTerm2: `9;text`, the whole text is the message.
+        let body = clean(rest);
+        return (!body.is_empty()).then_some(Mark::Notify { title: String::new(), body });
+    }
     if let Some(rest) = osc.strip_prefix("133;") {
         let mut parts = rest.split(';');
         return match parts.next()? {
@@ -168,6 +254,25 @@ fn parse(osc: &[u8]) -> Option<Mark> {
         None => return None,
     };
     Some(Mark::Cwd(PathBuf::from(percent_decode(path))))
+}
+
+/// `state;percent`: 0 off, 1 normal, 2 error, 3 busy, 4 paused.
+fn parse_progress(s: &str) -> Option<Progress> {
+    let mut parts = s.split(';');
+    let state = parts.next()?;
+    let percent = parts.next().and_then(|p| p.parse::<u8>().ok()).map(|p| p.min(100));
+    match state {
+        "1" => Some(Progress::Normal(percent.unwrap_or(0))),
+        "2" => Some(Progress::Error(percent)),
+        "3" => Some(Progress::Busy),
+        "4" => Some(Progress::Paused(percent)),
+        _ => None,
+    }
+}
+
+/// Notification text as shown: no control characters, not too long.
+fn clean(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(MAX_NOTE).collect::<String>().trim().to_owned()
 }
 
 pub fn percent_decode(s: &str) -> String {
@@ -258,5 +363,21 @@ mod tests {
         assert_eq!(scan(&[b"\x1b[>0q\x1b[?2026$p\x1b[c"]), vec![(5, Mark::XtVersion)]);
         // Other `q`s aren't it: DECSCUSR (cursor shape), DECLL, XTVERSION with a stray parameter.
         assert_eq!(scan(&[b"\x1b[2 q\x1b[1q\x1b[>1q\x1b[>00000000q\x1b[0m"]), vec![]);
+    }
+
+    #[test]
+    fn notifications_and_progress() {
+        let notify = |title: &str, body: &str| Mark::Notify { title: title.into(), body: body.into() };
+        let marks = |chunks: &[&[u8]]| scan(chunks).into_iter().map(|(_, m)| m).collect::<Vec<Mark>>();
+        assert_eq!(marks(&[b"\x1b]9;Build done\x07"]), vec![notify("", "Build done")]);
+        assert_eq!(marks(&[b"\x1b]777;notify;Claude;Needs you\x1b\\"]), vec![notify("Claude", "Needs you")]);
+        // ConEmu's own 9;n commands are not messages; 9;4 is progress.
+        assert_eq!(marks(&[b"\x1b]9;9;/tmp\x07"]), vec![]);
+        assert_eq!(marks(&[b"\x1b]9;4;1;45\x07"]), vec![Mark::Progress(Some(Progress::Normal(45)))]);
+        assert_eq!(marks(&[b"\x1b]9;4;3\x07"]), vec![Mark::Progress(Some(Progress::Busy))]);
+        assert_eq!(marks(&[b"\x1b]9;4;0\x07"]), vec![Mark::Progress(None)]);
+        // kitty: title and body in pieces (one base64), done with the last.
+        let pieces: &[&[u8]] = &[b"\x1b]99;i=1:d=0;Tests\x1b\\", b"\x1b]99;i=1:d=0:p=body:e=1;MyBwYXNzZWQ=\x1b\\", b"\x1b]99;i=1:p=body;, 1 failed\x1b\\"];
+        assert_eq!(marks(pieces), vec![notify("Tests", "3 passed, 1 failed")]);
     }
 }
