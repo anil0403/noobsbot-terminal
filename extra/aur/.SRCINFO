@@ -2,7 +2,7 @@ pkgbase = noobsbot-git
 	pkgdesc = GPU-rendered terminal emulator with situation-aware color palettes
 	pkgver = r67.1fa30e9
 	pkgrel = 1
-	url = https://github.com/anil0403/noobsbot-terminal
+	url = https://github.com/noobsbot-team/noobsbot-terminal
 	arch = x86_64
 	arch = aarch64
 	license = MIT
@@ -21,7 +21,7 @@ pkgbase = noobsbot-git
 	optdepends = kitty: kitten icat, to show images
 	provides = noobsbot
 	conflicts = noobsbot
-	source = git+https://github.com/anil0403/noobsbot-terminal.git
+	source = git+https://github.com/noobsbot-team/noobsbot-terminal.git
 	sha256sums = SKIP
 
 pkgname = noobsbot-git

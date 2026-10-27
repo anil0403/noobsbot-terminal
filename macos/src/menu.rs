@@ -15,7 +15,7 @@ use crate::input::{self, Action};
 use crate::pane::Dir;
 use crate::term::UserEvent;
 
-const HELP_URL: &str = "https://github.com/anil0403/noobsbot-terminal/tree/main/macos#readme";
+const HELP_URL: &str = "https://github.com/noobsbot-team/noobsbot-terminal/tree/main/macos#readme";
 
 /// One row: an action with its title, a line, or a standard AppKit item.
 enum Row {

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # noobsbot terminal installer:
-#   curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh | bash
+#   curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/install.sh | bash
 # Installs the dependencies (nano and the JetBrainsMono Nerd Font included),
 # installs the latest release's prebuilt noobsbot (or builds it from source when
 # that can't run here) and makes nano the default editor.
-# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds.
+# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds;
+# NOOBSBOT_BETA=1 installs the newest release, betas included.
 set -euo pipefail
 
 # All in a function, so nothing runs until the whole script has downloaded.
 main() {
 
-REPO=https://github.com/anil0403/noobsbot-terminal
+REPO=https://github.com/noobsbot-team/noobsbot-terminal
 FONT="JetBrainsMono Nerd Font Mono"
 RUST_MIN=90 # rustc 1.90 or newer
 SRC=${XDG_CACHE_HOME:-$HOME/.cache}/noobsbot/src
@@ -47,10 +48,17 @@ fi
 # or newer (what release.yml builds against). Empty → build from source: no
 # release yet, its build still running, another CPU, musl, or NOOBSBOT_FROM_SOURCE=1.
 tarball="" ver=""
+# NOOBSBOT_BETA=1 (noobsbot -u --beta): the newest release, betas included. Not
+# on Arch: a package version can't hold the '-' in 0.6.1-beta.2.
+releases=releases/latest
+if [[ -n ${NOOBSBOT_BETA:-} ]]; then
+    if has pacman; then say "No betas on Arch; installing the latest release"
+    else releases="releases?per_page=1"; fi
+fi
 glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2 || true)
 if [[ -z ${NOOBSBOT_FROM_SOURCE:-} && $(uname -m) == x86_64 && -n $glibc &&
       $(printf '2.35\n%s\n' "$glibc" | sort -V | head -1) == 2.35 ]]; then
-    tarball=$(curl -fsSL "https://api.github.com/repos/${REPO#https://github.com/}/releases/latest" 2>/dev/null |
+    tarball=$(curl -fsSL "https://api.github.com/repos/${REPO#https://github.com/}/$releases" 2>/dev/null |
         sed -n 's/.*"browser_download_url": *"\([^"]*x86_64-linux\.tar\.gz\)".*/\1/p' | head -1 || true)
     ver=$(basename "$tarball" | sed -n 's/^noobsbot-\(.*\)-x86_64-linux\.tar\.gz$/\1/p')
     [[ -n $ver ]] || tarball=""

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # noobsbot terminal installer for macOS:
-#   curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/macos/install.sh | bash
+#   curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/macos/install.sh | bash
 # Installs Noobsbot.app (the latest release, or built from source when there is
 # none), the `noobsbot` command and the JetBrainsMono Nerd Font.
-# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds.
+# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds;
+# NOOBSBOT_BETA=1 installs the newest release, betas included.
 set -euo pipefail
 
 # All in a function, so nothing runs until the whole script has downloaded.
 main() {
 
-REPO=anil0403/noobsbot-terminal
+REPO=noobsbot-team/noobsbot-terminal
 RUST_MIN=90 # rustc 1.90 or newer
 SRC=$HOME/Library/Caches/noobsbot/src
 TMP=$(mktemp -d)
@@ -24,7 +25,10 @@ has() { command -v "$1" >/dev/null 2>&1; }
 
 app=""
 if [[ -z ${NOOBSBOT_FROM_SOURCE:-} ]]; then
-    url=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null |
+    # NOOBSBOT_BETA=1 (noobsbot -u --beta): the newest release, betas included.
+    releases=releases/latest
+    [[ -z ${NOOBSBOT_BETA:-} ]] || releases="releases?per_page=1"
+    url=$(curl -fsSL "https://api.github.com/repos/$REPO/$releases" 2>/dev/null |
         sed -n 's/.*"browser_download_url": *"\([^"]*macos-universal\.zip\)".*/\1/p' | head -1 || true)
     if [[ -n $url ]]; then
         say "Downloading $(basename "$url")"

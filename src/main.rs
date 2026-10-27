@@ -35,7 +35,7 @@ fn main() {
         Ok(Cli::Window) => (false, None),
         Ok(Cli::Quake) => (true, None),
         Ok(Cli::Exec(cmd)) => (false, Some(cmd)),
-        Ok(Cli::Update) => std::process::exit(update()),
+        Ok(Cli::Update(beta)) => std::process::exit(update(beta)),
         Ok(Cli::Restart) => std::process::exit(restart::cli()),
         Ok(Cli::Help) => return print!("{HELP}"),
         Ok(Cli::Version) => return println!("noobsbot {}", env!("CARGO_PKG_VERSION")),
@@ -65,14 +65,14 @@ instead of the shell; everything after it is PROGRAM's arguments.
 
 Options:
   --quake          the drop-down terminal; run it again (or press F12) to show or hide it
-  -u, --update     install the latest version
+  -u, --update     install the latest version (-u --beta: the newest beta too)
   -r, --restart    swap running noobsbot windows for fresh ones (after --update)
   -v, --version    print the version
   -h, --help       print this list
 
 Settings:   ~/.config/noobsbot/config.toml (made on first run)
 Shortcuts:  Ctrl+Shift+P lists every action
-More help:  https://github.com/anil0403/noobsbot-terminal
+More help:  https://github.com/noobsbot-team/noobsbot-terminal
 "
 );
 
@@ -83,7 +83,8 @@ enum Cli {
     Quake,
     /// `-e program args…`: a window running that instead of the shell.
     Exec(Vec<String>),
-    Update,
+    /// `--update`, or `--update --beta` for the newest version, betas too.
+    Update(bool),
     Restart,
     Help,
     Version,
@@ -92,7 +93,7 @@ enum Cli {
 fn parse(args: &[String]) -> Result<Cli, String> {
     let cli = |arg: &str| match arg {
         "--quake" => Ok(Cli::Quake),
-        "-u" | "--update" => Ok(Cli::Update),
+        "-u" | "--update" => Ok(Cli::Update(false)),
         "-r" | "--restart" => Ok(Cli::Restart),
         "-h" | "--help" => Ok(Cli::Help),
         "-v" | "-V" | "--version" => Ok(Cli::Version),
@@ -112,6 +113,7 @@ fn parse(args: &[String]) -> Result<Cli, String> {
     match args {
         [] => Ok(Cli::Window),
         [arg] => cli(arg),
+        [u, beta] if cli(u) == Ok(Cli::Update(false)) && beta == "--beta" => Ok(Cli::Update(true)),
         [first, rest @ ..] => {
             cli(first)?;
             Err(match rest.iter().find(|a| cli(a).is_err()) {
@@ -122,10 +124,15 @@ fn parse(args: &[String]) -> Result<Cli, String> {
     }
 }
 
-/// `noobsbot --update`: rerun the installer, which installs the latest version.
-fn update() -> i32 {
-    const INSTALL: &str = "curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh | bash";
-    match std::process::Command::new("bash").args(["-o", "pipefail", "-c", INSTALL]).status() {
+/// `noobsbot --update`: rerun the installer, which installs the latest version
+/// (with `beta`, the newest one, betas included).
+fn update(beta: bool) -> i32 {
+    const INSTALL: &str = "curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/install.sh | bash";
+    let mut bash = std::process::Command::new("bash");
+    if beta {
+        bash.env("NOOBSBOT_BETA", "1");
+    }
+    match bash.args(["-o", "pipefail", "-c", INSTALL]).status() {
         Ok(s) if s.success() => {
             println!("Updated. Run `noobsbot --restart` to use the new version.");
             0
@@ -147,7 +154,10 @@ mod tests {
         let parse = |args: &[&str]| parse(&args.iter().map(|a| a.to_string()).collect::<Vec<_>>());
         assert_eq!(parse(&[]), Ok(Cli::Window));
         assert_eq!(parse(&["--quake"]), Ok(Cli::Quake));
-        assert_eq!((parse(&["-u"]), parse(&["--update"])), (Ok(Cli::Update), Ok(Cli::Update)));
+        assert_eq!((parse(&["-u"]), parse(&["--update"])), (Ok(Cli::Update(false)), Ok(Cli::Update(false))));
+        assert_eq!((parse(&["-u", "--beta"]), parse(&["--update", "--beta"])), (Ok(Cli::Update(true)), Ok(Cli::Update(true))));
+        assert_eq!(parse(&["--beta"]), Err("unknown argument '--beta'".into()));
+        assert_eq!(parse(&["--quake", "--beta"]), Err("unknown argument '--beta'".into()));
         assert_eq!((parse(&["-r"]), parse(&["--restart"])), (Ok(Cli::Restart), Ok(Cli::Restart)));
         assert_eq!((parse(&["-h"]), parse(&["--help"])), (Ok(Cli::Help), Ok(Cli::Help)));
         for arg in ["-v", "-V", "--version"] {

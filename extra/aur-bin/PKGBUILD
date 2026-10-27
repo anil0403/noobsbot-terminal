@@ -7,7 +7,7 @@ pkgver=0.4.0
 pkgrel=1
 pkgdesc='GPU-rendered terminal emulator with situation-aware color palettes'
 arch=('x86_64')
-url="https://github.com/anil0403/$_repo"
+url="https://github.com/noobsbot-team/$_repo"
 license=('MIT')
 # The same runtime needs as noobsbot-git (see extra/aur/PKGBUILD).
 depends=('gcc-libs' 'glibc' 'libx11' 'libxcursor' 'libxi' 'libxkbcommon-x11' 'vulkan-icd-loader' 'nano' 'ttf-jetbrains-mono-nerd')

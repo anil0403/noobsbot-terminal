@@ -44,7 +44,7 @@ const CAT_W: usize = 35;
 const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
 /// Where the latest release is looked up, and how often (the answer is cached).
-const RELEASES: &str = "https://api.github.com/repos/anil0403/noobsbot-terminal/releases/latest";
+const RELEASES: &str = "https://api.github.com/repos/noobsbot-team/noobsbot-terminal/releases/latest";
 const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 /// A release newer than this build, once the check has found one.
 static NEWER: Mutex<Option<String>> = Mutex::new(None);
@@ -195,10 +195,17 @@ fn tag_name(json: &str) -> Option<String> {
     Some(rest[..rest.find('"')?].to_owned()).filter(|t| !t.is_empty())
 }
 
-/// `tag` (`v0.2.1`) is a later version than `ours` (`0.2.0`).
+/// `tag` (`v0.2.1`) is a later version than `ours` (`0.2.0`). A beta
+/// (`0.6.1-beta.2`) comes after `0.6.0` and before `0.6.1`.
 pub fn newer(tag: &str, ours: &str) -> bool {
-    let parts = |v: &str| v.trim_start_matches('v').split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
-    parts(tag) > parts(ours)
+    let key = |v: &str| {
+        let v = v.trim_start_matches('v');
+        let (core, beta) = v.split_once('-').map_or((v, None), |(c, b)| (c, Some(b)));
+        let parts = core.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+        let n = beta.and_then(|b| b.rsplit('.').next()?.parse::<u64>().ok()).unwrap_or(0);
+        (parts, beta.is_none(), n)
+    };
+    key(tag) > key(ours)
 }
 
 /// The last CPU reading, (busy, total) ticks, and the share it gave.
@@ -661,6 +668,8 @@ mod tests {
         assert_eq!(tag_name(r#"{"message": "API rate limit exceeded"}"#), None);
         assert!(newer("v0.2.1", "0.2.0") && newer("v0.10.0", "0.9.5") && newer("1.0", "0.9.9"));
         assert!(!newer("v0.2.0", "0.2.0") && !newer("v0.1.9", "0.2.0") && !newer("bogus", "0.2.0"));
+        assert!(newer("v0.6.1-beta.1", "0.6.0") && newer("v0.6.1", "0.6.1-beta.3") && newer("v0.6.1-beta.10", "0.6.1-beta.9"));
+        assert!(!newer("v0.6.1-beta.2", "0.6.1") && !newer("v0.6.1-beta.2", "0.6.1-beta.2") && newer("v0.7.0", "0.6.1-beta.2"));
     }
 
     #[test]
