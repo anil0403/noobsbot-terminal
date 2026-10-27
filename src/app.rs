@@ -43,8 +43,9 @@ use crate::tap::{Mark, Progress};
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
 
-/// What a program's notification is titled when it gives no title.
-const WINDOW_NAME: &str = "Noobsbot Terminal";
+/// The window's name while no program set a title, and a notification's title
+/// when its program gives none.
+const WINDOW_TITLE: &str = "Noobsbot Terminal";
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
 /// Minimum gap between situation checks while output is streaming.
@@ -100,6 +101,8 @@ pub struct App {
     shell_name: String,
     _config_watcher: Option<notify::RecommendedWatcher>,
     window: Option<Arc<Window>>,
+    /// What the window is called now (the focused pane's title, or ours).
+    window_title: String,
     renderer: Option<Renderer>,
     panes: HashMap<PaneId, Pane>,
     tabs: Vec<Tab>,
@@ -210,6 +213,7 @@ impl App {
             config,
             proxy,
             window: None,
+            window_title: WINDOW_TITLE.into(),
             renderer: None,
             panes: HashMap::new(),
             tabs: Vec::new(),
@@ -294,6 +298,18 @@ fn focus_report(pane: &mut Pane, focused: bool) {
 impl App {
     fn focused(&self) -> PaneId {
         self.tabs[self.active].focused
+    }
+
+    /// The window is named after the focused pane's title, like its tab.
+    fn sync_window_title(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let title = self.panes.get(&tab.focused).and_then(|p| p.title.clone()).unwrap_or_else(|| WINDOW_TITLE.into());
+        if title != self.window_title {
+            if let Some(w) = &self.window {
+                w.set_title(&title);
+            }
+            self.window_title = title;
+        }
     }
 
     fn focused_pane(&mut self) -> &mut Pane {
@@ -385,6 +401,8 @@ impl App {
             progress: None,
             notified_at: None,
             at_prompt: false,
+            title: None,
+            title_before: None,
             running: None,
             welcome,
             typing: welcome.then(Instant::now),
@@ -902,13 +920,16 @@ impl App {
                     return;
                 }
                 pane.notified_at = Some(Instant::now());
-                let title = if title.is_empty() { WINDOW_NAME.to_owned() } else { title };
+                let title = if title.is_empty() { pane.title.clone().unwrap_or_else(|| WINDOW_TITLE.into()) } else { title };
                 return notify(title, body);
             }
             Mark::Progress(progress) => return pane.progress = progress,
             Mark::Cwd(path) => return pane.cwd = Some(path),
             Mark::CommandEnd(code) => {
                 pane.at_prompt = true; // sent before every prompt
+                if let Some(title) = pane.title_before.take() {
+                    pane.title = title;
+                }
                 pane.progress = None; // its program is done, even if it never said so
                 if let (Some(0), Some((cmd, dir))) = (code, pane.running.take()) {
                     self.suggest.ran(&cmd, &dir);
@@ -916,6 +937,7 @@ impl App {
             }
             Mark::CommandStart => {
                 pane.at_prompt = false;
+                pane.title_before = Some(pane.title.clone());
                 let cmd = blocks::command_text(&pane.term.lock(), prompt);
                 pane.running = cmd.zip(pane.cwd());
             }
@@ -1346,7 +1368,7 @@ impl ApplicationHandler<UserEvent> for App {
         let icon =
             crate::images::png(include_bytes!("../extra/noobsbot-128.png")).ok().and_then(|p| winit::window::Icon::from_rgba(p.rgba.clone(), p.w, p.h).ok());
         // Transparent always, so `opacity` can change without a new window.
-        let mut attrs = Window::default_attributes().with_title("Noobsbot Terminal").with_window_icon(icon).with_transparent(true);
+        let mut attrs = Window::default_attributes().with_title(WINDOW_TITLE).with_window_icon(icon).with_transparent(true);
         let monitor = event_loop.primary_monitor().or_else(|| event_loop.available_monitors().next());
         if let (Some(_), Some(m)) = (&self.quake, monitor) {
             // Borderless, full width, on top; hidden until it fades in.
@@ -1435,6 +1457,16 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(w) = self.window.as_ref().filter(|_| !self.renderer.as_ref().is_some_and(|r| r.focused)) {
                     w.request_user_attention(Some(winit::window::UserAttentionType::Informational));
                 }
+            }
+            // OSC 0/2 (and the title stack, CSI 22/23 t): the tab and the window show it.
+            Event::Title(title) => {
+                let title: String = title.chars().filter(|c| !c.is_control()).take(200).collect();
+                pane.title = Some(title.trim().to_owned()).filter(|t| !t.is_empty());
+                self.dirty = true;
+            }
+            Event::ResetTitle => {
+                pane.title = None;
+                self.dirty = true;
             }
             Event::ClipboardStore(ty, text) => self.clipboard.set(ty == ClipboardType::Selection, text),
             Event::ClipboardLoad(ty, format) => {
@@ -1957,6 +1989,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::RedrawRequested => {
                 self.last_frame = Instant::now();
+                self.sync_window_title();
                 self.update_hover(); // the text under the pointer may have changed
                 let (bar_h, tab_w) = (self.bar_h(), self.tab_w());
                 let suggestion = self.suggestion();
@@ -2486,11 +2519,16 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
         let hovered = matches!(hover, Some(BarHit::Tab(h) | BarHit::Close(h)) if h == i);
         // The close button keeps the last two cells, so labels don't shift when it shows.
         let room = if closable { fit - 2 } else { fit };
-        let mut label = format!(" Terminal {} ", i + 1);
-        // Tight: just the number, padded if there's room.
-        for short in [format!(" {} ", i + 1), (i + 1).to_string()] {
-            if label.chars().count() > room {
-                label = short;
+        // A program's title, cut short to fit; else "Terminal N", or just the number when tight.
+        let mut label = match &pane.title {
+            Some(title) if room >= 4 => format!(" {title} "),
+            _ => format!(" Terminal {} ", i + 1),
+        };
+        if pane.title.is_none() || room < 4 {
+            for short in [format!(" {} ", i + 1), (i + 1).to_string()] {
+                if label.chars().count() > room {
+                    label = short;
+                }
             }
         }
         if label.chars().count() > room {

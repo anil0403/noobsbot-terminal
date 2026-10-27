@@ -63,6 +63,11 @@ pub struct Pane {
     pub notified_at: Option<Instant>,
     /// The shell is waiting at its prompt (shell integration), not running a command.
     pub at_prompt: bool,
+    /// The title a program set (OSC 0/2), for its tab and the window.
+    pub title: Option<String>,
+    /// The title when the running command started. It comes back when the command
+    /// ends, so the title ssh or vim set doesn't stay after they're gone.
+    pub title_before: Option<Option<String>>,
     /// The command running and where it started, for the suggestions once it succeeds.
     pub running: Option<(String, PathBuf)>,
     /// The welcome screen is still up, until the first key at the prompt.

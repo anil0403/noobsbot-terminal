@@ -97,7 +97,7 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 🐱 **Welcome screen** | A cat beside your machine's specs and live meters that types itself out, gone as soon as you type. |
 | 💎 **Pretty prompt** | A powerline prompt for bash, zsh and fish: user, folder, git branch, exit status. |
 | 💾 **Session restore** | Opt in, and closing the window keeps its tabs, splits and folders for next time. |
-| 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. Zoom one pane to fill the tab and back, or type into all of them at once. |
+| 🪟 **Tabs and splits** | Split in all four directions from the tab bar, the right-click menu or the keyboard. Zoom one pane to fill the tab and back, or type into all of them at once. A tab shows the title its program sets (ssh, vim, htop), and so does the window. |
 | 🧭 **Command palette** | Every action, theme and shell, one search away (Ctrl+Shift+P). |
 | 💡 **Suggestions** | Grey text after the cursor as you type (bash, zsh): commands that worked in this folder first, then anywhere, then your shell's history, then file names. → takes it. |
 | 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. Or Ctrl+Shift+L and type a link's letter, no mouse needed. |
