@@ -18,7 +18,7 @@ pub enum UserEvent {
     NewTab,
     /// An action picked in the menu bar.
     Menu(crate::input::Action),
-    /// The Dock menu's "Check for Updates": a new tab runs `noobsbot --update`.
+    /// The Dock menu's "Check for Updates": a new tab runs `noobsbot --update` (with `--beta` on a beta).
     Update,
     /// Quit from the app menu (Cmd+Q): asks first while programs still run.
     Quit,

@@ -4,8 +4,8 @@
 #   "type!:" or "BREAKING" → a release now: 0.7.0 (from 1.0 on, 2.0.0)
 #   "feat:"                → a release now: 0.6.1 (from 1.0 on, 1.1.0)
 #   anything else          → a beta now: 0.6.1-beta.N, released by the nightly run
-# A push that changes only docs and GitHub files makes nothing, and neither does
-# a run when the last CI run on main failed.
+# docs:, ci: and test: commits, and commits that change only docs and GitHub
+# files, make nothing. Nor does a run when the last CI run on main failed.
 # A release bumps both crates and tags; a beta only tags (the builds set its
 # version from the tag). Each gets a draft GitHub release (a beta as a
 # pre-release) and starts the Linux and macOS builds for its tag. The last of the
@@ -44,18 +44,27 @@ jobs:
       - run: |
           set -euo pipefail
           docs='\.md$|^\.github/|^extra/screenshots/|^LICENSE$'
+          # Subjects of the commits in a range that count for a version: not
+          # docs:, ci: or test:, and changing more than docs and GitHub files.
+          counted() {
+            git log --format='%H %s' "$1" | while read -r h s; do
+              [[ $s =~ ^(docs|ci|test)(\(.+\))?: ]] && continue
+              git diff-tree --no-commit-id --name-only -r "$h" | grep -Ev "$docs" >/dev/null || continue
+              echo "$s"
+            done
+          }
           last=$(git describe --tags --abbrev=0 --exclude '*-*')
-          log=$(git log --format='%s' "$last..HEAD")
-          [[ -n $log ]] || { echo "nothing since $last"; exit 0; }
+          [[ -n $(git log --format=%s "$last..HEAD") ]] || { echo "nothing since $last"; exit 0; }
+          log=$(counted "$last..HEAD")
           bump=${{ inputs.bump || 'auto' }}
+          if [[ -z $log && $bump == auto ]]; then echo "only docs, CI and tests since $last"; exit 0; fi
+          # A push looks at what's new since the newest tag, betas included, not at
+          # its own commits: a waiting run is dropped when a newer push comes. A
+          # re-run on a tagged commit finds nothing new.
           if [[ $GITHUB_EVENT_NAME == push ]]; then
-            before=${{ github.event.before }}
-            git cat-file -e "$before^{commit}" 2>/dev/null || before=$last
-            pushed=$(git diff --name-only "$before" HEAD | grep -Ev "$docs" || true)
-            [[ -n $pushed ]] || { echo "only docs in this push"; exit 0; }
+            newest=$(git describe --tags --abbrev=0)
+            [[ -n $(counted "$newest..HEAD") ]] || { echo "nothing new since $newest"; exit 0; }
           fi
-          code=$(git diff --name-only "$last..HEAD" | grep -Ev "$docs" || true)
-          if [[ -z $code && $bump == auto ]]; then echo "only docs changed since $last"; exit 0; fi
           for wf in release.yml macos.yml; do
             ok=$(gh run list --workflow "$wf" --branch main --event push --status completed --limit 1 --json conclusion -q '.[0].conclusion // "success"')
             [[ $ok == success ]] || { echo "::error::the last $wf run on main ended with \"$ok\"; fix main first"; exit 1; }
@@ -89,7 +98,9 @@ jobs:
             .github/set-version.sh "$v"
             git commit -am "v$v"
             git tag -a "v$v" -m "v$v"
-            git push --follow-tags
+            # Both or neither: if main moved meanwhile, nothing is pushed and the
+            # next run (the push that moved it) makes the release.
+            git push --atomic origin HEAD:main "v$v" || { echo "::error::main moved during the release; the next run makes v$v"; exit 1; }
             gh release create "v$v" --generate-notes --notes-start-tag "$last" --draft
           fi
           gh workflow run release.yml --ref "v$v"

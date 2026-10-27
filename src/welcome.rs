@@ -43,7 +43,7 @@ const CAT_W: usize = 35;
 const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
 /// Where the latest release is looked up, and how often (the answer is cached).
-const RELEASES: &str = "https://api.github.com/repos/noobsbot-team/noobsbot-terminal/releases/latest";
+const RELEASES: &str = "https://api.github.com/repos/noobsbot-team/noobsbot-terminal/releases";
 const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 /// A release newer than this build, once the check has found one.
 static NEWER: Mutex<Option<String>> = Mutex::new(None);
@@ -151,6 +151,17 @@ pub fn redraw<T: EventListener>(term: &mut Term<T>, screen: &str, rows: &mut usi
     true
 }
 
+/// This build is a beta (0.6.1-beta.2). It then looks for and updates to betas too.
+pub fn beta() -> bool {
+    env!("CARGO_PKG_VERSION").contains('-')
+}
+
+/// Where to ask for the newest version: the latest release, or for a beta the
+/// newest release, betas included.
+fn releases_url() -> String {
+    format!("{RELEASES}{}", if beta() { "?per_page=1" } else { "/latest" })
+}
+
 /// Starts the update check: the cached answer now, and a fresh one from GitHub in
 /// the background once that's stale. The screen shows a newer release when drawn.
 pub fn check_for_update() {
@@ -167,7 +178,8 @@ pub fn check_for_update() {
         return;
     }
     std::thread::spawn(move || {
-        let Ok(out) = std::process::Command::new("curl").args(["-fsSL", "-m", "10", RELEASES]).stderr(std::process::Stdio::null()).output() else { return };
+        let url = releases_url();
+        let Ok(out) = std::process::Command::new("curl").args(["-fsSL", "-m", "10", &url]).stderr(std::process::Stdio::null()).output() else { return };
         let Some(tag) = tag_name(&String::from_utf8_lossy(&out.stdout)) else { return };
         if let Some(dir) = cache.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -326,7 +338,8 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
         meter("Battery", bar(level, true), status.to_lowercase());
     }
     if let Some(tag) = NEWER.lock().unwrap().as_deref() {
-        lines.push(format!("\x1b[1;38;5;10m{:<10}\x1b[0m{tag} is out \x1b[38;5;8m·\x1b[0m run \x1b[1mnoobsbot --update\x1b[0m", "Update"));
+        let update = if beta() { "noobsbot --update --beta" } else { "noobsbot --update" };
+        lines.push(format!("\x1b[1;38;5;10m{:<10}\x1b[0m{tag} is out \x1b[38;5;8m·\x1b[0m run \x1b[1m{update}\x1b[0m", "Update"));
     }
     lines.push(String::new());
     lines.push(format!("\x1b[38;5;8m{TIP}"));

@@ -61,7 +61,17 @@ if [[ -z ${NOOBSBOT_FROM_SOURCE:-} && $(uname -m) == x86_64 && -n $glibc &&
 fi
 sha256() { curl -fsSL "$tarball.sha256" | cut -d' ' -f1; }
 
-if has pacman; then
+# Version order, as noobsbot's update check: 0.6.0 < 0.6.1-beta.2 < 0.6.1.
+vkey() { if [[ $1 == *-* ]]; then echo "${1%%-*}.0.${1##*.}"; else echo "$1.1.0"; fi; }
+newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$(vkey "$1")" "$(vkey "$2")" | sort -V | tail -1) == "$(vkey "$1")" ]]; }
+# Never go back: a plain -u on a beta finds an older release.
+cur=$(noobsbot --version 2>/dev/null | sed -n 's/^noobsbot //p' || true)
+keep=""
+[[ -n $tarball && -n $cur ]] && newer "$cur" "$ver" && keep=1
+
+if [[ -n $keep ]]; then
+    say "noobsbot $cur is newer than the latest release ($ver), so it stays. noobsbot -u --beta gets the newest beta."
+elif has pacman; then
     # Arch: a real package (pacman -R noobsbot-bin or noobsbot-git removes it):
     # noobsbot-bin wraps the tarball (extra/aur-bin), noobsbot-git builds (extra/aur).
     if [[ -n $tarball ]]; then pkg=noobsbot-bin dir=aur-bin old=noobsbot-git
