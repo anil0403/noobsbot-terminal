@@ -67,7 +67,7 @@ We use [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`, with tags
 | `docs:`, `ci:`, `test:` | nothing | — | — |
 
 - A plain `noobsbot -u` installs only releases. `noobsbot -u --beta` also installs betas, for testing.
-- A release deletes the betas before it, because it has all their changes.
+- Betas stay on the Releases page, marked "Pre-release". A release has all the changes of the betas before it.
 - Versions only go up. A released version never changes: if it's wrong, the next one fixes it.
 - We go to `1.0.0` when the config format is settled and Linux and macOS both work well day to day.
 

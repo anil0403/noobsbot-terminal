@@ -9,8 +9,8 @@
 # A release bumps both crates and tags; a beta only tags (the builds set its
 # version from the tag). Each gets a draft GitHub release (a beta as a
 # pre-release) and starts the Linux and macOS builds for its tag. The last of the
-# two to upload publishes it, so "latest" never lacks them. A release deletes
-# the betas before it: it has all their changes.
+# two to upload publishes it, so "latest" never lacks them. Betas stay listed
+# as pre-releases; a release has all the changes of the betas before it.
 name: version
 
 on:
@@ -91,9 +91,6 @@ jobs:
             git tag -a "v$v" -m "v$v"
             git push --follow-tags
             gh release create "v$v" --generate-notes --notes-start-tag "$last" --draft
-            for t in $(git tag -l 'v*-beta.*'); do
-              gh release delete "$t" --cleanup-tag --yes || git push origin --delete "$t" || true
-            done
           fi
           gh workflow run release.yml --ref "v$v"
           gh workflow run macos.yml --ref "v$v"
