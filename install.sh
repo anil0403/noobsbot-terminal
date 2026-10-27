@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # noobsbot terminal installer:
-#   curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh | bash
+#   curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/install.sh | bash
 # Installs the dependencies (nano and the JetBrainsMono Nerd Font included),
 # installs the latest release's prebuilt noobsbot (or builds it from source when
 # that can't run here) and makes nano the default editor.
-# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds.
+# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds;
+# NOOBSBOT_BETA=1 installs the newest release, betas included.
 set -euo pipefail
 
 # All in a function, so nothing runs until the whole script has downloaded.
 main() {
 
-REPO=https://github.com/anil0403/noobsbot-terminal
+REPO=https://github.com/noobsbot-team/noobsbot-terminal
 FONT="JetBrainsMono Nerd Font Mono"
 RUST_MIN=90 # rustc 1.90 or newer
 SRC=${XDG_CACHE_HOME:-$HOME/.cache}/noobsbot/src
@@ -47,29 +48,45 @@ fi
 # or newer (what release.yml builds against). Empty → build from source: no
 # release yet, its build still running, another CPU, musl, or NOOBSBOT_FROM_SOURCE=1.
 tarball="" ver=""
+# NOOBSBOT_BETA=1 (noobsbot -u --beta): the newest release, betas included.
+releases=releases/latest
+[[ -z ${NOOBSBOT_BETA:-} ]] || releases="releases?per_page=1"
 glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2 || true)
 if [[ -z ${NOOBSBOT_FROM_SOURCE:-} && $(uname -m) == x86_64 && -n $glibc &&
       $(printf '2.35\n%s\n' "$glibc" | sort -V | head -1) == 2.35 ]]; then
-    tarball=$(curl -fsSL "https://api.github.com/repos/${REPO#https://github.com/}/releases/latest" 2>/dev/null |
+    tarball=$(curl -fsSL "https://api.github.com/repos/${REPO#https://github.com/}/$releases" 2>/dev/null |
         sed -n 's/.*"browser_download_url": *"\([^"]*x86_64-linux\.tar\.gz\)".*/\1/p' | head -1 || true)
     ver=$(basename "$tarball" | sed -n 's/^noobsbot-\(.*\)-x86_64-linux\.tar\.gz$/\1/p')
     [[ -n $ver ]] || tarball=""
 fi
 sha256() { curl -fsSL "$tarball.sha256" | cut -d' ' -f1; }
 
-if has pacman; then
+# Version order, as noobsbot's update check: 0.6.0 < 0.6.1-beta.2 < 0.6.1.
+vkey() { if [[ $1 == *-* ]]; then echo "${1%%-*}.0.${1##*.}"; else echo "$1.1.0"; fi; }
+newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$(vkey "$1")" "$(vkey "$2")" | sort -V | tail -1) == "$(vkey "$1")" ]]; }
+# Never go back: a plain -u on a beta finds an older release.
+cur=$(noobsbot --version 2>/dev/null | sed -n 's/^noobsbot //p' || true)
+keep=""
+[[ -n $tarball && -n $cur ]] && newer "$cur" "$ver" && keep=1
+
+if [[ -n $keep ]]; then
+    say "noobsbot $cur is newer than the latest release ($ver), so it stays. noobsbot -u --beta gets the newest beta."
+elif has pacman; then
     # Arch: a real package (pacman -R noobsbot-bin or noobsbot-git removes it):
     # noobsbot-bin wraps the tarball (extra/aur-bin), noobsbot-git builds (extra/aur).
     if [[ -n $tarball ]]; then pkg=noobsbot-bin dir=aur-bin old=noobsbot-git
     else pkg=noobsbot-git dir=aur old=noobsbot-bin; fi
-    if [[ -n $tarball && $(pacman -Q $pkg 2>/dev/null) == "$pkg $ver-1" ]]; then
+    # pacman has no '-' in a version: a beta 0.6.1-beta.2 is 0.6.1beta2, which it
+    # sorts before 0.6.1 too.
+    pkgver=${ver/-beta./beta}
+    if [[ -n $tarball && $(pacman -Q $pkg 2>/dev/null) == "$pkg $pkgver-1" ]]; then
         say "noobsbot $ver is already installed"
     else
         say "Making the $pkg package"
         rm -rf "$SRC" && mkdir -p "$SRC"
         curl -fsSL "$REPO/raw/main/extra/$dir/PKGBUILD" -o "$SRC/PKGBUILD"
         if [[ -n $tarball ]]; then
-            sed -i "s/^pkgver=.*/pkgver=$ver/; s/^sha256sums=.*/sha256sums=('$(sha256)')/" "$SRC/PKGBUILD"
+            sed -i "s/^pkgver=.*/pkgver=$pkgver/; s/^sha256sums=.*/sha256sums=('$(sha256)')/" "$SRC/PKGBUILD"
         fi
         (cd "$SRC" && makepkg -sf --noconfirm --cleanbuild)
         # The two conflict, and under --noconfirm pacman refuses to swap them itself.

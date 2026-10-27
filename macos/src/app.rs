@@ -1521,7 +1521,8 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Update => {
                 // Quoted for the shell; the installer replaces the app this runs from.
                 let exe = std::env::current_exe().unwrap_or_else(|_| "noobsbot".into()).to_string_lossy().replace('\'', "'\\''");
-                return self.dock_new_tab(Some(format!("'{exe}' --update\n")));
+                let beta = if crate::welcome::beta() { " --beta" } else { "" };
+                return self.dock_new_tab(Some(format!("'{exe}' --update{beta}\n")));
             }
             UserEvent::Quit => return self.request_close(event_loop, Closing::Window),
             UserEvent::Shell(id, prompt, mark) => return self.shell_mark(id, prompt, mark),

@@ -14,7 +14,7 @@
 Paste this into Terminal:
 
 ```sh
-curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/macos/install.sh \
+curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/macos/install.sh \
   | bash
 ```
 
@@ -23,7 +23,7 @@ That command:
 - installs **Noobsbot.app** in `/Applications` (or `~/Applications`): the latest release, or built from source when there is none (it then asks for the Xcode Command Line Tools and installs Rust with rustup)
 - adds the `noobsbot` command (`noobsbot --quake` starts the drop-down terminal)
 - installs the **JetBrainsMono Nerd Font** for the prompt's icons
-- updates noobsbot when you run it again, or when you run `noobsbot --update`; `noobsbot --restart` (or "Restart noobsbot" in Cmd+Shift+P) then swaps the window for a fresh one
+- updates noobsbot when you run it again, or when you run `noobsbot --update` (`noobsbot -u --beta` gets the newest beta, for testing); `noobsbot --restart` (or "Restart noobsbot" in Cmd+Shift+P) then swaps the window for a fresh one
 
 The app is signed with our own "Noobsbot Terminal" certificate, not by Apple: the installer clears the download quarantine so Gatekeeper doesn't call it damaged. The certificate stays the same in every release, so permissions you give the app (Screen Recording, Accessibility, Full Disk Access) stay after `noobsbot -u`. To remove noobsbot, delete `Noobsbot.app` and the `noobsbot` link.
 
@@ -33,7 +33,7 @@ The app is signed with our own "Noobsbot Terminal" certificate, not by Apple: th
 <br>
 
 ```sh
-git clone https://github.com/anil0403/noobsbot-terminal && cd noobsbot-terminal/macos
+git clone https://github.com/noobsbot-team/noobsbot-terminal && cd noobsbot-terminal/macos
 cargo build --release && ./package.sh
 cp -R target/Noobsbot.app /Applications/
 ```

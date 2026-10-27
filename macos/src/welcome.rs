@@ -44,7 +44,7 @@ const CAT_W: usize = 35;
 const MIN_COLS: usize = CAT_W + 3 + 57;
 const BAR: usize = 20;
 /// Where the latest release is looked up, and how often (the answer is cached).
-const RELEASES: &str = "https://api.github.com/repos/anil0403/noobsbot-terminal/releases/latest";
+const RELEASES: &str = "https://api.github.com/repos/noobsbot-team/noobsbot-terminal/releases";
 const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 /// A release newer than this build, once the check has found one.
 static NEWER: Mutex<Option<String>> = Mutex::new(None);
@@ -152,6 +152,17 @@ pub fn redraw<T: EventListener>(term: &mut Term<T>, screen: &str, rows: &mut usi
     true
 }
 
+/// This build is a beta (0.6.1-beta.2). It then looks for and updates to betas too.
+pub fn beta() -> bool {
+    env!("CARGO_PKG_VERSION").contains('-')
+}
+
+/// Where to ask for the newest version: the latest release, or for a beta the
+/// newest release, betas included.
+fn releases_url() -> String {
+    format!("{RELEASES}{}", if beta() { "?per_page=1" } else { "/latest" })
+}
+
 /// Starts the update check: the cached answer now, and a fresh one from GitHub in
 /// the background once that's stale. The screen shows a newer release when drawn.
 pub fn check_for_update() {
@@ -179,7 +190,7 @@ pub fn check_for_update() {
 
 /// The latest release's tag (`v0.2.1`), asked from GitHub now (up to 10 s); None when offline.
 pub fn latest_release() -> Option<String> {
-    let out = std::process::Command::new("curl").args(["-fsSL", "-m", "10", RELEASES]).stderr(std::process::Stdio::null()).output().ok()?;
+    let out = std::process::Command::new("curl").args(["-fsSL", "-m", "10", &releases_url()]).stderr(std::process::Stdio::null()).output().ok()?;
     tag_name(&String::from_utf8_lossy(&out.stdout))
 }
 
@@ -195,10 +206,17 @@ fn tag_name(json: &str) -> Option<String> {
     Some(rest[..rest.find('"')?].to_owned()).filter(|t| !t.is_empty())
 }
 
-/// `tag` (`v0.2.1`) is a later version than `ours` (`0.2.0`).
+/// `tag` (`v0.2.1`) is a later version than `ours` (`0.2.0`). A beta
+/// (`0.6.1-beta.2`) comes after `0.6.0` and before `0.6.1`.
 pub fn newer(tag: &str, ours: &str) -> bool {
-    let parts = |v: &str| v.trim_start_matches('v').split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
-    parts(tag) > parts(ours)
+    let key = |v: &str| {
+        let v = v.trim_start_matches('v');
+        let (core, beta) = v.split_once('-').map_or((v, None), |(c, b)| (c, Some(b)));
+        let parts = core.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+        let n = beta.and_then(|b| b.rsplit('.').next()?.parse::<u64>().ok()).unwrap_or(0);
+        (parts, beta.is_none(), n)
+    };
+    key(tag) > key(ours)
 }
 
 /// The last CPU reading, (busy, total) ticks, and the share it gave.
@@ -313,7 +331,8 @@ fn info(gpu: &str, shell: &str) -> Vec<String> {
         meter("Battery", bar(level, true), status.to_lowercase());
     }
     if let Some(tag) = NEWER.lock().unwrap().as_deref() {
-        lines.push(format!("\x1b[1;38;5;10m{:<10}\x1b[0m{tag} is out \x1b[38;5;8m·\x1b[0m run \x1b[1mnoobsbot --update\x1b[0m", "Update"));
+        let update = if beta() { "noobsbot --update --beta" } else { "noobsbot --update" };
+        lines.push(format!("\x1b[1;38;5;10m{:<10}\x1b[0m{tag} is out \x1b[38;5;8m·\x1b[0m run \x1b[1m{update}\x1b[0m", "Update"));
     }
     lines.push(String::new());
     lines.push(format!("\x1b[38;5;8m{TIP}"));
@@ -661,6 +680,8 @@ mod tests {
         assert_eq!(tag_name(r#"{"message": "API rate limit exceeded"}"#), None);
         assert!(newer("v0.2.1", "0.2.0") && newer("v0.10.0", "0.9.5") && newer("1.0", "0.9.9"));
         assert!(!newer("v0.2.0", "0.2.0") && !newer("v0.1.9", "0.2.0") && !newer("bogus", "0.2.0"));
+        assert!(newer("v0.6.1-beta.1", "0.6.0") && newer("v0.6.1", "0.6.1-beta.3") && newer("v0.6.1-beta.10", "0.6.1-beta.9"));
+        assert!(!newer("v0.6.1-beta.2", "0.6.1") && !newer("v0.6.1-beta.2", "0.6.1-beta.2") && newer("v0.7.0", "0.6.1-beta.2"));
     }
 
     #[test]

@@ -1,14 +1,21 @@
-# Cuts a release once a day, or when started by hand, from the commits since the
-# last tag. No release when nothing changed but docs and GitHub files (unless a
-# bump is chosen by hand), or when the last CI run on main failed.
-# The bump is read from commit subjects only (bodies can quote other commits):
-# "type!:" or "BREAKING" → major, "feat:" → minor, anything else → patch.
-# Bumps both crates, tags, creates the GitHub release (auto notes) as a draft,
-# then starts the Linux and macOS release builds for the tag. The last of the
-# two to upload its file publishes the release, so "latest" never lacks them.
+# Makes versions from the commits since the last release (rules in
+# CONTRIBUTING.md, "Versions"). Read from commit subjects only (bodies can quote
+# other commits):
+#   "type!:" or "BREAKING" → a release now: 0.7.0 (from 1.0 on, 2.0.0)
+#   "feat:"                → a release now: 0.6.1 (from 1.0 on, 1.1.0)
+#   anything else          → a beta now: 0.6.1-beta.N, released by the nightly run
+# docs:, ci: and test: commits, and commits that change only docs and GitHub
+# files, make nothing. Nor does a run when the last CI run on main failed.
+# A release bumps both crates and tags; a beta only tags (the builds set its
+# version from the tag). Each gets a draft GitHub release (a beta as a
+# pre-release) and starts the Linux and macOS builds for its tag. The last of the
+# two to upload publishes it, so "latest" never lacks them. Betas stay listed
+# as pre-releases; a release has all the changes of the betas before it.
 name: version
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
@@ -21,7 +28,7 @@ permissions:
   contents: write
   actions: write
 
-# One at a time, so a manual run and the daily one can't cut the same version.
+# One at a time, so two runs can't cut the same version.
 concurrency:
   group: version
   cancel-in-progress: false
@@ -36,34 +43,66 @@ jobs:
           fetch-depth: 0
       - run: |
           set -euo pipefail
-          last=$(git describe --tags --abbrev=0)
-          log=$(git log --format='%s' "$last..HEAD")
-          [[ -n $log ]] || { echo "nothing since $last"; exit 0; }
+          docs='\.md$|^\.github/|^extra/screenshots/|^LICENSE$'
+          # Subjects of the commits in a range that count for a version: not
+          # docs:, ci: or test:, and changing more than docs and GitHub files.
+          counted() {
+            git log --format='%H %s' "$1" | while read -r h s; do
+              [[ $s =~ ^(docs|ci|test)(\(.+\))?: ]] && continue
+              git diff-tree --no-commit-id --name-only -r "$h" | grep -Ev "$docs" >/dev/null || continue
+              echo "$s"
+            done
+          }
+          last=$(git describe --tags --abbrev=0 --exclude '*-*')
+          [[ -n $(git log --format=%s "$last..HEAD") ]] || { echo "nothing since $last"; exit 0; }
+          log=$(counted "$last..HEAD")
           bump=${{ inputs.bump || 'auto' }}
-          code=$(git diff --name-only "$last..HEAD" | grep -Ev '\.md$|^\.github/|^extra/screenshots/|^LICENSE$' || true)
-          if [[ -z $code && $bump == auto ]]; then echo "only docs changed since $last"; exit 0; fi
+          if [[ -z $log && $bump == auto ]]; then echo "only docs, CI and tests since $last"; exit 0; fi
+          # A push looks at what's new since the newest tag, betas included, not at
+          # its own commits: a waiting run is dropped when a newer push comes. A
+          # re-run on a tagged commit finds nothing new.
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            newest=$(git describe --tags --abbrev=0)
+            [[ -n $(counted "$newest..HEAD") ]] || { echo "nothing new since $newest"; exit 0; }
+          fi
           for wf in release.yml macos.yml; do
             ok=$(gh run list --workflow "$wf" --branch main --event push --status completed --limit 1 --json conclusion -q '.[0].conclusion // "success"')
             [[ $ok == success ]] || { echo "::error::the last $wf run on main ended with \"$ok\"; fix main first"; exit 1; }
           done
+          IFS=. read -r major minor patch <<<"${last#v}"
           if [[ $bump == auto ]]; then
-            if grep -Eq '^[a-z]+(\(.+\))?!:|BREAKING' <<<"$log"; then bump=major
-            elif grep -Eq '^feat(\(.+\))?:' <<<"$log"; then bump=minor
+            # Before 1.0 each is one place lower: a breaking change makes 0.7.0, a feature 0.6.1.
+            if grep -Eq '^[a-z]+(\(.+\))?!:|BREAKING' <<<"$log"; then
+              if (( major )); then bump=major; else bump=minor; fi
+            elif grep -Eq '^feat(\(.+\))?:' <<<"$log"; then
+              if (( major )); then bump=minor; else bump=patch; fi
+            elif [[ $GITHUB_EVENT_NAME == push ]]; then bump=beta
             else bump=patch; fi
           fi
-          IFS=. read -r major minor patch <<<"${last#v}"
           case $bump in
             major) v="$((major + 1)).0.0" ;;
             minor) v="$major.$((minor + 1)).0" ;;
             patch) v="$major.$minor.$((patch + 1))" ;;
+            beta)
+              next="$major.$minor.$((patch + 1))"
+              n=$(git tag -l "v$next-beta.*" | sed 's/.*-beta\.//' | sort -n | tail -1)
+              v="$next-beta.$((${n:-0} + 1))" ;;
+            *) echo "::error::unknown bump \"$bump\""; exit 1 ;;
           esac
-          sed -i "0,/^version = /s/^version = .*/version = \"$v\"/" Cargo.toml macos/Cargo.toml
-          sed -i "/^name = \"noobsbot\"\$/{n;s/^version = .*/version = \"$v\"/}" Cargo.lock macos/Cargo.lock
           git config user.name github-actions && git config user.email actions@github.com
-          git commit -am "v$v"
-          git tag -a "v$v" -m "v$v"
-          git push --follow-tags
-          gh release create "v$v" --generate-notes --draft
+          if [[ $bump == beta ]]; then
+            git tag -a "v$v" -m "v$v"
+            git push origin "v$v"
+            gh release create "v$v" --generate-notes --draft --prerelease
+          else
+            .github/set-version.sh "$v"
+            git commit -am "v$v"
+            git tag -a "v$v" -m "v$v"
+            # Both or neither: if main moved meanwhile, nothing is pushed and the
+            # next run (the push that moved it) makes the release.
+            git push --atomic origin HEAD:main "v$v" || { echo "::error::main moved during the release; the next run makes v$v"; exit 1; }
+            gh release create "v$v" --generate-notes --notes-start-tag "$last" --draft
+          fi
           gh workflow run release.yml --ref "v$v"
           gh workflow run macos.yml --ref "v$v"
         env:

@@ -37,7 +37,7 @@
 Paste this into any terminal. It works on **Arch, Debian/Ubuntu, Fedora and openSUSE**:
 
 ```sh
-curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/install.sh \
+curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/install.sh \
   | bash
 ```
 
@@ -46,7 +46,7 @@ That command:
 - installs every dependency, including **nano** and the **JetBrainsMono Nerd Font** (anything already installed is skipped)
 - downloads the latest prebuilt noobsbot (x86_64 with glibc 2.35 or newer; anywhere else it builds from source) and adds **noobsbot terminal** to your app menu
 - makes **nano your default editor** for git, gh and the rest, unless you've already picked one
-- updates noobsbot when you run it again, or when you run `noobsbot --update` (`noobsbot --version` shows what you have); `noobsbot --restart` (or "Restart noobsbot" in Ctrl+Shift+P) then swaps the window for a fresh one
+- updates noobsbot when you run it again, or when you run `noobsbot --update` (`noobsbot --version` shows what you have; `noobsbot -u --beta` gets the newest beta, for testing); `noobsbot --restart` (or "Restart noobsbot" in Ctrl+Shift+P) then swaps the window for a fresh one
 
 `noobsbot -e PROGRAM [ARGS...]` (or `noobsbot -- PROGRAM ...`) opens a window running that program instead of your shell; apps marked `Terminal=true` open in noobsbot this way through `xdg-terminal-exec`.
 
@@ -55,7 +55,7 @@ On Arch it installs the `noobsbot-bin` package, or `noobsbot-git` when it builds
 **On a Mac?** The macOS port has its own installer; see [macos/](macos/README.md):
 
 ```sh
-curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/macos/install.sh \
+curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/macos/install.sh \
   | bash
 ```
 
@@ -67,7 +67,7 @@ curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/macos/install.
 On Arch, build the package from [extra/aur](extra/aur) (or the prebuilt one from [extra/aur-bin](extra/aur-bin)):
 
 ```sh
-git clone https://github.com/anil0403/noobsbot-terminal && cd noobsbot-terminal/extra/aur
+git clone https://github.com/noobsbot-team/noobsbot-terminal && cd noobsbot-terminal/extra/aur
 makepkg -si
 ```
 

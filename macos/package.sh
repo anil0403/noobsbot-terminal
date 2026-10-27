@@ -21,7 +21,11 @@ app=target/Noobsbot.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create "${bins[@]}" -output "$app/Contents/MacOS/noobsbot"
-sed "s/@VERSION@/$ver/" extra/Info.plist > "$app/Contents/Info.plist"
+# macOS shows only numbers (0.6.1); a beta's build number says which one (0.6.1b2).
+short=${ver%%-*}
+build=$short
+[[ $ver != *-beta.* ]] || build=${short}b${ver##*.}
+sed "s/@VERSION@/$build/; s/@SHORT_VERSION@/$short/" extra/Info.plist > "$app/Contents/Info.plist"
 cp extra/noobsbot.icns extra/noobsbot.terminfo extra/config.example.toml "$app/Contents/Resources/"
 # Signed with the "Noobsbot Terminal" certificate when it is in the keychain
 # (CI loads it into $SIGN_KEYCHAIN). macOS then knows the app by its id and that

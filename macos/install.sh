@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # noobsbot terminal installer for macOS:
-#   curl -fsSL https://github.com/anil0403/noobsbot-terminal/raw/main/macos/install.sh | bash
+#   curl -fsSL https://github.com/noobsbot-team/noobsbot-terminal/raw/main/macos/install.sh | bash
 # Installs Noobsbot.app (the latest release, or built from source when there is
 # none), the `noobsbot` command and the JetBrainsMono Nerd Font.
-# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds.
+# Running it again updates noobsbot. NOOBSBOT_FROM_SOURCE=1 always builds;
+# NOOBSBOT_BETA=1 installs the newest release, betas included.
 set -euo pipefail
 
 # All in a function, so nothing runs until the whole script has downloaded.
 main() {
 
-REPO=anil0403/noobsbot-terminal
+REPO=noobsbot-team/noobsbot-terminal
 RUST_MIN=90 # rustc 1.90 or newer
 SRC=$HOME/Library/Caches/noobsbot/src
 TMP=$(mktemp -d)
@@ -22,11 +23,28 @@ has() { command -v "$1" >/dev/null 2>&1; }
 [[ $(uname -s) == Darwin ]] || die "this installer is for macOS; on Linux use install.sh at the repo's top."
 [[ $EUID -ne 0 ]] || die "run this as your user, not root."
 
+# Version order, as noobsbot's update check: 0.6.0 < 0.6.1-beta.2 < 0.6.1.
+vkey() { if [[ $1 == *-* ]]; then echo "${1%%-*}.0.${1##*.}"; else echo "$1.1.0"; fi; }
+newer() { [[ $1 != "$2" && $(printf '%s\n%s\n' "$(vkey "$1")" "$(vkey "$2")" | sort -V | tail -1) == "$(vkey "$1")" ]]; }
+# The installed app, if any: never go back (a plain -u on a beta finds an older release).
+have="" cur="" keep=""
+for d in /Applications "$HOME/Applications"; do
+    [[ -x $d/Noobsbot.app/Contents/MacOS/noobsbot ]] && { have=$d; break; }
+done
+[[ -z $have ]] || cur=$("$have/Noobsbot.app/Contents/MacOS/noobsbot" --version 2>/dev/null | sed -n 's/^noobsbot //p' || true)
+
 app=""
 if [[ -z ${NOOBSBOT_FROM_SOURCE:-} ]]; then
-    url=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null |
+    # NOOBSBOT_BETA=1 (noobsbot -u --beta): the newest release, betas included.
+    releases=releases/latest
+    [[ -z ${NOOBSBOT_BETA:-} ]] || releases="releases?per_page=1"
+    url=$(curl -fsSL "https://api.github.com/repos/$REPO/$releases" 2>/dev/null |
         sed -n 's/.*"browser_download_url": *"\([^"]*macos-universal\.zip\)".*/\1/p' | head -1 || true)
-    if [[ -n $url ]]; then
+    ver=$(basename "$url" | sed -n 's/^noobsbot-\(.*\)-macos-universal\.zip$/\1/p')
+    if [[ -n $ver && -n $cur ]] && newer "$cur" "$ver"; then
+        say "noobsbot $cur is newer than the latest release ($ver), so it stays. noobsbot -u --beta gets the newest beta."
+        keep=1
+    elif [[ -n $url ]]; then
         say "Downloading $(basename "$url")"
         curl -fsSL "$url" -o "$TMP/noobsbot.zip"
         # Checked before it's unpacked: its quarantine flag is removed below.
@@ -39,7 +57,7 @@ if [[ -z ${NOOBSBOT_FROM_SOURCE:-} ]]; then
     fi
 fi
 
-if [[ -z $app ]]; then
+if [[ -z $app && -z $keep ]]; then
     say "No release to download; building from source"
     xcode-select -p >/dev/null 2>&1 || {
         xcode-select --install 2>/dev/null || true
@@ -59,14 +77,18 @@ if [[ -z $app ]]; then
     app=$SRC/macos/target/Noobsbot.app
 fi
 
-# /Applications when we may write there (admin users), else ~/Applications.
-dest=/Applications
-[[ -w $dest ]] || { dest=$HOME/Applications; mkdir -p "$dest"; }
-say "Installing $dest/Noobsbot.app"
-rm -rf "$dest/Noobsbot.app"
-ditto "$app" "$dest/Noobsbot.app"
-# Unsigned by Apple: without this Gatekeeper says it's "damaged".
-xattr -dr com.apple.quarantine "$dest/Noobsbot.app" 2>/dev/null || true
+if [[ -n $keep ]]; then
+    dest=$have
+else
+    # /Applications when we may write there (admin users), else ~/Applications.
+    dest=/Applications
+    [[ -w $dest ]] || { dest=$HOME/Applications; mkdir -p "$dest"; }
+    say "Installing $dest/Noobsbot.app"
+    rm -rf "$dest/Noobsbot.app"
+    ditto "$app" "$dest/Noobsbot.app"
+    # Unsigned by Apple: without this Gatekeeper says it's "damaged".
+    xattr -dr com.apple.quarantine "$dest/Noobsbot.app" 2>/dev/null || true
+fi
 
 # The `noobsbot` command (noobsbot --quake for the drop-down terminal).
 bin=""
