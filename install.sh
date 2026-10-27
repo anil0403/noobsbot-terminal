@@ -48,13 +48,9 @@ fi
 # or newer (what release.yml builds against). Empty → build from source: no
 # release yet, its build still running, another CPU, musl, or NOOBSBOT_FROM_SOURCE=1.
 tarball="" ver=""
-# NOOBSBOT_BETA=1 (noobsbot -u --beta): the newest release, betas included. Not
-# on Arch: a package version can't hold the '-' in 0.6.1-beta.2.
+# NOOBSBOT_BETA=1 (noobsbot -u --beta): the newest release, betas included.
 releases=releases/latest
-if [[ -n ${NOOBSBOT_BETA:-} ]]; then
-    if has pacman; then say "No betas on Arch; installing the latest release"
-    else releases="releases?per_page=1"; fi
-fi
+[[ -z ${NOOBSBOT_BETA:-} ]] || releases="releases?per_page=1"
 glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2 || true)
 if [[ -z ${NOOBSBOT_FROM_SOURCE:-} && $(uname -m) == x86_64 && -n $glibc &&
       $(printf '2.35\n%s\n' "$glibc" | sort -V | head -1) == 2.35 ]]; then
@@ -70,14 +66,17 @@ if has pacman; then
     # noobsbot-bin wraps the tarball (extra/aur-bin), noobsbot-git builds (extra/aur).
     if [[ -n $tarball ]]; then pkg=noobsbot-bin dir=aur-bin old=noobsbot-git
     else pkg=noobsbot-git dir=aur old=noobsbot-bin; fi
-    if [[ -n $tarball && $(pacman -Q $pkg 2>/dev/null) == "$pkg $ver-1" ]]; then
+    # pacman has no '-' in a version: a beta 0.6.1-beta.2 is 0.6.1beta2, which it
+    # sorts before 0.6.1 too.
+    pkgver=${ver/-beta./beta}
+    if [[ -n $tarball && $(pacman -Q $pkg 2>/dev/null) == "$pkg $pkgver-1" ]]; then
         say "noobsbot $ver is already installed"
     else
         say "Making the $pkg package"
         rm -rf "$SRC" && mkdir -p "$SRC"
         curl -fsSL "$REPO/raw/main/extra/$dir/PKGBUILD" -o "$SRC/PKGBUILD"
         if [[ -n $tarball ]]; then
-            sed -i "s/^pkgver=.*/pkgver=$ver/; s/^sha256sums=.*/sha256sums=('$(sha256)')/" "$SRC/PKGBUILD"
+            sed -i "s/^pkgver=.*/pkgver=$pkgver/; s/^sha256sums=.*/sha256sums=('$(sha256)')/" "$SRC/PKGBUILD"
         fi
         (cd "$SRC" && makepkg -sf --noconfirm --cleanbuild)
         # The two conflict, and under --noconfirm pacman refuses to swap them itself.
