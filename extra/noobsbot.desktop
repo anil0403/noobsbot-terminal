@@ -10,6 +10,7 @@ Categories=System;TerminalEmulator;
 Keywords=shell;prompt;command;commandline;cmd;terminal;
 StartupWMClass=noobsbot
 Actions=quake;
+X-TerminalArgExec=-e
 
 [Desktop Action quake]
 Name=Drop-down terminal

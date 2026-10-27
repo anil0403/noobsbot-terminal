@@ -57,6 +57,10 @@ pub struct Pane {
     pub failed_at: Option<Instant>,
     /// When the program last rang the bell (BEL), for the border flash.
     pub bell_at: Option<Instant>,
+    /// What the program reports with OSC 9;4, until it clears it or its command ends.
+    pub progress: Option<crate::tap::Progress>,
+    /// When this pane last showed a program's notification (they're spaced out).
+    pub notified_at: Option<Instant>,
     /// The shell is waiting at its prompt (shell integration), not running a command.
     pub at_prompt: bool,
     /// The title a program set (OSC 0/2), for its tab and the window.
@@ -74,6 +78,8 @@ pub struct Pane {
     pub welcome_rows: usize,
     /// A resize the shell hasn't been told of yet, while the window is dragged.
     pub held: Option<Held>,
+    /// When its shell (or program) started.
+    pub started: Instant,
 }
 
 impl Pane {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -18,6 +18,7 @@ use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::blocks::{self, Blocks};
@@ -27,6 +28,7 @@ use crate::context::{self, Context};
 use crate::font::Font;
 use crate::images::Images;
 use crate::input::{self, Action, Vi, binding, key_bytes, mouse_report, paste_bytes, vi_binding};
+use crate::kitty;
 use crate::links::{self, Hints, Link, Target};
 use crate::list::{Done, List, ListKey};
 use crate::palette::{Item, Palette};
@@ -37,11 +39,12 @@ use crate::search::Search;
 use crate::session;
 use crate::shell;
 use crate::suggest::{self, Suggest};
-use crate::tap::Mark;
+use crate::tap::{Mark, Progress};
 use crate::term::{Listener, PaneId, Term, UserEvent};
 use crate::theme::{self, Fade, Theme};
 
-/// The window's name while no program set a title.
+/// The window's name while no program set a title, and a notification's title
+/// when its program gives none.
 const WINDOW_TITLE: &str = "Noobsbot Terminal";
 const BLINK: Duration = Duration::from_millis(530);
 const MULTI_CLICK: Duration = Duration::from_millis(400);
@@ -70,6 +73,8 @@ const RESIZE_STEP: f32 = 0.05;
 const NOTIFY_AFTER: Duration = Duration::from_secs(10);
 /// Red border after a failed command.
 const FLASH: Duration = Duration::from_millis(400);
+/// Shortest gap between two notifications from one pane.
+const NOTIFY_GAP: Duration = Duration::from_secs(1);
 /// Welcome screen characters typed per second.
 const TYPE_RATE: f32 = 3000.0;
 /// Longest the welcome screen keeps redrawing to type (a pane out of view never finishes).
@@ -125,6 +130,9 @@ pub struct App {
     /// A key was pressed since the pointer last moved: plain hovering is off,
     /// so typing `c` with the pointer resting on a URL types it.
     typed_since_move: bool,
+    /// Keys whose press went to a program as a kitty keyboard protocol event, so
+    /// their release goes there too (and not the release of our own shortcuts).
+    kitty_down: HashSet<winit::keyboard::PhysicalKey>,
     /// Pressed on a link without Ctrl: opens on release unless it became a selection.
     link_press: Option<Target>,
     /// Tab, close button or bar button under the pointer.
@@ -164,6 +172,8 @@ pub struct App {
     zoom: f32,
     /// Running as the drop-down terminal (`--quake`).
     quake: Option<Quake>,
+    /// `noobsbot -e`: the program the window runs instead of the shell.
+    exec: Option<Vec<String>>,
     /// CRT effect on (config, flipped from the palette).
     crt: bool,
     suggest: Suggest,
@@ -172,7 +182,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(proxy: EventLoopProxy<UserEvent>, quake: bool) -> Self {
+    pub fn new(proxy: EventLoopProxy<UserEvent>, quake: bool, exec: Option<Vec<String>>) -> Self {
         let path = config::path();
         let config = config::load(&path).unwrap_or_else(|e| {
             log::error!("config error, using defaults: {e}");
@@ -198,6 +208,7 @@ impl App {
             shell: config.terminal.shell.clone(),
             shell_name: shell_name(&config.terminal.shell),
             quake,
+            exec,
             _config_watcher: config::watch(&path, proxy.clone()),
             config,
             proxy,
@@ -220,6 +231,7 @@ impl App {
             link_hints: None,
             session_saved: false,
             typed_since_move: false,
+            kitty_down: HashSet::new(),
             link_press: None,
             bar_hover: None,
             divider_hover: None,
@@ -386,6 +398,8 @@ impl App {
             cwd: None,
             failed_at: None,
             bell_at: None,
+            progress: None,
+            notified_at: None,
             at_prompt: false,
             title: None,
             title_before: None,
@@ -394,6 +408,7 @@ impl App {
             typing: welcome.then(Instant::now),
             welcome_rows,
             held: None,
+            started: Instant::now(),
         };
         self.panes.insert(id, pane);
         Some(id)
@@ -405,9 +420,9 @@ impl App {
         self.panes.get(&tab.focused)?.cwd()
     }
 
-    fn new_tab(&mut self) {
+    fn new_tab(&mut self, command: Option<Vec<String>>) {
         let cwd = self.new_cwd();
-        let Some(id) = self.spawn_pane(cwd, None) else { return };
+        let Some(id) = self.spawn_pane(cwd, command) else { return };
         let old = self.tabs.get(self.active).map(|t| t.focused);
         self.tabs.push(Tab { root: Node::Leaf(id), focused: id, zoomed: false, broadcast: false });
         self.active = self.tabs.len() - 1;
@@ -455,6 +470,22 @@ impl App {
         }
         self.relayout();
         self.focus_changed(Some(old));
+    }
+
+    /// A `-e` program that failed within a second keeps its window open with its
+    /// exit code, so its error can be read. True if held.
+    fn hold(&mut self, id: PaneId, status: std::process::ExitStatus) -> bool {
+        use std::os::unix::process::ExitStatusExt;
+        let Some(pane) = self.panes.get_mut(&id) else { return false };
+        // Pane 0 is the program: a `-e` window has no session to restore first.
+        if self.exec.is_none() || id != 0 || status.success() || pane.started.elapsed() >= Duration::from_secs(1) {
+            return false;
+        }
+        let code = status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+        let line = format!("\r\n[process exited with code {code}]");
+        alacritty_terminal::vte::ansi::Processor::<alacritty_terminal::vte::ansi::StdSyncHandler>::new().advance(&mut *pane.term.lock(), line.as_bytes());
+        self.dirty = true;
+        true
     }
 
     /// Close every pane in tab `i`.
@@ -760,7 +791,7 @@ impl App {
             Action::ZoomIn => self.set_zoom(self.zoom + 1.0),
             Action::ZoomOut => self.set_zoom(self.zoom - 1.0),
             Action::ZoomReset => self.set_zoom(0.0),
-            Action::NewTab => self.new_tab(),
+            Action::NewTab => self.new_tab(None),
             Action::ClosePane => self.close_pane(event_loop, self.focused()),
             Action::NextTab => self.switch_tab((self.active + 1) % self.tabs.len()),
             Action::PrevTab => self.switch_tab((self.active + self.tabs.len() - 1) % self.tabs.len()),
@@ -879,15 +910,27 @@ impl App {
 impl App {
     fn shell_mark(&mut self, id: PaneId, prompt: u64, mark: Mark) {
         let window_focused = self.renderer.as_ref().is_some_and(|r| r.focused);
+        // You're looking at this pane: a notification from it would only repeat it.
+        let looking = window_focused && self.tabs.get(self.active).is_some_and(|t| t.focused == id);
         let Some(pane) = self.panes.get_mut(&id) else { return };
         self.dirty = true;
         match mark {
+            Mark::Notify { title, body } => {
+                if looking || pane.notified_at.is_some_and(|t| t.elapsed() < NOTIFY_GAP) {
+                    return;
+                }
+                pane.notified_at = Some(Instant::now());
+                let title = if title.is_empty() { pane.title.clone().unwrap_or_else(|| WINDOW_TITLE.into()) } else { title };
+                return notify(title, body);
+            }
+            Mark::Progress(progress) => return pane.progress = progress,
             Mark::Cwd(path) => return pane.cwd = Some(path),
             Mark::CommandEnd(code) => {
                 pane.at_prompt = true; // sent before every prompt
                 if let Some(title) = pane.title_before.take() {
                     pane.title = title;
                 }
+                pane.progress = None; // its program is done, even if it never said so
                 if let (Some(0), Some((cmd, dir))) = (code, pane.running.take()) {
                     self.suggest.ran(&cmd, &dir);
                 }
@@ -1003,7 +1046,7 @@ impl App {
                     Some(Item::Shell(path)) => {
                         self.shell_name = shell_name(&path);
                         self.shell = path;
-                        self.new_tab();
+                        self.new_tab(None);
                     }
                     None => {}
                 }
@@ -1259,8 +1302,9 @@ impl App {
 
 // Session restore.
 impl App {
+    /// Not for `-e` windows: closing one would forget the session.
     fn session_on(&self) -> bool {
-        self.quake.is_none() && self.config.terminal.restore_session
+        self.quake.is_none() && self.exec.is_none() && self.config.terminal.restore_session
     }
 
     /// Save the tabs for the next window; with none left (the last shell exited),
@@ -1347,8 +1391,11 @@ impl ApplicationHandler<UserEvent> for App {
         let font = Font::new(&self.config.font.family, self.font_px(&window), self.config.font.weight);
         self.renderer = Some(Renderer::new(window.clone(), font));
         self.window = Some(window);
-        if !self.restore_session() {
-            self.new_tab();
+        // `-e`: the program, in this process's directory (no tab yet to take one from).
+        if let Some(cmd) = self.exec.clone() {
+            self.new_tab(Some(cmd));
+        } else if !self.restore_session() {
+            self.new_tab(None);
         }
         if self.tabs.is_empty() {
             event_loop.exit(); // no shell to run
@@ -1367,6 +1414,11 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Shell(id, prompt, mark) => return self.shell_mark(id, prompt, mark),
             UserEvent::Term(id, event) => (id, event),
         };
+        if let Event::ChildExit(status) = event
+            && self.hold(id, status)
+        {
+            return;
+        }
         if matches!(event, Event::Exit | Event::ChildExit(_)) {
             return self.close_pane(event_loop, id);
         }
@@ -1467,10 +1519,12 @@ impl ApplicationHandler<UserEvent> for App {
         }
         let flicker = self.crt && self.config.crt.flicker > 0.0;
         if flicker
-            || self
-                .panes
-                .values()
-                .any(|p| p.theme.fading() || p.typing.is_some_and(|t| t.elapsed() < TYPING) || p.failed_at.or(p.bell_at).is_some_and(|t| t.elapsed() < FLASH))
+            || self.panes.values().any(|p| {
+                p.theme.fading()
+                    || p.typing.is_some_and(|t| t.elapsed() < TYPING)
+                    || p.failed_at.or(p.bell_at).is_some_and(|t| t.elapsed() < FLASH)
+                    || p.progress == Some(Progress::Busy)
+            })
         {
             self.dirty = true;
         }
@@ -1526,6 +1580,23 @@ impl ApplicationHandler<UserEvent> for App {
                 self.renderer.as_mut().unwrap().focused = focused;
                 focus_report(self.focused_pane(), focused);
                 self.dirty = true;
+            }
+            // Releases go to programs that asked for them (kitty keyboard protocol),
+            // for keys whose press they got.
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
+                if !self.kitty_down.remove(&event.physical_key) {
+                    return;
+                }
+                let base = event.key_without_modifiers();
+                let k =
+                    kitty::KeyIn { key: &event.logical_key, base: &base, text: None, location: event.location, mods: self.mods, kind: kitty::Kind::Release };
+                for id in self.typing_to() {
+                    let pane = self.panes.get_mut(&id).unwrap();
+                    let flags = *pane.term.lock().mode() & TermMode::KITTY_KEYBOARD_PROTOCOL;
+                    if let kitty::Out::Send(bytes) = kitty::encode(&k, flags) {
+                        pane.pty.write(&bytes);
+                    }
+                }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 // `c` on a hovered link copies it.
@@ -1632,10 +1703,29 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 let mods = self.mods;
+                let base = event.key_without_modifiers();
+                let kind = if event.repeat { kitty::Kind::Repeat } else { kitty::Kind::Press };
+                let k = kitty::KeyIn { key: &event.logical_key, base: &base, text: event.text.as_deref(), location: event.location, mods, kind };
                 for id in self.typing_to() {
                     let pane = self.panes.get_mut(&id).unwrap();
-                    let app_cursor = pane.term.lock().mode().contains(TermMode::APP_CURSOR);
-                    let Some(bytes) = key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor) else { return };
+                    let (app_cursor, flags) = {
+                        let term = pane.term.lock();
+                        (term.mode().contains(TermMode::APP_CURSOR), *term.mode() & TermMode::KITTY_KEYBOARD_PROTOCOL)
+                    };
+                    let legacy = || key_bytes(&event.logical_key, event.text.as_deref(), mods, app_cursor);
+                    let bytes = if flags.is_empty() {
+                        legacy()
+                    } else {
+                        if flags.contains(TermMode::REPORT_EVENT_TYPES) {
+                            self.kitty_down.insert(event.physical_key);
+                        }
+                        match kitty::encode(&k, flags) {
+                            kitty::Out::Legacy => legacy(),
+                            kitty::Out::Send(bytes) => Some(bytes),
+                            kitty::Out::Nothing => None,
+                        }
+                    };
+                    let Some(bytes) = bytes else { continue };
                     if pane.clear_welcome() {
                         self.dirty = true;
                         // Enter only clears the welcome screen; any other key also types.
@@ -1949,6 +2039,10 @@ impl ApplicationHandler<UserEvent> for App {
                     };
                     let ui = PaneUi { vi, search: self.search.as_ref().filter(|s| s.pane == id && s.editing), flash, broadcast: tab.broadcast, cursor_row };
                     draw_pane_ui(renderer, pane.rect, &theme, ui);
+                    if let Some(progress) = pane.progress {
+                        let (r, h) = (pane.rect, renderer.px(3.0));
+                        draw_progress(renderer, Rect { x: r.x, y: r.y + r.h - h, w: r.w, h }, progress, theme.cursor, true, &theme);
+                    }
                     if let Some(h) = self.link_hints.as_ref().filter(|h| h.pane == id) {
                         draw_link_labels(renderer, &pane.term.lock(), pane.rect, h, &theme);
                     }
@@ -2387,6 +2481,26 @@ fn draw_menu(r: &mut Renderer, origin: (f32, f32), hovered: Option<usize>, can_c
     }
 }
 
+/// A program's progress (OSC 9;4) as a bar across `rect`: `ink`, red for an error,
+/// yellow when paused; busy is a piece that slides along. `track` draws the rest faintly.
+fn draw_progress(r: &mut Renderer, rect: Rect, progress: Progress, ink: Rgb, track: bool, theme: &Theme) {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let part = |p: Option<u8>| p.map_or(1.0, |p| p as f32 / 100.0);
+    let (color, from, to) = match progress {
+        Progress::Normal(p) => (ink, 0.0, part(Some(p))),
+        Progress::Error(p) => (theme.ansi[1], 0.0, part(p)),
+        Progress::Paused(p) => (theme.ansi[3], 0.0, part(p)),
+        Progress::Busy => {
+            let t = START.get_or_init(Instant::now).elapsed().as_secs_f32() % 1.5 / 1.5;
+            (ink, (t * 1.3 - 0.3).max(0.0), (t * 1.3).min(1.0))
+        }
+    };
+    if track {
+        r.fill(rect, theme::to_f32(theme::blend(theme.bg, theme.fg, 0.15)));
+    }
+    r.fill(Rect { x: rect.x + rect.w * from, y: rect.y, w: rect.w * (to - from), h: rect.h }, theme::to_f32(color));
+}
+
 /// One tab per slot, each tinted with its focused pane's situation theme, so a
 /// red production tab stays visible while you work in another one.
 fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane>, active: usize, bar_h: f32, tab_w: f32, hover: Option<BarHit>) {
@@ -2428,6 +2542,10 @@ fn draw_tab_bar(r: &mut Renderer, tabs: &[Tab], panes: &mut HashMap<PaneId, Pane
             (false, false) => (theme::blend(backdrop, theme.selection, 0.7), theme::blend(theme.fg, theme.bg, 0.3)),
         };
         pill(r, x, y, &label, theme::to_f32(bg), theme::to_f32(fg));
+        if let Some(progress) = pane.progress {
+            // In the tab's text color, so it shows on the active (cursor-colored) tab too.
+            draw_progress(r, Rect { x: x + cw / 2.0, y: y + ch - r.px(2.0), w: fit as f32 * cw - cw, h: r.px(2.0) }, progress, fg, false, &theme);
+        }
         if closable && (i == active || hovered) {
             let cx = x + fit as f32 * cw;
             if hover == Some(BarHit::Close(i)) {

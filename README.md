@@ -48,6 +48,8 @@ That command:
 - makes **nano your default editor** for git, gh and the rest, unless you've already picked one
 - updates noobsbot when you run it again, or when you run `noobsbot --update` (`noobsbot --version` shows what you have); `noobsbot --restart` (or "Restart noobsbot" in Ctrl+Shift+P) then swaps the window for a fresh one
 
+`noobsbot -e PROGRAM [ARGS...]` (or `noobsbot -- PROGRAM ...`) opens a window running that program instead of your shell; apps marked `Terminal=true` open in noobsbot this way through `xdg-terminal-exec`.
+
 On Arch it installs the `noobsbot-bin` package, or `noobsbot-git` when it builds from source (`sudo pacman -R noobsbot-bin` removes it). Elsewhere noobsbot goes to `/usr/local/bin`. A source build gets Rust from rustup if your distro's is too old; `NOOBSBOT_FROM_SOURCE=1` always builds.
 
 **On a Mac?** The macOS port has its own installer; see [macos/](macos/README.md):
@@ -101,10 +103,11 @@ Programs inside see `TERM=noobsbot`. On first start noobsbot compiles its termin
 | 🔗 **Clickable links** | Click a URL to open it, `c` while hovering copies it; Ctrl+click for terminal hyperlinks and `file.rs:12` paths. Or Ctrl+Shift+L and type a link's letter, no mouse needed. |
 | 📂 **Drag and drop** | Drop files from your file manager onto the terminal to type their paths, quoted when they have spaces. |
 | 🖼️ **Inline images** | kitty graphics protocol and sixel. |
+| ⌨️ **Every key counts** | Programs that ask for it (Claude Code, Neovim, Helix, fish) get the kitty keyboard protocol: Shift+Enter, Ctrl+I and Esc reach them as their own keys. |
 | 📋 **Copy on select** | Selected text goes straight to the clipboard. |
 | 📺 **CRT mode** | Scanlines, glow and a curved screen, like an old monitor. |
 | ⬇️ **Drop-down mode** | A quake-style terminal that slides in with F12. |
-| 🔔 **Command tracking** | A red flash when a command fails, jump between commands, notifications when long ones finish. A visual bell flashes the pane's border. |
+| 🔔 **Command tracking** | A red flash when a command fails, jump between commands, notifications when long ones finish. A visual bell flashes the pane's border. Programs can send their own notifications (OSC 9, 777, 99) and show progress (OSC 9;4) as a bar on the pane and its tab. |
 
 <a id="shortcuts"></a>
 
